@@ -103,8 +103,8 @@ void main() {
       start: DateTime(2026, 9, 30),
       deadline: DateTime(2026, 10, 7),
     );
-    expect(round.label, '9/30(수) ~ 10/6(화)');
-    expect(round.deadlineLabel, '10/6(화) 24:00');
+    expect(round.label, '9/30(수) ~ 10/7(수)');
+    expect(round.deadlineLabel, '10/7(수) 오전 9시');
     expect(round.previousStart(1), DateTime(2026, 9, 23));
   });
 }

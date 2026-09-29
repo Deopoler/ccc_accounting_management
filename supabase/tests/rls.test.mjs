@@ -202,7 +202,7 @@ describe('교재 신청', () => {
 });
 
 describe('신청 회차', () => {
-  test('회차 시작일은 수요일, 마감은 7일 뒤 00:00 KST(= 15:00 UTC 전날)', async () => {
+  test('회차 시작일은 수요일, 마감은 7일 뒤 수요일 09:00 KST(= 00:00 UTC)', async () => {
     const { rows } = await asUser(db, alice, `
       select round_start, deadline,
              extract(isodow from round_start)::int as dow,
@@ -210,8 +210,32 @@ describe('신청 회차', () => {
              deadline > now() and deadline <= now() + interval '7 days' as in_range
       from public.get_order_round()`);
     assert.equal(rows[0].dow, 3);
-    assert.equal(rows[0].utc_time, '15:00');
+    assert.equal(rows[0].utc_time, '00:00');
     assert.equal(rows[0].in_range, true);
+  });
+
+  test('경계: 수요일 09:00 KST 에 새 회차가 시작된다', async () => {
+    const cases = [
+      ['2026-09-30 08:59:59+09', '2026-09-23'], // 수요일 마감 직전 → 이전 회차
+      ['2026-09-30 09:00:00+09', '2026-09-30'], // 수요일 09:00 → 새 회차
+      ['2026-10-06 23:59:59+09', '2026-09-30'], // 화요일 밤 → 아직 이번 회차
+      ['2026-10-07 08:59:59+09', '2026-09-30'], // 다음 수요일 마감 직전
+      ['2026-10-07 09:00:00+09', '2026-10-07'],
+      ['2026-10-04 12:00:00+09', '2026-09-30'], // 일요일
+    ];
+    for (const [at, expected] of cases) {
+      const { rows } = await db.query(`select to_char(private.order_round_for($1::timestamptz), 'YYYY-MM-DD') as r`, [at]);
+      assert.equal(rows[0].r, expected, at);
+    }
+    const { rows } = await db.query(`select public.order_round_deadline('2026-09-30') = '2026-10-07 09:00:00+09'::timestamptz as ok`);
+    assert.equal(rows[0].ok, true);
+  });
+
+  test('회차 계산 내부 함수는 회원이 직접 호출할 수 없다', async () => {
+    await assert.rejects(
+      asUser(db, alice, `select private.order_round_for(now())`),
+      (e) => e.code === '42501',
+    );
   });
 });
 
