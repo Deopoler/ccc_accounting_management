@@ -35,6 +35,8 @@ supabase/
   functions/           Edge Functions (admin-members: 비밀번호 초기화 / 가입 거절)
   bootstrap_admin.sql  최초 관리자 지정 SQL
   tests/               PGlite 기반 RLS/권한 테스트 (Node)
+assets/fonts/          Noto Sans KR (현대 한글 11,172자 전체, 보통·굵게) + 라이선스(OFL)
+tool/fonts/            폰트 생성 스크립트
 test/                  Flutter 단위 / 반응형 레이아웃 테스트
 ```
 
@@ -243,6 +245,19 @@ cp build/web/index.html build/web/404.html
 
 - **학번 사칭 가입**: 누구나 남의 학번으로 먼저 가입을 시도할 수 있다. 승인 전에는 아무것도 볼 수 없으므로 관리자가 승인 시 본인 확인을 하고, 잘못된 가입은 거절한다.
 - **publishable 키 노출**: 설계상 공개 키다. 모든 권한은 RLS / RPC / Edge Function 에서 서버가 판단한다.
+
+## 폰트
+
+- UI 폰트는 앱에 포함한 **Noto Sans KR** 이다. 현대 한글 음절 **11,172자 전체**와 옛한글 자모, 라틴, 자주 쓰는 기호가 들어 있어
+  드문 글자(예: 똠, 햏, 뷁)도 네모(□)나 늦은 로딩 없이 바로 그려진다. 한자는 크기 때문에 넣지 않았다. (필요하면 브라우저 대체 폰트로 그려진다)
+- 굵기는 보통(400)·굵게(700) 두 가지다. Flutter 웹은 등록된 폰트를 시작할 때 모두 받으므로 파일 수를 줄였다. (각 약 2.8MB)
+- 원본 가변 폰트에서 굵기별로 필요한 글자만 추려 만든다. 다시 만들 때:
+
+```sh
+cd tool/fonts && npm install && npm run build   # 원본 자동 다운로드, 한글 누락 시 실패
+```
+
+- 라이선스: SIL Open Font License 1.1 ([assets/fonts/OFL.txt](assets/fonts/OFL.txt)), 앱의 라이선스 목록에도 등록된다.
 
 ## CSV 내보내기
 

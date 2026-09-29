@@ -22,7 +22,6 @@ dependencies:
   file_picker: ^13.1.0
   web: ^1.1.1
   cupertino_icons: ^1.0.9
-
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -30,3 +29,15 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
+  assets:
+    - assets/fonts/OFL.txt
+
+  # Noto Sans KR: 현대 한글 11,172자 전체 포함 (tool/fonts/build_fonts.mjs 로 생성, SIL OFL 1.1)
+  fonts:
+    - family: NotoSansKR
+      fonts:
+        - asset: assets/fonts/NotoSansKR-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/NotoSansKR-Bold.ttf
+          weight: 700

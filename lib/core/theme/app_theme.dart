@@ -3,6 +3,9 @@ import 'package:material_ui/material_ui.dart';
 abstract final class AppTheme {
   static const _seed = Color(0xFF2F5BB7);
 
+  /// 앱에 포함한 Noto Sans KR (현대 한글 전체). pubspec.yaml 의 fonts 참고.
+  static const fontFamily = 'NotoSansKR';
+
   static ThemeData light() => _build(Brightness.light);
   static ThemeData dark() => _build(Brightness.dark);
 
@@ -14,6 +17,7 @@ abstract final class AppTheme {
     final radius = BorderRadius.circular(12);
 
     return ThemeData(
+      fontFamily: fontFamily,
       colorScheme: scheme,
       scaffoldBackgroundColor: scheme.surfaceContainerLowest,
       appBarTheme: AppBarTheme(

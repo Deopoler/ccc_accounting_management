@@ -1,0 +1,13 @@
+{
+  "name": "ccc-fonts",
+  "private": true,
+  "type": "module",
+  "description": "Noto Sans KR 에서 앱용 정적 폰트(현대 한글 전체)를 만든다",
+  "scripts": {
+    "build": "node build_fonts.mjs"
+  },
+  "devDependencies": {
+    "fontkit": "^2.0.4",
+    "subset-font": "^2.4.0"
+  }
+}
