@@ -1,13 +1,14 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
 
+import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
+import '../../../core/widgets/app_widgets.dart';
 import '../../../core/widgets/feedback.dart';
 import '../../../core/widgets/responsive.dart';
 import '../../../core/widgets/state_views.dart';
 import '../../auth/domain/profile.dart';
 import '../../auth/presentation/auth_providers.dart';
-import '../../textbooks/presentation/widgets/order_widgets.dart';
 import 'member_providers.dart';
 
 /// 회원 관리: 가입 승인, 관리자 지정.
@@ -187,15 +188,7 @@ class _AdminMembersPageState extends ConsumerState<AdminMembersPage> {
                             Flexible(child: Text(m.name)),
                             if (m.isAdmin) ...[
                               const SizedBox(width: 8),
-                              StatusBadge(
-                                label: '관리자',
-                                background: Theme.of(context)
-                                    .colorScheme
-                                    .primaryContainer,
-                                foreground: Theme.of(context)
-                                    .colorScheme
-                                    .onPrimaryContainer,
-                              ),
+                              const AppBadge('관리자'),
                             ],
                           ],
                         ),
@@ -256,9 +249,8 @@ class _PendingSection extends StatelessWidget {
     final allSelected = pending.isNotEmpty && selected.length == pending.length;
 
     return Card(
-      color: pending.isEmpty
-          ? null
-          : theme.colorScheme.tertiaryContainer.withValues(alpha: 0.35),
+      // 승인할 사람이 있으면 해야 할 일이므로 옅은 파랑 면으로 둔다.
+      color: pending.isEmpty ? null : context.colors.primarySoft,
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(

@@ -110,7 +110,8 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                     : const Text('로그인'),
               ),
               const SizedBox(height: 8),
-              OutlinedButton(
+              // 화면의 파란 버튼(CTA)은 로그인 하나. 가입은 글자 버튼으로 둔다.
+              TextButton(
                 onPressed: _submitting
                     ? null
                     : () => context.go(AppRoutes.signup),

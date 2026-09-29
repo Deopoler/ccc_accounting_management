@@ -4,7 +4,9 @@ import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../../../core/router/routes.dart';
+import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/download/download.dart';
+import '../../../core/widgets/app_widgets.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../core/widgets/feedback.dart';
 import '../../../core/widgets/responsive.dart';
@@ -165,13 +167,13 @@ class _AdminEventDetailPageState extends ConsumerState<AdminEventDetailPage> {
         .map((p) => '${p.member?.name ?? '-'}(${p.member?.studentId ?? '-'})')
         .join('\n');
     await Clipboard.setData(ClipboardData(text: text));
-    if (mounted) showSnack(context, '미송금자 ${unpaid.length}명을 복사했습니다.');
+    if (mounted) showSnack(context, '미납자 ${unpaid.length}명을 복사했습니다.');
   }
 
   void _exportUnpaid(Event event, List<EventPayment> payments) {
     try {
       downloadTextFile(
-        safeFileName('미송금자_${event.title}_${todayStamp()}.csv'),
+        safeFileName('미납자_${event.title}_${todayStamp()}.csv'),
         encodeCsv(unpaidCsvRows(event, payments)),
       );
     } catch (e) {
@@ -256,13 +258,11 @@ class _AdminEventDetailPageState extends ConsumerState<AdminEventDetailPage> {
                 const SizedBox(height: 16),
                 PaymentProgress(summary: summary),
                 const SizedBox(height: 12),
-                Text(
-                  '미송금 ${summary.unpaidCount}명 · '
-                  '미수금 ${formatWon(summary.outstandingAmount)}',
-                  style: theme.textTheme.titleSmall?.copyWith(
-                    color: summary.unpaidCount > 0
-                        ? theme.colorScheme.error
-                        : null,
+                LabeledValue(
+                  label: '미납 ${summary.unpaidCount}명 · 미수금',
+                  value: AmountText(
+                    summary.outstandingAmount,
+                    highlight: summary.unpaidCount > 0,
                   ),
                 ),
               ],
@@ -277,8 +277,8 @@ class _AdminEventDetailPageState extends ConsumerState<AdminEventDetailPage> {
           children: [
             for (final (f, label) in [
               (_PaidFilter.all, '전체 ${summary.targetCount}'),
-              (_PaidFilter.unpaid, '미송금 ${summary.unpaidCount}'),
-              (_PaidFilter.paid, '송금 ${summary.paidCount}'),
+              (_PaidFilter.unpaid, '미납 ${summary.unpaidCount}'),
+              (_PaidFilter.paid, '완납 ${summary.paidCount}'),
             ])
               ChoiceChip(
                 label: Text(label),
@@ -313,14 +313,14 @@ class _AdminEventDetailPageState extends ConsumerState<AdminEventDetailPage> {
                   ? null
                   : () => _copyUnpaid(all),
               icon: const Icon(Icons.copy),
-              label: const Text('미송금자 복사'),
+              label: const Text('미납자 복사'),
             ),
             OutlinedButton.icon(
               onPressed: summary.unpaidCount == 0
                   ? null
                   : () => _exportUnpaid(e, all),
               icon: const Icon(Icons.download),
-              label: const Text('미송금자 CSV'),
+              label: const Text('미납자 CSV'),
             ),
           ],
         ),
@@ -356,8 +356,8 @@ class _AdminEventDetailPageState extends ConsumerState<AdminEventDetailPage> {
                                 : formatWon(p.amountFor(e)),
                             style: p.hasCustomAmount
                                 ? TextStyle(
-                                    color: theme.colorScheme.tertiary,
-                                    fontWeight: FontWeight.w600,
+                                    color: context.colors.textPrimary,
+                                    fontWeight: FontWeight.w700,
                                   )
                                 : null,
                           ),
@@ -376,14 +376,7 @@ class _AdminEventDetailPageState extends ConsumerState<AdminEventDetailPage> {
                     trailing: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text(
-                          p.isPaid ? '송금' : '미송금',
-                          style: TextStyle(
-                            color: p.isPaid
-                                ? theme.colorScheme.primary
-                                : theme.colorScheme.error,
-                          ),
-                        ),
+                        PaymentBadge(payment: p),
                         const SizedBox(width: 4),
                         Switch(
                           value: p.isPaid,

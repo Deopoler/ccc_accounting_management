@@ -81,51 +81,50 @@ class _BankAccountFormState extends ConsumerState<_BankAccountForm> {
     String? required(String? v, String label) =>
         (v == null || v.trim().isEmpty) ? '$label을(를) 입력해 주세요.' : null;
 
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Form(
-          key: _formKey,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const SectionTitle('송금 계좌'),
-              Text(
-                '교재 신청 완료 화면과 이벤트 화면에서 회원에게 안내됩니다.',
-                style: Theme.of(context).textTheme.bodySmall,
+    // 입력칸이 회색 면이라 카드 없이 흰 배경에 둔다.
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Form(
+        key: _formKey,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const SectionTitle('송금 계좌'),
+            Text(
+              '교재 신청 완료 화면과 이벤트 화면에서 회원에게 안내됩니다.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 16),
+            TextFormField(
+              controller: _bank,
+              decoration: const InputDecoration(labelText: '은행'),
+              validator: (v) => required(v, '은행'),
+            ),
+            const SizedBox(height: 16),
+            TextFormField(
+              controller: _number,
+              decoration: const InputDecoration(
+                labelText: '계좌번호',
+                hintText: '예) 123-456-789012',
               ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _bank,
-                decoration: const InputDecoration(labelText: '은행'),
-                validator: (v) => required(v, '은행'),
+              validator: (v) => required(v, '계좌번호'),
+            ),
+            const SizedBox(height: 16),
+            TextFormField(
+              controller: _holder,
+              decoration: const InputDecoration(labelText: '예금주'),
+              validator: (v) => required(v, '예금주'),
+              onFieldSubmitted: (_) => _save(),
+            ),
+            const SizedBox(height: 24),
+            Align(
+              alignment: Alignment.centerRight,
+              child: FilledButton(
+                onPressed: _saving ? null : _save,
+                child: const Text('저장'),
               ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _number,
-                decoration: const InputDecoration(
-                  labelText: '계좌번호',
-                  hintText: '예) 123-456-789012',
-                ),
-                validator: (v) => required(v, '계좌번호'),
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _holder,
-                decoration: const InputDecoration(labelText: '예금주'),
-                validator: (v) => required(v, '예금주'),
-                onFieldSubmitted: (_) => _save(),
-              ),
-              const SizedBox(height: 24),
-              Align(
-                alignment: Alignment.centerRight,
-                child: FilledButton(
-                  onPressed: _saving ? null : _save,
-                  child: const Text('저장'),
-                ),
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );

@@ -3,6 +3,8 @@ import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../../../core/router/routes.dart';
+import '../../../core/theme/app_theme.dart';
+import '../../../core/widgets/app_widgets.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../core/widgets/feedback.dart';
 import '../../../core/widgets/responsive.dart';
@@ -271,8 +273,9 @@ class _RoundBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final c = context.colors;
     return Card(
-      color: theme.colorScheme.primaryContainer.withValues(alpha: 0.4),
+      color: c.primarySoft,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(20, 16, 12, 16),
         child: Row(
@@ -289,13 +292,14 @@ class _RoundBanner extends StatelessWidget {
                   Text(
                     editing ? '신청 내역 수정 중' : '이번 회차 ${round.label}',
                     style: theme.textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w600,
+                      fontWeight: FontWeight.w700,
+                      color: c.textPrimary,
                     ),
                   ),
                   const SizedBox(height: 2),
                   Text(
                     '${round.deadlineLabel}에 마감됩니다. 마감 전까지 수정·취소할 수 있습니다.',
-                    style: theme.textTheme.bodySmall,
+                    style: TextStyle(fontSize: 13, color: c.textSecondary),
                   ),
                 ],
               ),
@@ -328,12 +332,9 @@ class _TextbookTile extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
-        side: BorderSide(
-          color: selected
-              ? theme.colorScheme.primary
-              : theme.colorScheme.outlineVariant,
-          width: selected ? 1.5 : 1,
-        ),
+        side: selected
+            ? BorderSide(color: context.colors.primary, width: 1.5)
+            : BorderSide.none,
       ),
       child: InkWell(
         onTap: textbook.isActive
@@ -354,20 +355,9 @@ class _TextbookTile extends StatelessWidget {
                       runSpacing: 4,
                       crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
-                        Text(
-                          formatWon(textbook.price),
-                          style: theme.textTheme.bodyLarge?.copyWith(
-                            color: theme.colorScheme.primary,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
+                        AmountText(textbook.price, size: AmountSize.small),
                         if (!textbook.isActive)
-                          StatusBadge(
-                            label: '신청 불가',
-                            background:
-                                theme.colorScheme.surfaceContainerHighest,
-                            foreground: theme.colorScheme.onSurfaceVariant,
-                          ),
+                          const AppBadge('신청 불가', tone: BadgeTone.muted),
                       ],
                     ),
                   ],
@@ -403,14 +393,17 @@ class _SubmitBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Material(
-      color: theme.colorScheme.surfaceContainer,
+    final c = context.colors;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: c.background,
+        border: Border(top: BorderSide(color: c.divider)),
+      ),
       child: SafeArea(
         top: false,
         child: PageBody(
           maxWidth: 800,
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
           child: Row(
             children: [
               Expanded(
@@ -418,13 +411,11 @@ class _SubmitBar extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text('선택 $count권', style: theme.textTheme.bodySmall),
                     Text(
-                      formatWon(total),
-                      style: theme.textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
+                      '선택 $count권',
+                      style: TextStyle(fontSize: 13, color: c.textSecondary),
                     ),
+                    AmountText(total),
                   ],
                 ),
               ),
@@ -494,18 +485,17 @@ class _CategoryTile extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       child: ListTile(
         contentPadding: const EdgeInsets.fromLTRB(20, 8, 12, 8),
-        leading: Icon(Icons.folder_outlined, color: theme.colorScheme.primary),
+        leading: Icon(
+          Icons.folder_outlined,
+          color: context.colors.textSecondary,
+        ),
         title: Text(group.name, style: theme.textTheme.titleMedium),
         subtitle: Text('교재 ${group.textbooks.length}종'),
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (selected > 0)
-              StatusBadge(
-                label: '$selected권 선택',
-                background: theme.colorScheme.primaryContainer,
-                foreground: theme.colorScheme.onPrimaryContainer,
-              ),
+            if (selected > 0) AppBadge('$selected권 선택', tone: BadgeTone.accent),
+            const SizedBox(width: 4),
             const Icon(Icons.chevron_right),
           ],
         ),

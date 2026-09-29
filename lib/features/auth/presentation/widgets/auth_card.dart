@@ -1,6 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 
-/// 로그인 / 비밀번호 변경처럼 셸 밖에서 가운데 카드로 보여주는 화면의 틀.
+/// 로그인 / 비밀번호 변경처럼 셸 밖에서 보여주는 화면의 틀.
+/// 카드 없이 흰 배경에 큰 제목과 입력칸을 바로 놓는다. (입력칸이 회색 면이라 카드와 겹치지 않게)
 class AuthCard extends StatelessWidget {
   const AuthCard({
     super.key,
@@ -22,39 +23,35 @@ class AuthCard extends StatelessWidget {
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.fromLTRB(24, 32, 24, 32),
             child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 420),
-              child: Card(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      if (leading != null) ...[
-                        Align(alignment: Alignment.centerLeft, child: leading),
-                        const SizedBox(height: 8),
-                      ],
-                      Text(
-                        title,
-                        style: theme.textTheme.headlineSmall?.copyWith(
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      if (subtitle != null) ...[
-                        const SizedBox(height: 8),
-                        Text(
-                          subtitle!,
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
-                          ),
-                        ),
-                      ],
-                      const SizedBox(height: 24),
-                      child,
-                    ],
+              constraints: const BoxConstraints(maxWidth: 400),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (leading != null) ...[
+                    Align(alignment: Alignment.centerLeft, child: leading),
+                    const SizedBox(height: 8),
+                  ],
+                  Text(
+                    title,
+                    style: theme.textTheme.headlineSmall?.copyWith(
+                      fontSize: 26,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
-                ),
+                  if (subtitle != null) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      subtitle!,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 32),
+                  child,
+                ],
               ),
             ),
           ),

@@ -70,7 +70,7 @@ class OrderCompletePage extends ConsumerWidget {
             child: const Text('내 신청 내역 보기'),
           ),
           const SizedBox(height: 8),
-          OutlinedButton(
+          TextButton(
             onPressed: () => context.go(AppRoutes.home),
             child: const Text('홈으로'),
           ),

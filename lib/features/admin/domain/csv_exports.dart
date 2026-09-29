@@ -50,7 +50,7 @@ List<List<Object?>> textbookTallyCsvRows(Iterable<TextbookOrder> orders) {
   ];
 }
 
-/// 이벤트 미송금자 목록.
+/// 이벤트 미납자 목록.
 List<List<Object?>> unpaidCsvRows(
   Event event,
   Iterable<EventPayment> payments,

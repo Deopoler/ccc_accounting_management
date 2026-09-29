@@ -22,6 +22,7 @@ dependencies:
   file_picker: ^13.1.0
   web: ^1.1.1
   cupertino_icons: ^1.0.9
+  shared_preferences: ^2.5.5
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -31,13 +32,13 @@ flutter:
   uses-material-design: true
 
   assets:
-    - assets/fonts/OFL.txt
+    - assets/fonts/Pretendard-LICENSE.txt
 
-  # Noto Sans KR: 현대 한글 11,172자 전체 포함 (tool/fonts/build_fonts.mjs 로 생성, SIL OFL 1.1)
+  # Pretendard: 현대 한글 11,172자 전체 포함 (tool/fonts/build_fonts.mjs 로 생성, SIL OFL 1.1)
   fonts:
-    - family: NotoSansKR
+    - family: Pretendard
       fonts:
-        - asset: assets/fonts/NotoSansKR-Regular.ttf
+        - asset: assets/fonts/Pretendard-Regular.ttf
           weight: 400
-        - asset: assets/fonts/NotoSansKR-Bold.ttf
+        - asset: assets/fonts/Pretendard-Bold.ttf
           weight: 700

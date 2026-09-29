@@ -12,7 +12,7 @@ class PageBody extends StatelessWidget {
     super.key,
     required this.child,
     this.maxWidth = 1100,
-    this.padding = const EdgeInsets.all(16),
+    this.padding = const EdgeInsets.fromLTRB(20, 16, 20, 32),
   });
 
   final Widget child;

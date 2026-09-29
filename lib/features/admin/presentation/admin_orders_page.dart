@@ -1,8 +1,10 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
 
+import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/download/download.dart';
 import '../../../core/utils/formatters.dart';
+import '../../../core/widgets/app_widgets.dart';
 import '../../../core/widgets/feedback.dart';
 import '../../../core/widgets/responsive.dart';
 import '../../../core/widgets/state_views.dart';
@@ -190,92 +192,85 @@ class _Filters extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+    // 카드 없이 둔다. (입력칸이 회색 면이라 회색 카드와 겹치지 않게)
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Wrap(
+          spacing: 12,
+          runSpacing: 12,
           children: [
-            Wrap(
-              spacing: 12,
-              runSpacing: 12,
-              children: [
-                DropdownMenu<int>(
-                  width: 260,
-                  label: const Text('회차'),
-                  initialSelection: roundOffset,
-                  onSelected: (v) => onRoundChanged(v ?? 0),
-                  dropdownMenuEntries: [
-                    DropdownMenuEntry(
-                      value: 0,
-                      label: '이번 회차 (${current.label})',
-                    ),
-                    for (var i = 1; i <= _pastRoundOptions; i++)
-                      DropdownMenuEntry(
-                        value: i,
-                        label: roundLabel(current.previousStart(i)),
-                      ),
-                    const DropdownMenuEntry(value: _allRounds, label: '전체 회차'),
-                  ],
-                ),
-                DropdownMenu<String?>(
-                  width: 240,
-                  label: const Text('교재'),
-                  // 교재가 많으므로 입력해서 찾을 수 있게 한다.
-                  enableFilter: true,
-                  requestFocusOnTap: true,
-                  initialSelection: textbookId,
-                  onSelected: onTextbookChanged,
-                  dropdownMenuEntries: [
-                    const DropdownMenuEntry(value: null, label: '전체 교재'),
-                    for (final t in textbooks)
-                      DropdownMenuEntry(value: t.id, label: t.title),
-                  ],
-                ),
-                SizedBox(
-                  width: 240,
-                  child: TextField(
-                    controller: search,
-                    onChanged: (_) => onSearchChanged(),
-                    decoration: InputDecoration(
-                      labelText: '학번 / 이름 검색',
-                      prefixIcon: const Icon(Icons.search),
-                      suffixIcon: search.text.isEmpty
-                          ? null
-                          : IconButton(
-                              tooltip: '지우기',
-                              icon: const Icon(Icons.clear),
-                              onPressed: () {
-                                search.clear();
-                                onSearchChanged();
-                              },
-                            ),
-                    ),
+            DropdownMenu<int>(
+              width: 260,
+              label: const Text('회차'),
+              initialSelection: roundOffset,
+              onSelected: (v) => onRoundChanged(v ?? 0),
+              dropdownMenuEntries: [
+                DropdownMenuEntry(value: 0, label: '이번 회차 (${current.label})'),
+                for (var i = 1; i <= _pastRoundOptions; i++)
+                  DropdownMenuEntry(
+                    value: i,
+                    label: roundLabel(current.previousStart(i)),
                   ),
-                ),
+                const DropdownMenuEntry(value: _allRounds, label: '전체 회차'),
               ],
             ),
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                ChoiceChip(
-                  label: const Text('전체 상태'),
-                  selected: status == null,
-                  onSelected: (_) => onStatusChanged(null),
-                ),
-                for (final s in OrderStatus.values)
-                  ChoiceChip(
-                    label: Text(s.label),
-                    selected: status == s,
-                    onSelected: (_) => onStatusChanged(s),
-                  ),
+            DropdownMenu<String?>(
+              width: 240,
+              label: const Text('교재'),
+              // 교재가 많으므로 입력해서 찾을 수 있게 한다.
+              enableFilter: true,
+              requestFocusOnTap: true,
+              initialSelection: textbookId,
+              onSelected: onTextbookChanged,
+              dropdownMenuEntries: [
+                const DropdownMenuEntry(value: null, label: '전체 교재'),
+                for (final t in textbooks)
+                  DropdownMenuEntry(value: t.id, label: t.title),
               ],
+            ),
+            SizedBox(
+              width: 240,
+              child: TextField(
+                controller: search,
+                onChanged: (_) => onSearchChanged(),
+                decoration: InputDecoration(
+                  labelText: '학번 / 이름 검색',
+                  prefixIcon: const Icon(Icons.search),
+                  suffixIcon: search.text.isEmpty
+                      ? null
+                      : IconButton(
+                          tooltip: '지우기',
+                          icon: const Icon(Icons.clear),
+                          onPressed: () {
+                            search.clear();
+                            onSearchChanged();
+                          },
+                        ),
+                ),
+              ),
             ),
           ],
         ),
-      ),
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            ChoiceChip(
+              label: const Text('전체 상태'),
+              selected: status == null,
+              onSelected: (_) => onStatusChanged(null),
+            ),
+            for (final s in OrderStatus.values)
+              ChoiceChip(
+                label: Text(s.label),
+                selected: status == s,
+                onSelected: (_) => onStatusChanged(s),
+              ),
+          ],
+        ),
+      ],
     );
   }
 }
@@ -382,9 +377,12 @@ class _Summary extends StatelessWidget {
       ),
     );
     return TableRow(
+      // 카드(회색 면) 안의 표라 머리행은 면 대신 구분선으로 나눈다.
       decoration: header
           ? BoxDecoration(
-              color: Theme.of(context).colorScheme.surfaceContainerHigh,
+              border: Border(
+                bottom: BorderSide(color: context.colors.surfaceStrong),
+              ),
             )
           : null,
       children: [cell(a), cell(b, right: true), cell(c, right: true)],
@@ -405,24 +403,23 @@ class _StatCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final c = context.colors;
     return SizedBox(
       width: 180,
       child: Card(
         child: Padding(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(20),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(label, style: theme.textTheme.labelLarge),
-              const SizedBox(height: 4),
               Text(
-                value,
-                style: theme.textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.w700,
-                ),
+                label,
+                style: TextStyle(fontSize: 13, color: c.textSecondary),
               ),
-              Text(sub, style: theme.textTheme.bodyMedium),
+              const SizedBox(height: 6),
+              FigureText(value),
+              const SizedBox(height: 2),
+              Text(sub, style: TextStyle(fontSize: 14, color: c.textSecondary)),
             ],
           ),
         ),

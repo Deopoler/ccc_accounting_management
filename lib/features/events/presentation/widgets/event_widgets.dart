@@ -1,10 +1,12 @@
 import 'package:material_ui/material_ui.dart';
 
+import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/formatters.dart';
-import '../../../textbooks/presentation/widgets/order_widgets.dart';
+import '../../../../core/widgets/app_widgets.dart';
 import '../../domain/event.dart';
 
-/// 내 송금 상태 배지. [payment] 가 null 이면 대상이 아니다.
+/// 납부 상태 배지: 미납(파랑, 해야 할 일) / 완납(회색) / 대상 아님(흐림).
+/// [payment] 가 null 이면 대상이 아니다.
 class PaymentBadge extends StatelessWidget {
   const PaymentBadge({super.key, required this.payment});
 
@@ -12,30 +14,15 @@ class PaymentBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
     final p = payment;
-    if (p == null) {
-      return StatusBadge(
-        label: '대상 아님',
-        background: scheme.surfaceContainerHighest,
-        foreground: scheme.onSurfaceVariant,
-      );
-    }
+    if (p == null) return const AppBadge('대상 아님', tone: BadgeTone.muted);
     return p.isPaid
-        ? StatusBadge(
-            label: '송금완료',
-            background: scheme.primaryContainer,
-            foreground: scheme.onPrimaryContainer,
-          )
-        : StatusBadge(
-            label: '미송금',
-            background: scheme.errorContainer,
-            foreground: scheme.onErrorContainer,
-          );
+        ? const AppBadge('완납', tone: BadgeTone.neutral)
+        : const AppBadge('미납', tone: BadgeTone.accent);
   }
 }
 
-/// 금액 · 마감일(D-day) 한 줄.
+/// 금액(크게) + 마감일(D-day).
 class EventMetaLine extends StatelessWidget {
   const EventMetaLine({super.key, required this.event, this.payment});
 
@@ -46,34 +33,36 @@ class EventMetaLine extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final c = context.colors;
     final due = event.dueDate;
     final dDay = dDayLabel(event.daysLeft(DateTime.now()));
-    return Wrap(
-      spacing: 12,
-      crossAxisAlignment: WrapCrossAlignment.center,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          formatWon(payment?.amountFor(event) ?? event.amount),
-          style: theme.textTheme.titleMedium?.copyWith(
-            color: theme.colorScheme.primary,
-            fontWeight: FontWeight.w700,
-          ),
+        Wrap(
+          spacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            AmountText(payment?.amountFor(event) ?? event.amount),
+            if (payment?.hasCustomAmount ?? false)
+              Text(
+                '기본 ${formatWon(event.amount)}',
+                style: TextStyle(
+                  fontSize: 13,
+                  color: c.textTertiary,
+                  decoration: TextDecoration.lineThrough,
+                  decorationColor: c.textTertiary,
+                ),
+              ),
+          ],
         ),
-        if (payment?.hasCustomAmount ?? false)
+        if (due != null) ...[
+          const SizedBox(height: 2),
           Text(
-            '(기본 ${formatWon(event.amount)})',
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
+            '마감 ${formatDate(due)}${dDay == null ? '' : ' · $dDay'}',
+            style: TextStyle(fontSize: 14, color: c.textSecondary),
           ),
-        if (due != null)
-          Text(
-            '마감 ${formatDate(due)}${dDay == null ? '' : ' ($dDay)'}',
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
-          ),
+        ],
       ],
     );
   }
@@ -87,37 +76,43 @@ class PaymentProgress extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final c = context.colors;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Row(
+          crossAxisAlignment: CrossAxisAlignment.baseline,
+          textBaseline: TextBaseline.alphabetic,
           children: [
             Text(
-              '송금 ${summary.paidCount}/${summary.targetCount}명',
-              style: theme.textTheme.bodyMedium,
+              '완납 ${summary.paidCount}/${summary.targetCount}명',
+              style: TextStyle(fontSize: 14, color: c.textSecondary),
             ),
             const Spacer(),
             Text(
               summary.rateLabel,
-              style: theme.textTheme.titleSmall?.copyWith(
+              style: TextStyle(
+                fontSize: 17,
                 fontWeight: FontWeight.w700,
+                color: c.textPrimary,
               ),
             ),
           ],
         ),
-        const SizedBox(height: 6),
+        const SizedBox(height: 8),
         ClipRRect(
           borderRadius: BorderRadius.circular(4),
-          child: LinearProgressIndicator(value: summary.rate, minHeight: 8),
+          child: LinearProgressIndicator(
+            value: summary.rate,
+            minHeight: 6,
+            backgroundColor: c.surfaceStrong,
+          ),
         ),
-        const SizedBox(height: 6),
+        const SizedBox(height: 8),
         Text(
           '수금 ${formatWon(summary.collectedAmount)} / '
           '${formatWon(summary.expectedAmount)}',
-          style: theme.textTheme.bodySmall?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
-          ),
+          style: TextStyle(fontSize: 13, color: c.textSecondary),
         ),
       ],
     );

@@ -5,6 +5,7 @@ import '../../../core/utils/formatters.dart';
 import '../../../core/widgets/responsive.dart';
 import '../../../core/widgets/state_views.dart';
 import '../../settings/presentation/bank_account_card.dart';
+import '../../../core/theme/app_theme.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../domain/event.dart';
 import 'event_providers.dart';
@@ -46,9 +47,9 @@ class EventsPage extends ConsumerWidget {
       children: [
         if (unpaidCount > 0) ...[
           Text(
-            '미송금 이벤트 $unpaidCount건 · 이벤트마다 안내된 금액과 입금자명으로 따로 송금해 주세요.',
+            '미납 이벤트 $unpaidCount건 · 이벤트마다 안내된 금액과 입금자명으로 따로 송금해 주세요.',
             style: Theme.of(context).textTheme.bodyMedium
-                ?.copyWith(color: Theme.of(context).colorScheme.error),
+                ?.copyWith(color: context.colors.textSecondary),
           ),
           const SizedBox(height: 12),
         ],
@@ -102,6 +103,7 @@ class _EventCard extends ConsumerWidget {
             if (needsPayment) ...[
               const SizedBox(height: 16),
               BankAccountCard(
+                embedded: true,
                 title: '이 이벤트 송금 안내',
                 amount: p.amountFor(event),
                 depositName: profile == null

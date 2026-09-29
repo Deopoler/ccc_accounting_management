@@ -9,6 +9,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'app.dart';
 import 'core/config/env.dart';
+import 'core/theme/theme_mode_provider.dart';
 import 'core/widgets/config_error_app.dart';
 
 Future<void> main() async {
@@ -18,8 +19,10 @@ Future<void> main() async {
 
   // 앱에 포함한 폰트의 라이선스 (Flutter 라이선스 목록 showLicensePage 에 표시된다)
   LicenseRegistry.addLicense(() async* {
-    final license = await rootBundle.loadString('assets/fonts/OFL.txt');
-    yield LicenseEntryWithLineBreaks(['Noto Sans KR'], license);
+    final license = await rootBundle.loadString(
+      'assets/fonts/Pretendard-LICENSE.txt',
+    );
+    yield LicenseEntryWithLineBreaks(['Pretendard'], license);
   });
 
   Intl.defaultLocale = 'ko_KR';
@@ -35,8 +38,12 @@ Future<void> main() async {
     publishableKey: Env.supabasePublishableKey,
   );
 
+  // 저장된 화면 테마를 먼저 읽어 첫 화면부터 적용한다.
+  final themeMode = await loadSavedThemeMode();
+
   runApp(
     ProviderScope(
+      overrides: [initialThemeModeProvider.overrideWithValue(themeMode)],
       // 실패한 요청을 자동 재시도하지 않고 즉시 에러 화면(다시 시도 버튼)을 보여준다.
       retry: (_, _) => null,
       child: const CccApp(),

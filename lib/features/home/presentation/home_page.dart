@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../../../core/router/routes.dart';
+import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../core/widgets/responsive.dart';
 import '../../../core/widgets/state_views.dart';
@@ -91,7 +92,7 @@ class _DashboardCard extends StatelessWidget {
           children: [
             Row(
               children: [
-                Icon(icon, color: theme.colorScheme.primary),
+                Icon(icon, size: 20, color: context.colors.textSecondary),
                 const SizedBox(width: 8),
                 Text(
                   title,
@@ -120,20 +121,25 @@ class _Figure extends StatelessWidget {
 
   final String label;
   final String value;
+
+  /// 내야 할 금액처럼 행동이 필요한 값이면 강조색(파랑)
   final bool alert;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final c = context.colors;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: theme.textTheme.bodySmall),
+        Text(label, style: TextStyle(fontSize: 13, color: c.textSecondary)),
+        const SizedBox(height: 4),
         Text(
           value,
-          style: theme.textTheme.titleLarge?.copyWith(
+          style: TextStyle(
+            fontSize: 24,
             fontWeight: FontWeight.w700,
-            color: alert ? theme.colorScheme.error : null,
+            letterSpacing: -0.5,
+            color: alert ? c.primary : c.textPrimary,
           ),
         ),
       ],
@@ -268,13 +274,13 @@ class _EventSummaryCard extends ConsumerWidget {
             children: [
               Expanded(
                 child: _Figure(
-                  label: '송금 완료',
+                  label: '완납',
                   value: '${targets.length - unpaid.length}/${targets.length}건',
                 ),
               ),
               Expanded(
                 child: _Figure(
-                  label: '미송금',
+                  label: '미납',
                   value: formatWon(unpaidTotal),
                   alert: unpaidTotal > 0,
                 ),
@@ -315,7 +321,8 @@ class _EventSummaryCard extends ConsumerWidget {
                     ?dDayLabel(e.daysLeft(today)),
                   ].join(' · '),
                   style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.error,
+                    color: context.colors.primary,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
               ],

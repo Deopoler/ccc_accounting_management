@@ -2,6 +2,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
 
+import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../core/widgets/feedback.dart';
 import '../../../core/widgets/state_views.dart';
@@ -14,19 +15,29 @@ class BankAccountCard extends ConsumerWidget {
     this.amount,
     this.depositName,
     this.title = '송금 계좌 안내',
+    this.embedded = false,
   });
 
   final int? amount;
   final String? depositName;
   final String title;
 
+  /// 다른 카드(회색 면) 안에 넣을 때 true: 흰(배경색) 면으로 구분한다.
+  final bool embedded;
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final account = ref.watch(bankAccountProvider);
     final theme = Theme.of(context);
 
+    final c = context.colors;
     return Card(
-      color: theme.colorScheme.secondaryContainer.withValues(alpha: 0.5),
+      color: embedded ? c.background : c.surfaceMuted,
+      shape: embedded
+          ? RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(AppRadius.sm),
+            )
+          : null,
       child: Padding(
         padding: const EdgeInsets.all(20),
         child: AsyncValueView(
@@ -72,7 +83,6 @@ class BankAccountCard extends ConsumerWidget {
                     value: depositName!,
                     copyText: depositName,
                     copiedMessage: '입금자명을 복사했습니다.',
-                    emphasize: true,
                   ),
               ],
             );
@@ -100,43 +110,54 @@ class _CopyRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
+      padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
         children: [
           SizedBox(
-            width: 72,
+            width: 64,
             child: Text(
               label,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
+              style: TextStyle(
+                fontSize: 14,
+                color: context.colors.textSecondary,
               ),
             ),
           ),
           Expanded(
             child: SelectableText(
               value,
-              style:
-                  (emphasize
-                          ? theme.textTheme.titleLarge
-                          : theme.textTheme.titleMedium)
-                      ?.copyWith(fontWeight: FontWeight.w600),
+              style: TextStyle(
+                fontSize: emphasize ? 20 : 16,
+                fontWeight: emphasize ? FontWeight.w700 : FontWeight.w600,
+                letterSpacing: emphasize ? -0.4 : 0,
+                color: context.colors.textPrimary,
+              ),
             ),
           ),
           if (copyText != null)
-            TextButton.icon(
+            // 값 칸을 넓게 쓰도록 작은 글자 버튼으로 둔다.
+            TextButton(
+              style: TextButton.styleFrom(
+                minimumSize: const Size(0, 36),
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                textStyle: const TextStyle(
+                  fontFamily: AppTheme.fontFamily,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
               onPressed: () async {
                 await Clipboard.setData(ClipboardData(text: copyText!));
                 if (context.mounted) {
                   showSnack(context, copiedMessage ?? '복사했습니다.');
                 }
               },
-              icon: const Icon(Icons.copy, size: 18),
-              label: const Text('복사'),
+              child: const Text('복사'),
             )
           else
-            const SizedBox(height: 40),
+            const SizedBox(height: 36),
         ],
       ),
     );

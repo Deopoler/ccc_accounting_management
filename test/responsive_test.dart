@@ -320,8 +320,9 @@ Future<void> _pump(
   Size size,
   String path,
   Widget page,
-  bool inShell,
-) async {
+  bool inShell, {
+  ThemeData? theme,
+}) async {
   tester.view.physicalSize = size * 2;
   tester.view.devicePixelRatio = 2;
   addTearDown(tester.view.reset);
@@ -331,7 +332,7 @@ Future<void> _pump(
       retry: (_, _) => null,
       overrides: _overrides,
       child: MaterialApp(
-        theme: AppTheme.light(),
+        theme: theme ?? AppTheme.light(),
         locale: const Locale('ko', 'KR'),
         supportedLocales: const [Locale('ko', 'KR')],
         localizationsDelegates: GlobalMaterialLocalizations.delegates,
@@ -369,6 +370,25 @@ void main() {
           expect(find.text('교재 신청 현황'), findsOneWidget);
         }
       });
+    });
+  }
+
+  // 다크 테마: 모든 화면이 색 토큰(AppColors)을 찾지 못해 깨지지 않는지
+  for (final sizeName in ['모바일', '데스크톱']) {
+    group('다크 $sizeName', () {
+      for (final (path, page, inShell) in _pages) {
+        testWidgets('$path ${page.runtimeType}', (tester) async {
+          await _pump(
+            tester,
+            _sizes[sizeName]!,
+            path,
+            page,
+            inShell,
+            theme: AppTheme.dark(),
+          );
+          expect(tester.takeException(), isNull);
+        });
+      }
     });
   }
 

@@ -5,6 +5,7 @@ import 'package:material_ui/material_ui.dart';
 import '../../features/auth/presentation/account_menu_button.dart';
 import '../../features/auth/presentation/auth_providers.dart';
 import '../router/routes.dart';
+import '../theme/app_theme.dart';
 import 'responsive.dart';
 
 /// 로그인 후 화면 공통 틀. 데스크톱은 사이드 네비게이션, 모바일은 하단 네비게이션.
@@ -62,17 +63,23 @@ class AppShell extends ConsumerWidget {
     return Scaffold(
       appBar: appBar,
       body: child,
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: selected ?? 0,
-        onDestinationSelected: (i) => context.go(destinations[i].path),
-        destinations: [
-          for (final d in destinations)
-            NavigationDestination(
-              icon: Icon(d.icon),
-              selectedIcon: Icon(d.selectedIcon),
-              label: d.label,
-            ),
-        ],
+      bottomNavigationBar: DecoratedBox(
+        // 그림자 대신 얇은 구분선
+        decoration: BoxDecoration(
+          border: Border(top: BorderSide(color: context.colors.divider)),
+        ),
+        child: NavigationBar(
+          selectedIndex: selected ?? 0,
+          onDestinationSelected: (i) => context.go(destinations[i].path),
+          destinations: [
+            for (final d in destinations)
+              NavigationDestination(
+                icon: Icon(d.icon),
+                selectedIcon: Icon(d.selectedIcon),
+                label: d.label,
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -91,17 +98,24 @@ class _SideNav extends StatelessWidget {
     final selected = matchDestination(all, location);
     final selectedPath = selected == null ? null : all[selected].path;
 
+    final c = context.colors;
     Widget tile(NavDestination d) {
       final isSelected = d.path == selectedPath;
       return Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
         child: ListTile(
           selected: isSelected,
-          shape: const StadiumBorder(),
-          selectedTileColor: theme.colorScheme.secondaryContainer,
-          selectedColor: theme.colorScheme.onSecondaryContainer,
+          selectedTileColor: c.surfaceMuted,
+          selectedColor: c.textPrimary,
+          iconColor: c.textTertiary,
+          textColor: c.textSecondary,
           leading: Icon(isSelected ? d.selectedIcon : d.icon),
-          title: Text(d.label),
+          title: Text(
+            d.label,
+            style: TextStyle(
+              fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+            ),
+          ),
           onTap: () => context.go(d.path),
         ),
       );
@@ -111,7 +125,7 @@ class _SideNav extends StatelessWidget {
       width: 248,
       // ListTile 의 선택 배경 / 잉크 효과가 보이도록 ColoredBox 가 아닌 Material 로 칠한다.
       child: Material(
-        color: theme.colorScheme.surfaceContainerLow,
+        color: c.background,
         child: SafeArea(
           child: ListView(
             padding: const EdgeInsets.symmetric(vertical: 16),
@@ -136,8 +150,10 @@ class _SideNav extends StatelessWidget {
                   padding: const EdgeInsets.fromLTRB(28, 0, 16, 8),
                   child: Text(
                     '관리자',
-                    style: theme.textTheme.labelLarge?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: c.textTertiary,
                     ),
                   ),
                 ),

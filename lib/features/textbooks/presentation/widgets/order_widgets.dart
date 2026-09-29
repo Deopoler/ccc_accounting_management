@@ -1,8 +1,11 @@
 import 'package:material_ui/material_ui.dart';
 
+import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/formatters.dart';
+import '../../../../core/widgets/app_widgets.dart';
 import '../../domain/textbook_order.dart';
 
+/// 교재 신청 상태 배지. 신청(입금 대기)만 파랑으로 강조한다.
 class OrderStatusChip extends StatelessWidget {
   const OrderStatusChip(this.status, {super.key});
 
@@ -10,48 +13,13 @@ class OrderStatusChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final (bg, fg) = switch (status) {
-      OrderStatus.requested => (
-        scheme.tertiaryContainer,
-        scheme.onTertiaryContainer,
-      ),
-      OrderStatus.paid => (scheme.primaryContainer, scheme.onPrimaryContainer),
-      OrderStatus.cancelled => (
-        scheme.surfaceContainerHighest,
-        scheme.onSurfaceVariant,
-      ),
-    };
-    return StatusBadge(label: status.label, background: bg, foreground: fg);
-  }
-}
-
-/// 작은 둥근 상태 표시.
-class StatusBadge extends StatelessWidget {
-  const StatusBadge({
-    super.key,
-    required this.label,
-    required this.background,
-    required this.foreground,
-  });
-
-  final String label;
-  final Color background;
-  final Color foreground;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(
-        color: background,
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        label,
-        style: Theme.of(context).textTheme.labelMedium
-            ?.copyWith(color: foreground, fontWeight: FontWeight.w600),
-      ),
+    return AppBadge(
+      status.label,
+      tone: switch (status) {
+        OrderStatus.requested => BadgeTone.accent,
+        OrderStatus.paid => BadgeTone.neutral,
+        OrderStatus.cancelled => BadgeTone.muted,
+      },
     );
   }
 }
@@ -73,12 +41,22 @@ class QuantityStepper extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.colors;
+    final style = IconButton.styleFrom(
+      backgroundColor: c.background,
+      foregroundColor: c.textPrimary,
+      disabledBackgroundColor: c.background,
+      disabledForegroundColor: c.textTertiary,
+      minimumSize: const Size(36, 36),
+      fixedSize: const Size(36, 36),
+      padding: EdgeInsets.zero,
+    );
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        IconButton.outlined(
+        IconButton(
           tooltip: '빼기',
-          visualDensity: VisualDensity.compact,
+          style: style,
           onPressed: value > 0 ? () => onChanged(value - 1) : null,
           icon: const Icon(Icons.remove, size: 18),
         ),
@@ -87,12 +65,16 @@ class QuantityStepper extends StatelessWidget {
           child: Text(
             '$value',
             textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.titleMedium,
+            style: TextStyle(
+              fontSize: 17,
+              fontWeight: FontWeight.w700,
+              color: value > 0 ? c.textPrimary : c.textTertiary,
+            ),
           ),
         ),
-        IconButton.outlined(
+        IconButton(
           tooltip: '더하기',
-          visualDensity: VisualDensity.compact,
+          style: style,
           onPressed: canIncrement && value < max
               ? () => onChanged(value + 1)
               : null,
@@ -118,16 +100,13 @@ class OrderItemsSummary extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final muted = theme.textTheme.bodyMedium?.copyWith(
-      color: theme.colorScheme.onSurfaceVariant,
-    );
+    final c = context.colors;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         for (final item in items)
           Padding(
-            padding: const EdgeInsets.symmetric(vertical: 3),
+            padding: const EdgeInsets.symmetric(vertical: 4),
             child: Row(
               children: [
                 Expanded(
@@ -135,38 +114,49 @@ class OrderItemsSummary extends StatelessWidget {
                     TextSpan(
                       text: item.title,
                       children: [
-                        TextSpan(text: '  × ${item.quantity}', style: muted),
+                        TextSpan(
+                          text: '  ${item.quantity}권',
+                          style: TextStyle(color: c.textSecondary),
+                        ),
                       ],
                     ),
                   ),
                 ),
-                Text(formatWon(item.subtotal)),
+                const SizedBox(width: 12),
+                Text(
+                  formatWon(item.subtotal),
+                  style: TextStyle(color: c.textSecondary),
+                ),
               ],
             ),
           ),
-        const Divider(height: 20),
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          child: Divider(color: c.surfaceStrong),
+        ),
         Row(
+          crossAxisAlignment: CrossAxisAlignment.baseline,
+          textBaseline: TextBaseline.alphabetic,
           children: [
             Expanded(
               child: Text(
                 '합계',
-                style: theme.textTheme.titleSmall?.copyWith(
+                style: TextStyle(
                   fontWeight: FontWeight.w600,
+                  color: c.textSecondary,
                 ),
               ),
             ),
-            Text(
-              formatWon(total),
-              style:
-                  (emphasizeTotal
-                          ? theme.textTheme.headlineSmall
-                          : theme.textTheme.titleMedium)
-                      ?.copyWith(
-                        fontWeight: FontWeight.w700,
-                        color: emphasizeTotal
-                            ? theme.colorScheme.primary
-                            : null,
-                      ),
+            // 좁은 화면에서 큰 금액이 넘치지 않도록 필요하면 줄인다.
+            Flexible(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerRight,
+                child: AmountText(
+                  total,
+                  size: emphasizeTotal ? AmountSize.large : AmountSize.small,
+                ),
+              ),
             ),
           ],
         ),
