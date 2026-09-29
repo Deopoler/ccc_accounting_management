@@ -9,15 +9,20 @@ import '../../../core/widgets/responsive.dart';
 import '../../../core/widgets/state_views.dart';
 import '../domain/order_round.dart';
 import '../domain/textbook.dart';
+import '../domain/textbook_category.dart';
 import '../domain/textbook_order.dart';
 import 'textbook_providers.dart';
 import 'widgets/order_widgets.dart';
 
-/// 교재 목록 및 신청. [editOrderId] 가 있으면 해당 신청을 수정한다.
+/// 교재 신청: 카테고리 선택 → 교재 선택. [editOrderId] 가 있으면 해당 신청을 수정한다.
+///
+/// [categoryId] 는 URL 쿼리(`?category=`)로 들어오며, 바뀌어도 이 위젯의 상태(선택 수량)는
+/// 유지된다. 여러 카테고리에서 고른 교재를 한 번에 신청한다.
 class TextbooksPage extends ConsumerStatefulWidget {
-  const TextbooksPage({super.key, this.editOrderId});
+  const TextbooksPage({super.key, this.editOrderId, this.categoryId});
 
   final String? editOrderId;
+  final String? categoryId;
 
   @override
   ConsumerState<TextbooksPage> createState() => _TextbooksPageState();
@@ -27,8 +32,25 @@ class _TextbooksPageState extends ConsumerState<TextbooksPage> {
   Map<String, int> _quantities = {};
   String? _prefilledFor;
   bool _submitting = false;
+  final _search = TextEditingController();
 
   bool get _editing => widget.editOrderId != null;
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
+  /// 카테고리 이동. 수정 모드면 edit 쿼리를 유지한다.
+  void _openCategory(String? categoryId) {
+    context.go(
+      Uri(
+        path: AppRoutes.textbooks,
+        queryParameters: {'edit': ?widget.editOrderId, 'category': ?categoryId},
+      ).toString(),
+    );
+  }
 
   void _setQuantity(String textbookId, int value) {
     setState(() => _quantities = {..._quantities, textbookId: value});
@@ -73,6 +95,17 @@ class _TextbooksPageState extends ConsumerState<TextbooksPage> {
     }
   }
 
+  List<Widget> _tiles(List<Textbook> textbooks) => [
+    for (final t in textbooks) ...[
+      _TextbookTile(
+        textbook: t,
+        quantity: _quantities[t.id] ?? 0,
+        onChanged: (v) => _setQuantity(t.id, v),
+      ),
+      const SizedBox(height: 8),
+    ],
+  ];
+
   int _count() => _quantities.values.fold(0, (a, b) => a + b);
 
   int _total(List<Textbook> textbooks) {
@@ -86,6 +119,7 @@ class _TextbooksPageState extends ConsumerState<TextbooksPage> {
   @override
   Widget build(BuildContext context) {
     final textbooks = ref.watch(textbooksProvider);
+    final categories = ref.watch(textbookCategoriesProvider);
     final round = ref.watch(currentRoundProvider);
     final editOrder = _editing
         ? ref.watch(orderProvider(widget.editOrderId!))
@@ -98,13 +132,14 @@ class _TextbooksPageState extends ConsumerState<TextbooksPage> {
       _quantities = {for (final i in order.items) i.textbookId: i.quantity};
     }
 
-    final loading = [textbooks, round, editOrder];
+    final loading = [textbooks, categories, round, editOrder];
     final error = loading.where((v) => v.hasError).firstOrNull;
     if (error != null) {
       return ErrorView(
         error: error.error!,
         onRetry: () {
           ref.invalidate(textbooksProvider);
+          ref.invalidate(textbookCategoriesProvider);
           ref.invalidate(currentRoundProvider);
           if (_editing) ref.invalidate(orderProvider(widget.editOrderId!));
         },
@@ -135,6 +170,57 @@ class _TextbooksPageState extends ConsumerState<TextbooksPage> {
     final visible = books
         .where((t) => t.isActive || (_quantities[t.id] ?? 0) > 0)
         .toList();
+    final groups = groupByCategory(categories.requireValue, visible);
+
+    final query = _search.text.trim().toLowerCase();
+    final List<Widget> content;
+    if (widget.categoryId != null) {
+      final group = groups.where((g) => g.id == widget.categoryId).firstOrNull;
+      content = [
+        _CategoryHeader(
+          name: group?.name ?? '카테고리',
+          onBack: () => _openCategory(null),
+        ),
+        const SizedBox(height: 12),
+        if (group == null)
+          const EmptyView(message: '이 카테고리에는 신청 가능한 교재가 없습니다.')
+        else
+          ..._tiles(group.textbooks),
+      ];
+    } else if (query.isNotEmpty) {
+      final hits = visible
+          .where((t) => t.title.toLowerCase().contains(query))
+          .toList();
+      content = [
+        _SearchField(controller: _search, onChanged: () => setState(() {})),
+        const SizedBox(height: 12),
+        if (hits.isEmpty)
+          const EmptyView(message: '검색 결과가 없습니다.')
+        else
+          ..._tiles(hits),
+      ];
+    } else {
+      content = [
+        _SearchField(controller: _search, onChanged: () => setState(() {})),
+        const SizedBox(height: 12),
+        if (groups.isEmpty)
+          const EmptyView(
+            icon: Icons.menu_book_outlined,
+            message: '현재 신청 가능한 교재가 없습니다.',
+          ),
+        for (final g in groups) ...[
+          _CategoryTile(
+            group: g,
+            selected: g.textbooks.fold(
+              0,
+              (s, t) => s + (_quantities[t.id] ?? 0),
+            ),
+            onTap: () => _openCategory(g.id),
+          ),
+          const SizedBox(height: 8),
+        ],
+      ];
+    }
 
     return Column(
       children: [
@@ -152,19 +238,7 @@ class _TextbooksPageState extends ConsumerState<TextbooksPage> {
                       onCancelEdit: () => context.go(AppRoutes.myOrders),
                     ),
                     const SizedBox(height: 16),
-                    if (visible.isEmpty)
-                      const EmptyView(
-                        icon: Icons.menu_book_outlined,
-                        message: '현재 신청 가능한 교재가 없습니다.',
-                      ),
-                    for (final t in visible) ...[
-                      _TextbookTile(
-                        textbook: t,
-                        quantity: _quantities[t.id] ?? 0,
-                        onChanged: (v) => _setQuantity(t.id, v),
-                      ),
-                      const SizedBox(height: 8),
-                    ],
+                    ...content,
                   ],
                 ),
               ),
@@ -367,6 +441,105 @@ class _SubmitBar extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _SearchField extends StatelessWidget {
+  const _SearchField({required this.controller, required this.onChanged});
+
+  final TextEditingController controller;
+  final VoidCallback onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return TextField(
+      controller: controller,
+      onChanged: (_) => onChanged(),
+      decoration: InputDecoration(
+        hintText: '교재명으로 찾기',
+        prefixIcon: const Icon(Icons.search),
+        suffixIcon: controller.text.isEmpty
+            ? null
+            : IconButton(
+                tooltip: '지우기',
+                icon: const Icon(Icons.clear),
+                onPressed: () {
+                  controller.clear();
+                  onChanged();
+                },
+              ),
+      ),
+    );
+  }
+}
+
+class _CategoryTile extends StatelessWidget {
+  const _CategoryTile({
+    required this.group,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final CategoryGroup group;
+
+  /// 이 카테고리에서 고른 권수
+  final int selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: ListTile(
+        contentPadding: const EdgeInsets.fromLTRB(20, 8, 12, 8),
+        leading: Icon(Icons.folder_outlined, color: theme.colorScheme.primary),
+        title: Text(group.name, style: theme.textTheme.titleMedium),
+        subtitle: Text('교재 ${group.textbooks.length}종'),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (selected > 0)
+              StatusBadge(
+                label: '$selected권 선택',
+                background: theme.colorScheme.primaryContainer,
+                foreground: theme.colorScheme.onPrimaryContainer,
+              ),
+            const Icon(Icons.chevron_right),
+          ],
+        ),
+        onTap: onTap,
+      ),
+    );
+  }
+}
+
+class _CategoryHeader extends StatelessWidget {
+  const _CategoryHeader({required this.name, required this.onBack});
+
+  final String name;
+  final VoidCallback onBack;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        IconButton(
+          tooltip: '카테고리 목록',
+          onPressed: onBack,
+          icon: const Icon(Icons.arrow_back),
+        ),
+        const SizedBox(width: 4),
+        Expanded(
+          child: Text(
+            name,
+            style: Theme.of(context).textTheme.titleLarge
+                ?.copyWith(fontWeight: FontWeight.w700),
+          ),
+        ),
+        TextButton(onPressed: onBack, child: const Text('다른 카테고리')),
+      ],
     );
   }
 }

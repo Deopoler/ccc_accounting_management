@@ -3,6 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/supabase/postgrest_ext.dart';
 import '../domain/order_round.dart';
 import '../domain/textbook.dart';
+import '../domain/textbook_category.dart';
 import '../domain/textbook_order.dart';
 
 const _orderColumns =
@@ -42,6 +43,46 @@ class TextbookRepository {
 
   Future<void> deleteTextbook(String id) =>
       _client.from('textbooks').delete().eq('id', id).expectAffected();
+
+  // ---------------------------------------------------------------- 카테고리
+
+  Future<List<TextbookCategory>> fetchCategories() async {
+    final rows = await _client
+        .from('textbook_categories')
+        .select('id, name, sort_order')
+        .order('sort_order')
+        .order('name');
+    return rows.map(TextbookCategory.fromJson).toList();
+  }
+
+  /// 맨 뒤 순서로 추가한다.
+  Future<void> createCategory(String name, {required int sortOrder}) => _client
+      .from('textbook_categories')
+      .insert({'name': name.trim(), 'sort_order': sortOrder});
+
+  Future<void> renameCategory(String id, String name) => _client
+      .from('textbook_categories')
+      .update({'name': name.trim()})
+      .eq('id', id)
+      .expectAffected();
+
+  /// 교재가 남아 있으면 DB 가 거부한다(23503).
+  Future<void> deleteCategory(String id) => _client
+      .from('textbook_categories')
+      .delete()
+      .eq('id', id)
+      .expectAffected();
+
+  /// 목록 순서대로 sort_order 를 다시 매긴다.
+  Future<void> reorderCategories(List<String> orderedIds) async {
+    for (var i = 0; i < orderedIds.length; i++) {
+      await _client
+          .from('textbook_categories')
+          .update({'sort_order': i})
+          .eq('id', orderedIds[i])
+          .expectAffected();
+    }
+  }
 
   // ---------------------------------------------------------------- 회차
 

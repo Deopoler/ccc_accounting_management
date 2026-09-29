@@ -63,9 +63,14 @@ final routerProvider = Provider<GoRouter>((ref) {
             path: AppRoutes.textbooks,
             pageBuilder: (_, state) {
               final edit = state.uri.queryParameters['edit'];
+              // 카테고리가 바뀌어도 같은 위젯(선택 수량 상태)을 유지하도록 key 는 edit 로만 정한다.
               return NoTransitionPage(
                 key: state.pageKey,
-                child: TextbooksPage(key: ValueKey(edit), editOrderId: edit),
+                child: TextbooksPage(
+                  key: ValueKey(edit),
+                  editOrderId: edit,
+                  categoryId: state.uri.queryParameters['category'],
+                ),
               );
             },
             routes: [

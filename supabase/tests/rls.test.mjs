@@ -365,3 +365,43 @@ describe('이벤트 입금자명', () => {
       `update public.events set deposit_name = repeat('가', 51) where title = 'MT2'`));
   });
 });
+
+describe('교재 카테고리', () => {
+  let categoryId;
+
+  test('관리자는 카테고리를 만들고 교재를 넣을 수 있다', async () => {
+    categoryId = (await asUser(db, admin,
+      `insert into public.textbook_categories (name, sort_order) values ('성경공부', 1) returning id`)).rows[0].id;
+    const r = await asUser(db, admin,
+      `update public.textbooks set category_id = $1 where title = '교재 A'`, [categoryId]);
+    assert.equal(r.affectedRows, 1);
+  });
+
+  test('회원은 카테고리를 볼 수 있지만 만들거나 바꿀 수 없다', async () => {
+    const { rows } = await asUser(db, alice, 'select name from public.textbook_categories');
+    assert.deepEqual(rows.map((r) => r.name), ['성경공부']);
+    await assert.rejects(asUser(db, alice, `insert into public.textbook_categories (name) values ('x')`));
+    const r = await asUser(db, alice, `update public.textbook_categories set name = 'x'`);
+    assert.equal(r.affectedRows, 0);
+    const r2 = await asUser(db, alice, `update public.textbooks set category_id = null`);
+    assert.equal(r2.affectedRows, 0);
+  });
+
+  test('승인 대기 사용자는 카테고리를 볼 수 없다', async () => {
+    const waiting = await createUser(db, { studentId: '20248888', approved: false });
+    const { rows } = await asUser(db, waiting, 'select * from public.textbook_categories');
+    assert.equal(rows.length, 0);
+  });
+
+  test('교재가 있는 카테고리는 삭제할 수 없다', async () => {
+    await assert.rejects(
+      asUser(db, admin, 'delete from public.textbook_categories where id = $1', [categoryId]),
+      (e) => e.code === '23503',
+    );
+  });
+
+  test('이름이 비었거나 중복이면 거부된다', async () => {
+    await assert.rejects(asUser(db, admin, `insert into public.textbook_categories (name) values ('  ')`));
+    await assert.rejects(asUser(db, admin, `insert into public.textbook_categories (name) values ('성경공부')`));
+  });
+});

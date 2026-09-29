@@ -5,6 +5,7 @@ import '../../auth/presentation/auth_providers.dart';
 import '../data/textbook_repository.dart';
 import '../domain/order_round.dart';
 import '../domain/textbook.dart';
+import '../domain/textbook_category.dart';
 import '../domain/textbook_order.dart';
 
 final textbookRepositoryProvider = Provider<TextbookRepository>(
@@ -14,6 +15,11 @@ final textbookRepositoryProvider = Provider<TextbookRepository>(
 final textbooksProvider = FutureProvider.autoDispose<List<Textbook>>(
   (ref) => ref.watch(textbookRepositoryProvider).fetchTextbooks(),
 );
+
+final textbookCategoriesProvider =
+    FutureProvider.autoDispose<List<TextbookCategory>>(
+      (ref) => ref.watch(textbookRepositoryProvider).fetchCategories(),
+    );
 
 final currentRoundProvider = FutureProvider.autoDispose<OrderRound>(
   (ref) => ref.watch(textbookRepositoryProvider).fetchCurrentRound(),

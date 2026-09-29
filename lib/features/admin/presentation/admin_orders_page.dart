@@ -221,6 +221,9 @@ class _Filters extends StatelessWidget {
                 DropdownMenu<String?>(
                   width: 240,
                   label: const Text('교재'),
+                  // 교재가 많으므로 입력해서 찾을 수 있게 한다.
+                  enableFilter: true,
+                  requestFocusOnTap: true,
                   initialSelection: textbookId,
                   onSelected: onTextbookChanged,
                   dropdownMenuEntries: [

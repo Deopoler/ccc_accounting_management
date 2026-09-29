@@ -11,8 +11,8 @@
 | 회원 | 관리자 |
 | --- | --- |
 | 가입 (관리자 승인 후 이용) | 가입 승인 / 거절, 관리자 지정, 비밀번호 초기화 |
-| 홈: 내 교재 신청·이벤트 송금 요약 | 교재 등록 / 수정 / 신청 가능 여부 |
-| 교재 신청 (주간 회차), 신청 완료 시 송금 계좌 안내·복사 | 교재 신청 현황: 회차·교재·상태·검색 필터, 입금확인, 교재별 집계, CSV |
+| 홈: 내 교재 신청·이벤트 송금 요약 | 교재 카테고리(추가·이름·순서·삭제), 교재 등록 / 수정 / 신청 가능 여부 |
+| 교재 신청: 카테고리 → 교재 선택(교재명 검색), 주간 회차, 완료 시 송금 계좌 안내·복사 | 교재 신청 현황: 회차·교재·상태·검색 필터, 입금확인, 교재별 집계, CSV |
 | 내 신청 내역: 이번 회차 신청은 수정·취소 | 이벤트 등록 / 수정 / 삭제, 입금자명 지정, 송금 대상 지정(전체 선택), 개인별 금액 조정 |
 | 이벤트별 내 송금 여부와 송금 안내(금액·계좌·입금자명 복사) | 이벤트별 송금률·수금액, 송금 토글, 미송금자 복사·CSV |
 | 비밀번호 변경 | 송금 계좌 설정 |
@@ -73,6 +73,7 @@ Dashboard > **Authentication** 에서
 3. `20261001000000_manual_event_targets.sql` — 이벤트 대상 자동 등록 제거
 4. `20261002000000_event_payment_amount.sql` — 이벤트 개인별 금액
 5. `20261003000000_event_deposit_name.sql` — 이벤트 입금자명
+6. `20261004000000_textbook_categories.sql` — 교재 카테고리
 
 **또는 CLI**:
 
@@ -139,9 +140,9 @@ cd supabase/tests && npm install && npm test   # DB (RLS / 권한 / RPC / 트리
 | 테스트 | 내용 |
 | --- | --- |
 | `test/auth_guard_test.dart` | 로그인 / 승인 대기 / 비밀번호 변경 / 역할별 라우팅, open redirect 방지 |
-| `test/textbook_order_test.dart`, `event_test.dart` | 회차, 수정 가능 여부, 집계, 필터, D-day, 정렬 |
+| `test/textbook_order_test.dart`, `event_test.dart`, `textbook_category_test.dart` | 회차, 수정 가능 여부, 집계, 필터, D-day, 정렬, 입금자명, 카테고리 묶기 |
 | `test/csv_exports_test.dart` | CSV 행 구성, BOM, 수식 주입 방지 |
-| `test/responsive_test.dart` | 모든 화면을 320 / 360 / 840 / 1280px 로 렌더링해 overflow 등 레이아웃 오류 검사 |
+| `test/responsive_test.dart` | 모든 화면을 320 / 360 / 840 / 1280px 로 렌더링해 overflow 등 레이아웃 오류 검사, 실제 라우터로 카테고리 이동 시 선택 수량 유지 검사 |
 | `supabase/tests/rls.test.mjs` | 역할별 조회 / 수정 권한, 교재 신청 RPC, 송금 기록 트리거 |
 | `supabase/tests/signup.test.mjs` | 가입 트리거, 승인 전 차단, 승인 / 관리자 권한 |
 | `supabase/tests/security.test.mjs` | 우회 시도 + **스키마 회귀 검사** (RLS 누락, anon 권한, 함수 실행 권한 허용 목록, SECURITY DEFINER search_path, 뷰 security_invoker) |
@@ -218,7 +219,7 @@ cp build/web/index.html build/web/404.html
 | 테이블 | 승인 대기 | member | admin |
 | --- | --- | --- | --- |
 | profiles | 본인 조회 | 본인 조회 | 전체 조회, 이름/역할/승인 수정 |
-| textbooks | - | 조회 | CRUD |
+| textbooks / textbook_categories | - | 조회 | CRUD |
 | textbook_orders / items | - | 본인 조회, RPC 로 신청·수정·취소 | 전체 조회, 상태 변경, 삭제 |
 | events | - | 조회 | CRUD |
 | event_payments | - | 본인 조회 | 전체 조회, 송금 여부 토글, 개인별 금액, 대상 추가/제외 |
@@ -232,7 +233,7 @@ cp build/web/index.html build/web/404.html
 
 | 항목 | 결과 |
 | --- | --- |
-| DB 권한 테스트 (PGlite) | 76개 통과. 회원·승인 대기·anon·관리자 각각의 우회 시도 포함 |
+| DB 권한 테스트 (PGlite) | 81개 통과. 회원·승인 대기·anon·관리자 각각의 우회 시도 포함 |
 | 회귀 검사의 유효성 | RLS 없는 테이블 / anon 권한 / 허용되지 않은 함수 / search_path 없는 definer 함수를 일부러 만들어 모두 검출됨을 확인 |
 | 실제 프로젝트 (anon 키) | 모든 테이블·뷰 42501 거부, `private` 스키마 미노출, 외부 도메인·`role: admin` 가입 시도 트리거에서 거부, Edge Function 토큰 없이 401 |
 | 반응형 | 17개 화면 × 4개 크기 레이아웃 오류 없음. 점검 중 사이드 메뉴 선택 배경이 가려지던 문제, 320px 교재 카드 overflow 수정 |
@@ -258,6 +259,14 @@ cp build/web/index.html build/web/404.html
 - 회원은 **이번 회차**이고 상태가 **신청**인 본인 주문만 수정·취소할 수 있다.
   마감된 회차나 입금확인된 주문은 변경할 수 없다. (서버 RPC 에서 강제)
 - 신청 시점의 교재 가격이 `unit_price` 로 저장된다.
+
+### 교재 카테고리
+
+- 관리자가 카테고리를 만들고 순서(↑↓)를 정한다. 교재 추가·수정 창에서 카테고리를 고른다. 카테고리가 없으면 "기타".
+- 회원은 카테고리 목록 → 카테고리 안의 교재 순으로 고른다. 주소는 `/textbooks?category=<id>`.
+  여러 카테고리에서 고른 수량은 유지되며 하단 합계로 한 번에 신청한다. 카테고리 목록 화면에서 교재명 검색도 된다.
+- 신청 가능한 교재가 없는 카테고리는 회원에게 보이지 않는다.
+- 교재가 들어 있는 카테고리는 삭제할 수 없다. (교재를 다른 카테고리로 옮긴 뒤 삭제)
 
 ### 이벤트 송금 대상
 

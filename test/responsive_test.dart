@@ -1,5 +1,6 @@
 // 모든 화면을 모바일 / 데스크톱 크기로 렌더링해 레이아웃 오류(overflow 등)가 없는지 확인한다.
 // Supabase 대신 가짜 저장소를 주입하고, 넘치기 쉬운 긴 문자열을 일부러 사용한다.
+import 'package:ccc_accounting_management/core/router/app_router.dart';
 import 'package:ccc_accounting_management/core/theme/app_theme.dart';
 import 'package:ccc_accounting_management/core/widgets/app_shell.dart';
 import 'package:ccc_accounting_management/features/admin/data/member_repository.dart';
@@ -29,12 +30,14 @@ import 'package:ccc_accounting_management/features/settings/presentation/setting
 import 'package:ccc_accounting_management/features/textbooks/data/textbook_repository.dart';
 import 'package:ccc_accounting_management/features/textbooks/domain/order_round.dart';
 import 'package:ccc_accounting_management/features/textbooks/domain/textbook.dart';
+import 'package:ccc_accounting_management/features/textbooks/domain/textbook_category.dart';
 import 'package:ccc_accounting_management/features/textbooks/domain/textbook_order.dart';
 import 'package:ccc_accounting_management/features/textbooks/presentation/my_orders_page.dart';
 import 'package:ccc_accounting_management/features/textbooks/presentation/order_complete_page.dart';
 import 'package:ccc_accounting_management/features/textbooks/presentation/textbook_providers.dart';
 import 'package:ccc_accounting_management/features/textbooks/presentation/textbooks_page.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/misc.dart' show Override;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:intl/intl.dart';
@@ -74,6 +77,12 @@ final _members = [
   _profile('p2', approved: false),
 ];
 
+const _categories = [
+  TextbookCategory(id: 'c1', name: '성경공부 (소그룹 리더 과정 · 심화)', sortOrder: 0),
+  TextbookCategory(id: 'c2', name: '전도', sortOrder: 1),
+];
+
+// b3 은 카테고리가 없어 "기타"로 묶인다.
 final _textbooks = [
   Textbook(
     id: 'b1',
@@ -81,6 +90,7 @@ final _textbooks = [
     price: 1234000,
     isActive: true,
     createdAt: DateTime(2026),
+    categoryId: 'c1',
   ),
   Textbook(
     id: 'b2',
@@ -88,6 +98,7 @@ final _textbooks = [
     price: 7000,
     isActive: true,
     createdAt: DateTime(2026),
+    categoryId: 'c2',
   ),
   Textbook(
     id: 'b3',
@@ -181,6 +192,8 @@ class _FakeTextbooks implements TextbookRepository {
   @override
   Future<List<Textbook>> fetchTextbooks() async => _textbooks;
   @override
+  Future<List<TextbookCategory>> fetchCategories() async => _categories;
+  @override
   Future<OrderRound> fetchCurrentRound() async => _round;
   @override
   Future<List<TextbookOrder>> fetchMyOrders(String userId) async => _orders;
@@ -262,6 +275,12 @@ final _pages = <(String, Widget, bool)>[
   ('/home', const HomePage(), true),
   ('/textbooks', const TextbooksPage(), true),
   ('/textbooks', const TextbooksPage(editOrderId: 'o1'), true),
+  ('/textbooks?category=c1', const TextbooksPage(categoryId: 'c1'), true),
+  (
+    '/textbooks?category=_uncategorized',
+    const TextbooksPage(categoryId: uncategorizedId),
+    true,
+  ),
   ('/textbooks/complete/o1', const OrderCompletePage(orderId: 'o1'), true),
   ('/my-orders', const MyOrdersPage(), true),
   ('/events', const EventsPage(), true),
@@ -278,6 +297,15 @@ final _pages = <(String, Widget, bool)>[
   ('/pending', const PendingApprovalPage(), false),
 ];
 
+List<Override> get _overrides => [
+  currentUserIdProvider.overrideWithValue('u1'),
+  authRepositoryProvider.overrideWithValue(_FakeAuth()),
+  textbookRepositoryProvider.overrideWithValue(_FakeTextbooks()),
+  eventRepositoryProvider.overrideWithValue(_FakeEvents()),
+  settingsRepositoryProvider.overrideWithValue(_FakeSettings()),
+  memberRepositoryProvider.overrideWithValue(_FakeMembers()),
+];
+
 Future<void> _pump(
   WidgetTester tester,
   Size size,
@@ -292,14 +320,7 @@ Future<void> _pump(
   await tester.pumpWidget(
     ProviderScope(
       retry: (_, _) => null,
-      overrides: [
-        currentUserIdProvider.overrideWithValue('u1'),
-        authRepositoryProvider.overrideWithValue(_FakeAuth()),
-        textbookRepositoryProvider.overrideWithValue(_FakeTextbooks()),
-        eventRepositoryProvider.overrideWithValue(_FakeEvents()),
-        settingsRepositoryProvider.overrideWithValue(_FakeSettings()),
-        memberRepositoryProvider.overrideWithValue(_FakeMembers()),
-      ],
+      overrides: _overrides,
       child: MaterialApp(
         theme: AppTheme.light(),
         locale: const Locale('ko', 'KR'),
@@ -359,5 +380,70 @@ void main() {
       true,
     );
     expect(find.byType(DataTable), findsNothing);
+  });
+
+  testWidgets('교재 신청: 카테고리를 오가도 고른 수량이 유지된다 (실제 라우터)', (tester) async {
+    tester.view.physicalSize = const Size(1280, 900) * 2;
+    tester.view.devicePixelRatio = 2;
+    addTearDown(tester.view.reset);
+
+    late ProviderContainer container;
+    await tester.pumpWidget(
+      ProviderScope(
+        retry: (_, _) => null,
+        overrides: _overrides,
+        child: Consumer(
+          builder: (context, ref, _) {
+            container = ProviderScope.containerOf(context);
+            return MaterialApp.router(
+              theme: AppTheme.light(),
+              locale: const Locale('ko', 'KR'),
+              supportedLocales: const [Locale('ko', 'KR')],
+              localizationsDelegates: GlobalMaterialLocalizations.delegates,
+              routerConfig: ref.watch(routerProvider),
+            );
+          },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final router = container.read(routerProvider);
+
+    Future<void> go(String location) async {
+      router.go(location);
+      await tester.pumpAndSettle();
+    }
+
+    await go('/textbooks');
+    expect(find.text('선택 0권'), findsOneWidget);
+    expect(find.textContaining('성경공부'), findsOneWidget);
+    expect(find.text('전도'), findsOneWidget);
+    // "기타"의 교재는 신청 불가뿐이라 회원 화면에서 카테고리째 숨겨진다.
+    expect(find.text('기타'), findsNothing);
+
+    // 성경공부에서 2권
+    await go('/textbooks?category=c1');
+    await tester.tap(find.byTooltip('더하기'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('더하기'));
+    await tester.pumpAndSettle();
+
+    // 전도로 이동해서 1권
+    await go('/textbooks?category=c2');
+    expect(find.text('선택 2권'), findsOneWidget, reason: '다른 카테고리로 가도 유지');
+    await tester.tap(find.byTooltip('더하기'));
+    await tester.pumpAndSettle();
+
+    // 카테고리 목록: 합계와 카테고리별 선택 수
+    await go('/textbooks');
+    expect(find.text('선택 3권'), findsOneWidget);
+    expect(find.text('2권 선택'), findsOneWidget);
+    expect(find.text('1권 선택'), findsOneWidget);
+
+    // 검색: 카테고리를 건너뛰고 교재를 바로 찾는다
+    await tester.enterText(find.byType(TextField), '교재 B');
+    await tester.pumpAndSettle();
+    expect(find.text('7,000원'), findsOneWidget, reason: '교재 B 카드');
+    expect(find.text('전도'), findsNothing);
   });
 }
