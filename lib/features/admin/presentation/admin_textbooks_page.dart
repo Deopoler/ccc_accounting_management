@@ -130,7 +130,8 @@ class AdminTextbooksPage extends ConsumerWidget {
   Future<void> _createTextbook(
     BuildContext context,
     WidgetRef ref,
-    List<TextbookCategory> categories, {
+    List<TextbookCategory> categories,
+    List<Textbook> books, {
     String? categoryId,
   }) async {
     final input = await showTextbookFormDialog(
@@ -139,11 +140,39 @@ class AdminTextbooksPage extends ConsumerWidget {
       initialCategoryId: categoryId,
     );
     if (input == null || !context.mounted) return;
+    // 새 교재는 맨 뒤에 둔다.
+    final last = books.fold(-1, (m, t) => t.sortOrder > m ? t.sortOrder : m);
+    final withOrder = TextbookInput(
+      title: input.title,
+      price: input.price,
+      isActive: input.isActive,
+      categoryId: input.categoryId,
+      sortOrder: last + 1,
+    );
     await _run(
       context,
       ref,
-      () => ref.read(textbookRepositoryProvider).createTextbook(input),
+      () => ref.read(textbookRepositoryProvider).createTextbook(withOrder),
       success: '교재를 추가했습니다.',
+    );
+  }
+
+  /// 같은 카테고리 안에서 교재를 위/아래로 옮긴다.
+  Future<void> _moveTextbook(
+    BuildContext context,
+    WidgetRef ref,
+    List<Textbook> group,
+    int index,
+    int delta,
+  ) async {
+    final ids = group.map((t) => t.id).toList();
+    final target = index + delta;
+    if (target < 0 || target >= ids.length) return;
+    ids.insert(target, ids.removeAt(index));
+    await _run(
+      context,
+      ref,
+      () => ref.read(textbookRepositoryProvider).reorderTextbooks(ids),
     );
   }
 
@@ -292,7 +321,7 @@ class AdminTextbooksPage extends ConsumerWidget {
         SectionTitle(
           '교재 ${books.length}종',
           trailing: FilledButton.icon(
-            onPressed: () => _createTextbook(context, ref, cats),
+            onPressed: () => _createTextbook(context, ref, cats, books),
             icon: const Icon(Icons.add),
             label: const Text('교재 추가'),
           ),
@@ -322,6 +351,7 @@ class AdminTextbooksPage extends ConsumerWidget {
                       context,
                       ref,
                       cats,
+                      books,
                       categoryId: g.category?.id,
                     ),
                     icon: const Icon(Icons.add, size: 18),
@@ -335,9 +365,15 @@ class AdminTextbooksPage extends ConsumerWidget {
                 padding: const EdgeInsets.only(left: 4, bottom: 8),
                 child: Text('교재가 없습니다.', style: theme.textTheme.bodySmall),
               ),
-            for (final t in g.textbooks) ...[
+            for (final (i, t) in g.textbooks.indexed) ...[
               _TextbookRow(
                 textbook: t,
+                onUp: i == 0
+                    ? null
+                    : () => _moveTextbook(context, ref, g.textbooks, i, -1),
+                onDown: i == g.textbooks.length - 1
+                    ? null
+                    : () => _moveTextbook(context, ref, g.textbooks, i, 1),
                 onToggleActive: (v) => _run(
                   context,
                   ref,
@@ -359,12 +395,18 @@ class AdminTextbooksPage extends ConsumerWidget {
 class _TextbookRow extends StatelessWidget {
   const _TextbookRow({
     required this.textbook,
+    required this.onUp,
+    required this.onDown,
     required this.onToggleActive,
     required this.onEdit,
     required this.onDelete,
   });
 
   final Textbook textbook;
+
+  /// null 이면 맨 위 / 맨 아래라 이동할 수 없다.
+  final VoidCallback? onUp;
+  final VoidCallback? onDown;
   final ValueChanged<bool> onToggleActive;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
@@ -374,9 +416,27 @@ class _TextbookRow extends StatelessWidget {
     final t = textbook;
     return Card(
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 8, 8, 8),
+        padding: const EdgeInsets.fromLTRB(4, 8, 0, 8),
         child: Row(
           children: [
+            Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  tooltip: '위로',
+                  visualDensity: VisualDensity.compact,
+                  onPressed: onUp,
+                  icon: const Icon(Icons.keyboard_arrow_up),
+                ),
+                IconButton(
+                  tooltip: '아래로',
+                  visualDensity: VisualDensity.compact,
+                  onPressed: onDown,
+                  icon: const Icon(Icons.keyboard_arrow_down),
+                ),
+              ],
+            ),
+            const SizedBox(width: 4),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -396,16 +456,13 @@ class _TextbookRow extends StatelessWidget {
                 ),
               ],
             ),
-            const SizedBox(width: 8),
-            IconButton(
-              tooltip: '수정',
-              onPressed: onEdit,
-              icon: const Icon(Icons.edit_outlined),
-            ),
-            IconButton(
-              tooltip: '삭제',
-              onPressed: onDelete,
-              icon: const Icon(Icons.delete_outline),
+            PopupMenuButton<String>(
+              tooltip: '더보기',
+              onSelected: (v) => v == 'edit' ? onEdit() : onDelete(),
+              itemBuilder: (_) => const [
+                PopupMenuItem(value: 'edit', child: Text('수정')),
+                PopupMenuItem(value: 'delete', child: Text('삭제')),
+              ],
             ),
           ],
         ),

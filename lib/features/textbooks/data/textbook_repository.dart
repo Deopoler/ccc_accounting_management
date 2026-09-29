@@ -21,7 +21,7 @@ class TextbookRepository {
     final rows = await _client
         .from('textbooks')
         .select()
-        .order('is_active', ascending: false)
+        .order('sort_order')
         .order('title');
     return rows.map(Textbook.fromJson).toList();
   }
@@ -72,6 +72,17 @@ class TextbookRepository {
       .delete()
       .eq('id', id)
       .expectAffected();
+
+  /// 한 카테고리 안의 교재를 목록 순서대로 sort_order 를 다시 매긴다.
+  Future<void> reorderTextbooks(List<String> orderedIds) async {
+    for (var i = 0; i < orderedIds.length; i++) {
+      await _client
+          .from('textbooks')
+          .update({'sort_order': i})
+          .eq('id', orderedIds[i])
+          .expectAffected();
+    }
+  }
 
   /// 목록 순서대로 sort_order 를 다시 매긴다.
   Future<void> reorderCategories(List<String> orderedIds) async {

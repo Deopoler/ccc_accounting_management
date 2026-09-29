@@ -35,7 +35,7 @@ class CategoryGroup {
   String get name => category?.name ?? uncategorizedName;
 }
 
-/// 카테고리 순서(sort_order, 이름)대로 교재를 묶는다. "기타"는 교재가 있을 때만 맨 뒤에 붙는다.
+/// 카테고리 순서(sort_order, 이름)대로 교재를 묶고, 카테고리 안은 교재 순서(sort_order, 교재명)로 정렬한다. "기타"는 교재가 있을 때만 맨 뒤에 붙는다.
 ///
 /// [includeEmpty] 가 false 면 교재가 없는 카테고리는 뺀다. (회원 화면)
 List<CategoryGroup> groupByCategory(
@@ -50,6 +50,12 @@ List<CategoryGroup> groupByCategory(
         ? t.categoryId!
         : uncategorizedId;
     byCategory.putIfAbsent(key, () => []).add(t);
+  }
+  for (final list in byCategory.values) {
+    list.sort((a, b) {
+      final o = a.sortOrder.compareTo(b.sortOrder);
+      return o != 0 ? o : a.title.compareTo(b.title);
+    });
   }
 
   final sorted = [...categories]

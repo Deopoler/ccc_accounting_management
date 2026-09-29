@@ -82,8 +82,17 @@ const _categories = [
   TextbookCategory(id: 'c2', name: '전도', sortOrder: 1),
 ];
 
-// b3 은 카테고리가 없어 "기타"로 묶인다.
+// b3 은 카테고리가 없어 "기타"로 묶인다. b4 는 c1 의 신청 불가 교재 (관리자 화면에서 ↑↓ 확인용).
 final _textbooks = [
+  Textbook(
+    id: 'b4',
+    title: '$_longTitle 해설집',
+    price: 32000,
+    isActive: false,
+    createdAt: DateTime(2026),
+    categoryId: 'c1',
+    sortOrder: 1,
+  ),
   Textbook(
     id: 'b1',
     title: _longTitle,

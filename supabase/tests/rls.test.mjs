@@ -405,3 +405,14 @@ describe('교재 카테고리', () => {
     await assert.rejects(asUser(db, admin, `insert into public.textbook_categories (name) values ('성경공부')`));
   });
 });
+
+describe('교재 순서', () => {
+  test('관리자는 교재 순서를 바꿀 수 있고 회원은 못 바꾼다', async () => {
+    const r = await asUser(db, admin, `update public.textbooks set sort_order = 99 where title = '교재 B'`);
+    assert.equal(r.affectedRows, 1);
+    const r2 = await asUser(db, alice, `update public.textbooks set sort_order = 0`);
+    assert.equal(r2.affectedRows, 0);
+    const { rows } = await asUser(db, alice, `select sort_order from public.textbooks where title = '교재 B'`);
+    assert.equal(rows[0].sort_order, 99);
+  });
+});
