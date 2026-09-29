@@ -1,0 +1,12 @@
+{
+  "name": "ccc-accounting-db-tests",
+  "private": true,
+  "type": "module",
+  "description": "PGlite 로 마이그레이션을 적용하고 RLS/권한을 검증하는 테스트",
+  "scripts": {
+    "test": "node --test"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.3.0"
+  }
+}

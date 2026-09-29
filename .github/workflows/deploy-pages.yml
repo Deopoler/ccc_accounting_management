@@ -1,0 +1,116 @@
+# main 에 push 하면 테스트 → 웹 빌드 → GitHub Pages 배포.
+# 필요한 저장소 설정
+#   Settings > Secrets and variables > Actions > Secrets
+#     SUPABASE_URL              https://<ref>.supabase.co
+#     SUPABASE_PUBLISHABLE_KEY  sb_publishable_...
+#   Settings > Pages > Build and deployment > Source: GitHub Actions
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  FLUTTER_VERSION: '3.47.5'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: DB 권한 테스트 (PGlite)
+        working-directory: supabase/tests
+        run: |
+          npm install
+          npm test
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: Supabase 접속 정보 확인
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
+        run: |
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_PUBLISHABLE_KEY" ]; then
+            echo "::error::저장소 Secrets 에 SUPABASE_URL / SUPABASE_PUBLISHABLE_KEY 를 설정해 주세요."
+            exit 1
+          fi
+
+      # <아이디>.github.io 저장소면 루트, 그 외에는 /<저장소 이름>/ 에서 서비스된다.
+      - name: base href 결정
+        id: base
+        run: |
+          repo="${{ github.event.repository.name }}"
+          if [[ "$repo" == *.github.io ]]; then
+            echo "href=/" >> "$GITHUB_OUTPUT"
+          else
+            echo "href=/$repo/" >> "$GITHUB_OUTPUT"
+          fi
+
+      - run: flutter pub get
+
+      - name: 웹 빌드
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
+        run: |
+          flutter build web --release \
+            --base-href "${{ steps.base.outputs.href }}" \
+            --dart-define=SUPABASE_URL="$SUPABASE_URL" \
+            --dart-define=SUPABASE_PUBLISHABLE_KEY="$SUPABASE_PUBLISHABLE_KEY"
+
+      # GitHub Pages 는 SPA rewrite 가 없으므로, 없는 경로(/home 새로고침 등)에서
+      # 404.html 로 같은 앱을 띄워 라우터가 처리하게 한다.
+      - name: SPA 대체 페이지
+        run: |
+          cp build/web/index.html build/web/404.html
+          touch build/web/.nojekyll
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/web
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

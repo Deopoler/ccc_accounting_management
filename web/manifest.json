@@ -1,0 +1,36 @@
+{
+    "name": "CCC 회계 관리",
+    "short_name": "CCC 회계",
+    "start_url": ".",
+    "display": "standalone",
+    "background_color": "#FBF8FF",
+    "theme_color": "#2F5BB7",
+    "description": "CCC 교재 신청 및 이벤트 송금 관리",
+    "lang": "ko",
+    "orientation": "any",
+    "prefer_related_applications": false,
+    "icons": [
+        {
+            "src": "icons/Icon-192.png",
+            "sizes": "192x192",
+            "type": "image/png"
+        },
+        {
+            "src": "icons/Icon-512.png",
+            "sizes": "512x512",
+            "type": "image/png"
+        },
+        {
+            "src": "icons/Icon-maskable-192.png",
+            "sizes": "192x192",
+            "type": "image/png",
+            "purpose": "maskable"
+        },
+        {
+            "src": "icons/Icon-maskable-512.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "maskable"
+        }
+    ]
+}
