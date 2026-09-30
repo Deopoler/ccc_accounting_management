@@ -57,6 +57,9 @@ supabase/.branches/
 # DB 테스트 (PGlite)
 supabase/tests/node_modules/
 
+# 로컬 Supabase CLI (npx supabase)
+/node_modules/
+
 # flutter run 스크린샷
 flutter_*.png
 
