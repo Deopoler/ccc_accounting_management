@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../auth/presentation/auth_providers.dart';
 import '../../textbooks/domain/textbook_order.dart';
 import '../../textbooks/presentation/textbook_providers.dart';
 
@@ -45,6 +46,31 @@ class AdminOrdersNotifier extends AsyncNotifier<List<TextbookOrder>> {
                 isShipped: saved.isShipped,
                 shippedAt: () => saved.shippedAt,
                 receivedAt: () => saved.receivedAt,
+                receivedBy: () => saved.receivedBy,
+              )
+            : o,
+    ]);
+  }
+
+  /// 관리자 수령 체크/해제. 서버가 기록한 시각으로 해당 행만 바꾼다.
+  Future<void> setReceived(String orderId, {required bool received}) async {
+    final at = await ref
+        .read(textbookRepositoryProvider)
+        .setReceived(orderId, received: received);
+    final adminId = ref.read(currentUserIdProvider);
+    final current = state.value;
+    if (!ref.mounted || current == null) return;
+    state = AsyncData([
+      for (final o in current)
+        o.id == orderId
+            ? o.copyWith(
+                receivedAt: () => at,
+                // 이미 수령된 건이면 서버가 기존 확인자를 유지한다.
+                receivedBy: () => at == null
+                    ? null
+                    : o.receivedAt != null
+                    ? o.receivedBy
+                    : adminId,
               )
             : o,
     ]);

@@ -73,6 +73,7 @@ class TextbookOrder {
     this.isShipped = false,
     this.shippedAt,
     this.receivedAt,
+    this.receivedBy,
   });
 
   factory TextbookOrder.fromJson(Map<String, dynamic> json) {
@@ -94,6 +95,7 @@ class TextbookOrder {
       isShipped: json['is_shipped'] as bool? ?? false,
       shippedAt: _parseTime(json['shipped_at']),
       receivedAt: _parseTime(json['received_at']),
+      receivedBy: json['received_by'] as String?,
       member: profile == null
           ? null
           : OrderMember(
@@ -116,8 +118,15 @@ class TextbookOrder {
   final bool isShipped;
   final DateTime? shippedAt;
 
-  /// 회원이 수령을 확인한 시각. 배송됨 상태에서만 값이 있다.
+  /// 수령 확인 시각. 배송됨 상태에서만 값이 있다.
   final DateTime? receivedAt;
+
+  /// 수령을 체크한 사람 (회원 본인 또는 관리자).
+  final String? receivedBy;
+
+  /// 회원 본인이 아니라 관리자가 수령 처리했는지.
+  bool get receivedByAdmin =>
+      receivedAt != null && receivedBy != null && receivedBy != userId;
 
   DeliveryStatus get delivery => receivedAt != null
       ? DeliveryStatus.received
@@ -142,6 +151,7 @@ class TextbookOrder {
     bool? isShipped,
     DateTime? Function()? shippedAt,
     DateTime? Function()? receivedAt,
+    String? Function()? receivedBy,
   }) => TextbookOrder(
     id: id,
     userId: userId,
@@ -154,6 +164,7 @@ class TextbookOrder {
     isShipped: isShipped ?? this.isShipped,
     shippedAt: shippedAt == null ? this.shippedAt : shippedAt(),
     receivedAt: receivedAt == null ? this.receivedAt : receivedAt(),
+    receivedBy: receivedBy == null ? this.receivedBy : receivedBy(),
   );
 }
 

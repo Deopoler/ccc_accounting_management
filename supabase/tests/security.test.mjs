@@ -68,6 +68,7 @@ describe('스키마 회귀 검사', () => {
     assert.deepEqual(rows.map((r) => r.fn), [
       'private.is_admin',
       'private.is_approved_user',
+      'public.admin_set_textbook_received',
       'public.cancel_textbook_order',
       'public.confirm_textbook_received',
       'public.current_order_round',

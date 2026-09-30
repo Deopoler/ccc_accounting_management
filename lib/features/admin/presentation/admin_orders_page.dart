@@ -94,6 +94,37 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
     }
   }
 
+  Future<void> _setReceived(
+    DateTime? round,
+    TextbookOrder order,
+    bool received,
+  ) async {
+    if ((order.receivedAt != null) == received) return;
+    // 회원 본인이 확인한 기록을 지울 때만 한 번 더 묻는다.
+    if (!received && !order.receivedByAdmin) {
+      final ok = await showConfirmDialog(
+        context,
+        title: '수령 해제',
+        message:
+            '${order.member?.name ?? '회원'}님이 직접 수령 확인한 신청입니다.\n'
+            '수령 기록을 지우시겠습니까?',
+        confirmLabel: '수령 해제',
+        destructive: true,
+      );
+      if (!ok || !mounted) return;
+    }
+    setState(() => _busy.add(order.id));
+    try {
+      await ref
+          .read(adminOrdersProvider(round).notifier)
+          .setReceived(order.id, received: received);
+    } catch (e) {
+      if (mounted) showErrorSnack(context, e);
+    } finally {
+      if (mounted) setState(() => _busy.remove(order.id));
+    }
+  }
+
   void _export(
     List<TextbookOrder> orders,
     DateTime? roundStart, {
@@ -191,6 +222,7 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
                           busy: _busy,
                           onStatus: (o, s) => _setStatus(roundStart, o, s),
                           onShipped: (o, v) => _setShipped(roundStart, o, v),
+                          onReceived: (o, v) => _setReceived(roundStart, o, v),
                         ),
                     ],
                   );
@@ -506,7 +538,7 @@ class _StatCard extends StatelessWidget {
 // ----------------------------------------------------------------------------
 
 typedef _OnStatus = void Function(TextbookOrder order, OrderStatus status);
-typedef _OnShipped = void Function(TextbookOrder order, bool shipped);
+typedef _OnToggle = void Function(TextbookOrder order, bool value);
 
 String _itemsText(TextbookOrder o) =>
     o.items.map((i) => '${i.title} ×${i.quantity}').join(', ');
@@ -517,12 +549,14 @@ class _OrdersList extends StatelessWidget {
     required this.busy,
     required this.onStatus,
     required this.onShipped,
+    required this.onReceived,
   });
 
   final List<TextbookOrder> orders;
   final Set<String> busy;
   final _OnStatus onStatus;
-  final _OnShipped onShipped;
+  final _OnToggle onShipped;
+  final _OnToggle onReceived;
 
   @override
   Widget build(BuildContext context) {
@@ -587,7 +621,19 @@ class _OrdersList extends StatelessWidget {
                               onShipped: onShipped,
                             ),
                           ),
-                          DataCell(_ReceiptText(o)),
+                          DataCell(
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                _ReceivedCheckbox(
+                                  order: o,
+                                  enabled: !busy.contains(o.id),
+                                  onReceived: onReceived,
+                                ),
+                                _ReceiptText(o),
+                              ],
+                            ),
+                          ),
                         ],
                       ),
                   ],
@@ -605,6 +651,7 @@ class _OrdersList extends StatelessWidget {
                 enabled: !busy.contains(o.id),
                 onStatus: onStatus,
                 onShipped: onShipped,
+                onReceived: onReceived,
               ),
               const SizedBox(height: 8),
             ],
@@ -621,12 +668,14 @@ class _OrderCard extends StatelessWidget {
     required this.enabled,
     required this.onStatus,
     required this.onShipped,
+    required this.onReceived,
   });
 
   final TextbookOrder order;
   final bool enabled;
   final _OnStatus onStatus;
-  final _OnShipped onShipped;
+  final _OnToggle onShipped;
+  final _OnToggle onReceived;
 
   @override
   Widget build(BuildContext context) {
@@ -669,17 +718,23 @@ class _OrderCard extends StatelessWidget {
             ),
             Row(
               children: [
-                Expanded(
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: _ReceiptText(order),
-                  ),
-                ),
+                Expanded(child: _ShippedText(order)),
                 const Text('배송'),
                 _ShippedCheckbox(
                   order: order,
                   enabled: enabled,
                   onShipped: onShipped,
+                ),
+              ],
+            ),
+            Row(
+              children: [
+                Expanded(child: _ReceiptText(order)),
+                const Text('수령'),
+                _ReceivedCheckbox(
+                  order: order,
+                  enabled: enabled,
+                  onReceived: onReceived,
                 ),
               ],
             ),
@@ -726,7 +781,7 @@ class _ShippedCheckbox extends StatelessWidget {
 
   final TextbookOrder order;
   final bool enabled;
-  final _OnShipped onShipped;
+  final _OnToggle onShipped;
 
   @override
   Widget build(BuildContext context) {
@@ -744,7 +799,31 @@ class _ShippedCheckbox extends StatelessWidget {
   }
 }
 
-/// 수령 여부 / 시각. 배송 전이거나 취소된 신청은 `-`.
+/// 수령 체크. 배송된 신청만 체크할 수 있다. (서버 RPC 가 강제)
+class _ReceivedCheckbox extends StatelessWidget {
+  const _ReceivedCheckbox({
+    required this.order,
+    required this.enabled,
+    required this.onReceived,
+  });
+
+  final TextbookOrder order;
+  final bool enabled;
+  final _OnToggle onReceived;
+
+  @override
+  Widget build(BuildContext context) {
+    final cancelled = order.status == OrderStatus.cancelled;
+    return Checkbox(
+      value: order.receivedAt != null,
+      onChanged: !enabled || cancelled || !order.isShipped
+          ? null
+          : (v) => onReceived(order, v == true),
+    );
+  }
+}
+
+/// 수령 여부 / 시각 / 확인자. 배송 전이거나 취소된 신청은 `-`.
 class _ReceiptText extends StatelessWidget {
   const _ReceiptText(this.order);
 
@@ -753,22 +832,34 @@ class _ReceiptText extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
-    if (order.status == OrderStatus.cancelled || !order.isShipped) {
-      return Text('-', style: TextStyle(color: c.textTertiary));
-    }
     final at = order.receivedAt;
-    // 좁은 카드에서는 시각이 다음 줄로 내려간다.
-    return Wrap(
-      spacing: 6,
-      runSpacing: 4,
-      crossAxisAlignment: WrapCrossAlignment.center,
-      children: [
-        DeliveryStatusChip(order.delivery),
-        Text(
-          at == null ? '미수령' : formatDateTime(at),
-          style: TextStyle(fontSize: 13, color: c.textSecondary),
-        ),
-      ],
+    final text = order.status == OrderStatus.cancelled || !order.isShipped
+        ? '-'
+        : at == null
+        ? '미수령'
+        : [formatDateTime(at), if (order.receivedByAdmin) '관리자'].join(' · ');
+    return Text(
+      text,
+      style: TextStyle(
+        fontSize: 13,
+        color: text == '-' ? c.textTertiary : c.textSecondary,
+      ),
+    );
+  }
+}
+
+/// 배송 처리 시각. 배송 전이면 비운다.
+class _ShippedText extends StatelessWidget {
+  const _ShippedText(this.order);
+
+  final TextbookOrder order;
+
+  @override
+  Widget build(BuildContext context) {
+    final at = order.shippedAt;
+    return Text(
+      at == null ? '' : '배송 ${formatDateTime(at)}',
+      style: TextStyle(fontSize: 13, color: context.colors.textSecondary),
     );
   }
 }

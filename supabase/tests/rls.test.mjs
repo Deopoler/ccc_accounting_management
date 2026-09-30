@@ -491,7 +491,9 @@ describe('교재 배송 / 수령', () => {
     assert.ok(first instanceof Date);
     const again = (await asUser(db, alice, 'select public.confirm_textbook_received($1) as t', [orderId])).rows[0].t;
     assert.equal(again.getTime(), first.getTime());
-    assert.equal((await order(orderId)).received_at.getTime(), first.getTime());
+    const o = await order(orderId);
+    assert.equal(o.received_at.getTime(), first.getTime());
+    assert.equal(o.received_by, alice);
   });
 
   test('관리자가 다른 컬럼을 바꿔도 배송/수령 기록은 유지된다', async () => {
@@ -516,6 +518,7 @@ describe('교재 배송 / 수령', () => {
     assert.equal(o.shipped_at, null);
     assert.equal(o.shipped_by, null);
     assert.equal(o.received_at, null);
+    assert.equal(o.received_by, null);
   });
 
   test('취소된 신청은 배송 처리할 수 없다', async () => {
@@ -525,5 +528,69 @@ describe('교재 배송 / 수령', () => {
       asUser(db, admin, 'update public.textbook_orders set is_shipped = true where id = $1', [id]),
       /취소된 신청은 배송/,
     );
+  });
+});
+
+describe('관리자 수령 처리', () => {
+  const one = (bookId) => JSON.stringify([{ textbook_id: bookId, quantity: 1 }]);
+  const order = async (id) =>
+    (await db.query('select * from public.textbook_orders where id = $1', [id])).rows[0];
+  const setReceived = (userId, id, received) =>
+    asUser(db, userId, 'select public.admin_set_textbook_received($1, $2) as t', [id, received]);
+  let orderId;
+
+  before(async () => {
+    orderId = (await asUser(db, alice, 'select public.place_textbook_order($1::jsonb) as id', [one(bookA)])).rows[0].id;
+  });
+
+  test('배송 전에는 관리자도 수령 처리할 수 없다', async () => {
+    await assertRaises(setReceived(admin, orderId, true), /배송되지 않은/);
+  });
+
+  test('회원은 관리자 수령 처리를 호출할 수 없다', async () => {
+    await asUser(db, admin, 'update public.textbook_orders set is_shipped = true where id = $1', [orderId]);
+    await assertRaises(setReceived(alice, orderId, true), /관리자만/);
+    assert.equal((await order(orderId)).received_at, null);
+  });
+
+  test('관리자가 수령 처리하면 시각과 확인자(관리자)가 기록된다', async () => {
+    const t = (await setReceived(admin, orderId, true)).rows[0].t;
+    assert.ok(t instanceof Date);
+    const o = await order(orderId);
+    assert.equal(o.received_at.getTime(), t.getTime());
+    assert.equal(o.received_by, admin);
+
+    // 이미 수령된 건은 다시 체크해도 기록이 바뀌지 않는다.
+    const again = (await setReceived(admin, orderId, true)).rows[0].t;
+    assert.equal(again.getTime(), t.getTime());
+  });
+
+  test('관리자가 수령 처리한 건은 회원이 확인해도 기록이 바뀌지 않는다', async () => {
+    await asUser(db, alice, 'select public.confirm_textbook_received($1)', [orderId]);
+    assert.equal((await order(orderId)).received_by, admin);
+  });
+
+  test('관리자는 수령을 해제할 수 있다 (회원 확인 건 포함)', async () => {
+    const r = (await setReceived(admin, orderId, false)).rows[0].t;
+    assert.equal(r, null);
+    let o = await order(orderId);
+    assert.equal(o.received_at, null);
+    assert.equal(o.received_by, null);
+    assert.equal(o.is_shipped, true);
+
+    await asUser(db, alice, 'select public.confirm_textbook_received($1)', [orderId]);
+    await setReceived(admin, orderId, false);
+    o = await order(orderId);
+    assert.equal(o.received_at, null);
+  });
+
+  test('취소된 신청은 수령 처리할 수 없다', async () => {
+    const id = (await asUser(db, alice, 'select public.place_textbook_order($1::jsonb) as id', [one(bookA)])).rows[0].id;
+    await asUser(db, alice, 'select public.cancel_textbook_order($1)', [id]);
+    await assertRaises(setReceived(admin, id, true), /취소된 신청/);
+  });
+
+  test('확인자는 관리자도 직접 조작할 수 없다', async () => {
+    await assertDenied(asUser(db, admin, 'update public.textbook_orders set received_by = $1', [admin]));
   });
 });

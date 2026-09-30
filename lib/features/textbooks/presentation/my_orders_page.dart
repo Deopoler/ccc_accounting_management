@@ -232,7 +232,9 @@ class _DeliveryPanel extends StatelessWidget {
     final waiting = order.canConfirmReceipt;
     final lines = [
       if (order.shippedAt != null) '배송 ${formatDateTime(order.shippedAt!)}',
-      if (received != null) '수령 ${formatDateTime(received)}',
+      if (received != null)
+        '수령 ${formatDateTime(received)}'
+            '${order.receivedByAdmin ? ' (관리자 확인)' : ''}',
     ];
 
     return Container(

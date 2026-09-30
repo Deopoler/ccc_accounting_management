@@ -117,9 +117,15 @@ void main() {
 
     final received = shipped.copyWith(
       receivedAt: () => DateTime.utc(2026, 10, 8),
+      receivedBy: () => 'u1',
     );
     expect(received.delivery, DeliveryStatus.received);
     expect(received.canConfirmReceipt, isFalse);
+    expect(received.receivedByAdmin, isFalse);
+    expect(
+      received.copyWith(receivedBy: () => 'admin').receivedByAdmin,
+      isTrue,
+    );
 
     final unshipped = received.copyWith(
       isShipped: false,

@@ -128,6 +128,7 @@ TextbookOrder _order(
   isShipped: shipped,
   shippedAt: shipped ? DateTime(2026, 10, 7, 10) : null,
   receivedAt: received ? DateTime(2026, 10, 8, 18, 30) : null,
+  receivedBy: received ? 'admin' : null,
   id: id,
   userId: userId,
   roundStart: _round.start,

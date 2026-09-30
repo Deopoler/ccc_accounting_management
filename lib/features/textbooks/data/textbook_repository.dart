@@ -12,11 +12,12 @@ typedef ShipmentState = ({
   bool isShipped,
   DateTime? shippedAt,
   DateTime? receivedAt,
+  String? receivedBy,
 });
 
 const _orderColumns =
     'id, user_id, round_start, status, total_price, created_at, '
-    'is_shipped, shipped_at, received_at, '
+    'is_shipped, shipped_at, received_at, received_by, '
     'textbook_order_items(textbook_id, quantity, unit_price, textbooks(title))';
 
 class TextbookRepository {
@@ -195,7 +196,7 @@ class TextbookRepository {
         .from('textbook_orders')
         .update({'is_shipped': shipped})
         .eq('id', orderId)
-        .select('is_shipped, shipped_at, received_at');
+        .select('is_shipped, shipped_at, received_at, received_by');
     if (rows.isEmpty) {
       throw const AppException('권한이 없거나 이미 삭제된 항목입니다.');
     }
@@ -206,7 +207,21 @@ class TextbookRepository {
       isShipped: row['is_shipped'] as bool,
       shippedAt: time('shipped_at'),
       receivedAt: time('received_at'),
+      receivedBy: row['received_by'] as String?,
     );
+  }
+
+  /// 관리자 수령 체크/해제. 서버가 기록한 수령 시각을 돌려준다. (해제하면 null)
+  /// 배송된 신청만 체크할 수 있다. (서버 RPC 가 강제)
+  Future<DateTime?> setReceived(
+    String orderId, {
+    required bool received,
+  }) async {
+    final at = await _client.rpc<String?>(
+      'admin_set_textbook_received',
+      params: {'p_order_id': orderId, 'p_received': received},
+    );
+    return at == null ? null : DateTime.parse(at);
   }
 
   List<Map<String, dynamic>> _items(Map<String, int> quantities) => [
