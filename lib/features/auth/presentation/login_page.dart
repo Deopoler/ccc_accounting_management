@@ -5,9 +5,11 @@ import 'package:material_ui/material_ui.dart';
 
 import '../../../core/router/routes.dart';
 import '../../../core/utils/error_message.dart';
+import '../../campus/presentation/campus_providers.dart';
 import '../domain/credentials.dart';
 import 'auth_providers.dart';
 import 'widgets/auth_card.dart';
+import 'widgets/campus_field.dart';
 
 class LoginPage extends ConsumerStatefulWidget {
   const LoginPage({super.key});
@@ -16,7 +18,8 @@ class LoginPage extends ConsumerStatefulWidget {
   ConsumerState<LoginPage> createState() => _LoginPageState();
 }
 
-class _LoginPageState extends ConsumerState<LoginPage> {
+class _LoginPageState extends ConsumerState<LoginPage>
+    with CampusSelection<LoginPage> {
   final _formKey = GlobalKey<FormState>();
   final _studentId = TextEditingController();
   final _password = TextEditingController();
@@ -33,6 +36,8 @@ class _LoginPageState extends ConsumerState<LoginPage> {
 
   Future<void> _submit() async {
     if (_submitting || !_formKey.currentState!.validate()) return;
+    final campus = this.campus;
+    if (campus == null) return; // 캠퍼스 필드의 검증 / 로딩 표시가 안내한다.
     setState(() {
       _submitting = true;
       _error = null;
@@ -40,7 +45,12 @@ class _LoginPageState extends ConsumerState<LoginPage> {
     try {
       await ref
           .read(authRepositoryProvider)
-          .signIn(studentId: _studentId.text, password: _password.text);
+          .signIn(
+            campus: campus,
+            studentId: _studentId.text,
+            password: _password.text,
+          );
+      await saveLastCampusCode(campus.code);
       TextInput.finishAutofillContext();
       // 이동은 라우터 가드가 처리한다.
     } catch (e) {
@@ -52,6 +62,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
 
   @override
   Widget build(BuildContext context) {
+    ref.watch(campusesProvider); // 목록을 불러오면 다시 그린다.
     return AuthCard(
       title: 'CCC 회계',
       subtitle: '학번과 비밀번호로 로그인하세요.',
@@ -61,6 +72,11 @@ class _LoginPageState extends ConsumerState<LoginPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              CampusField(
+                value: campus,
+                onChanged: pickCampus,
+                enabled: !_submitting,
+              ),
               TextFormField(
                 controller: _studentId,
                 autofocus: true,

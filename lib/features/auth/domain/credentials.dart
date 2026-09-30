@@ -1,12 +1,11 @@
-/// 학번을 Supabase Auth 용 가상 이메일로 매핑할 때 쓰는 도메인.
-/// Edge Function(계정 생성)과 반드시 같은 규칙을 사용해야 한다.
-const studentEmailDomain = 'ccc.local';
-
 final _studentIdPattern = RegExp(r'^[0-9A-Za-z]{4,20}$');
 
-/// `20240001` → `20240001@ccc.local`
-String studentIdToEmail(String studentId) =>
-    '${studentId.trim().toLowerCase()}@$studentEmailDomain';
+/// 학번 + 캠퍼스 이메일 도메인 → Supabase Auth 용 가상 이메일.
+/// 서버 가입 트리거가 같은 규칙으로 학번 / 캠퍼스를 읽는다.
+///   `20240001`, `ccc.local` → `20240001@ccc.local` (KAIST)
+///   `20240001`, `snu.ccc.local` → `20240001@snu.ccc.local`
+String studentIdToEmail(String studentId, String emailDomain) =>
+    '${studentId.trim().toLowerCase()}@$emailDomain';
 
 String? validateStudentId(String? value) {
   final v = value?.trim() ?? '';

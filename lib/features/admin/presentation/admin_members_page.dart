@@ -99,13 +99,13 @@ class _AdminMembersPageState extends ConsumerState<AdminMembersPage> {
   }
 
   Future<void> _toggleAdmin(Profile m) async {
-    final toAdmin = m.role != UserRole.admin;
+    final toAdmin = m.role == UserRole.member;
     final ok = await showConfirmDialog(
       context,
-      title: toAdmin ? '관리자 지정' : '관리자 해제',
+      title: toAdmin ? '캠퍼스 관리자 지정' : '캠퍼스 관리자 해제',
       message: toAdmin
-          ? '${m.name}(${m.studentId})에게 관리자 권한을 줍니다. 모든 회계 데이터를 보고 수정할 수 있게 됩니다.'
-          : '${m.name}(${m.studentId})의 관리자 권한을 해제합니다.',
+          ? '${m.name}(${m.studentId})에게 캠퍼스 관리자 권한을 줍니다. 캠퍼스의 모든 회계 데이터를 보고 수정할 수 있게 됩니다.'
+          : '${m.name}(${m.studentId})의 캠퍼스 관리자 권한을 해제합니다.',
       confirmLabel: toAdmin ? '지정' : '해제',
       destructive: !toAdmin,
     );
@@ -113,8 +113,8 @@ class _AdminMembersPageState extends ConsumerState<AdminMembersPage> {
     await _run(
       () => ref
           .read(memberRepositoryProvider)
-          .setRole(m.id, toAdmin ? UserRole.admin : UserRole.member),
-      toAdmin ? '관리자로 지정했습니다.' : '관리자 권한을 해제했습니다.',
+          .setRole(m.id, toAdmin ? UserRole.campusAdmin : UserRole.member),
+      toAdmin ? '캠퍼스 관리자로 지정했습니다.' : '캠퍼스 관리자 권한을 해제했습니다.',
     );
   }
 
@@ -188,7 +188,7 @@ class _AdminMembersPageState extends ConsumerState<AdminMembersPage> {
                             Flexible(child: Text(m.name)),
                             if (m.isAdmin) ...[
                               const SizedBox(width: 8),
-                              const AppBadge('관리자'),
+                              AppBadge(m.role.label),
                             ],
                           ],
                         ),
@@ -206,10 +206,14 @@ class _AdminMembersPageState extends ConsumerState<AdminMembersPage> {
                               value: 'reset',
                               child: Text('비밀번호 초기화'),
                             ),
-                            PopupMenuItem(
-                              value: 'role',
-                              child: Text(m.isAdmin ? '관리자 해제' : '관리자로 지정'),
-                            ),
+                            // 총괄 관리자 권한은 총괄 관리자 화면에서 다룬다. (서버도 강제)
+                            if (m.role != UserRole.centralAdmin)
+                              PopupMenuItem(
+                                value: 'role',
+                                child: Text(
+                                  m.isAdmin ? '캠퍼스 관리자 해제' : '캠퍼스 관리자로 지정',
+                                ),
+                              ),
                           ],
                         ),
                       ),

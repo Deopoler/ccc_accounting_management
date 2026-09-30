@@ -2,6 +2,8 @@ import 'package:ccc_accounting_management/core/router/auth_guard.dart';
 import 'package:ccc_accounting_management/core/router/routes.dart';
 import 'package:ccc_accounting_management/features/auth/domain/credentials.dart';
 import 'package:ccc_accounting_management/features/auth/domain/profile.dart';
+import 'package:ccc_accounting_management/features/campus/domain/campus.dart';
+import 'package:ccc_accounting_management/features/campus/presentation/campus_providers.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 Profile _profile({
@@ -71,7 +73,13 @@ void main() {
     });
 
     test('승인되지 않은 관리자는 관리자가 아니다', () {
-      expect(_profile(role: UserRole.admin, approved: false).isAdmin, isFalse);
+      for (final r in [UserRole.campusAdmin, UserRole.centralAdmin]) {
+        expect(_profile(role: r, approved: false).isAdmin, isFalse);
+      }
+      expect(
+        _profile(role: UserRole.centralAdmin, approved: false).isCentralAdmin,
+        isFalse,
+      );
     });
   });
 
@@ -92,9 +100,19 @@ void main() {
       expect(_go('/home', profile: _profile()), isNull);
     });
 
-    test('관리자는 관리자 화면에 들어갈 수 있다', () {
-      final admin = _profile(role: UserRole.admin);
-      expect(_go('/admin/orders', profile: admin), isNull);
+    test('캠퍼스 관리자 / 총괄 관리자는 관리자 화면에 들어갈 수 있다', () {
+      for (final r in [UserRole.campusAdmin, UserRole.centralAdmin]) {
+        expect(_go('/admin/orders', profile: _profile(role: r)), isNull);
+      }
+    });
+
+    test('역할은 DB 값으로 읽고 쓴다. 모르는 값은 회원으로 본다', () {
+      expect(UserRole.parse('campus_admin'), UserRole.campusAdmin);
+      expect(UserRole.parse('central_admin'), UserRole.centralAdmin);
+      expect(UserRole.parse('member'), UserRole.member);
+      expect(UserRole.parse('admin'), UserRole.member);
+      expect(UserRole.campusAdmin.dbValue, 'campus_admin');
+      expect(_profile(role: UserRole.campusAdmin).isCentralAdmin, isFalse);
     });
 
     test('회원은 비밀번호 변경 화면에 들어갈 수 있다', () {
@@ -113,8 +131,32 @@ void main() {
   });
 
   group('credentials', () {
-    test('학번을 가상 이메일로 변환한다', () {
-      expect(studentIdToEmail(' 20240001 '), '20240001@ccc.local');
+    test('학번을 캠퍼스 도메인의 가상 이메일로 변환한다', () {
+      expect(studentIdToEmail(' 20240001 ', 'ccc.local'), '20240001@ccc.local');
+      expect(
+        studentIdToEmail('A2024X01', 'snu.ccc.local'),
+        'a2024x01@snu.ccc.local',
+      );
+    });
+
+    test('처음 선택할 캠퍼스: 마지막 캠퍼스 → 하나뿐이면 그것 → 아니면 직접 선택', () {
+      const kaist = Campus(
+        id: 'k',
+        code: 'kaist',
+        name: 'KAIST',
+        emailDomain: 'ccc.local',
+      );
+      const snu = Campus(
+        id: 's',
+        code: 'snu',
+        name: '서울대',
+        emailDomain: 'snu.ccc.local',
+      );
+      expect(initialCampus([kaist, snu], 'snu'), snu);
+      expect(initialCampus([kaist, snu], null), isNull);
+      expect(initialCampus([kaist, snu], 'gone'), isNull);
+      expect(initialCampus([kaist], null), kaist);
+      expect(initialCampus([], 'kaist'), isNull);
     });
 
     test('이름 검사', () {

@@ -31,7 +31,7 @@ class MemberRepository {
 
   Future<void> setRole(String userId, UserRole role) => _client
       .from('profiles')
-      .update({'role': role.name})
+      .update({'role': role.dbValue})
       .eq('id', userId)
       .expectAffected();
 

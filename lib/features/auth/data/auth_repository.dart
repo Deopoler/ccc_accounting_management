@@ -1,6 +1,7 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../core/utils/app_exception.dart';
+import '../../campus/domain/campus.dart';
 import '../domain/credentials.dart';
 import '../domain/profile.dart';
 
@@ -16,23 +17,25 @@ class AuthRepository {
   String? get currentUserId => _auth.currentSession?.user.id;
 
   Future<void> signIn({
+    required Campus campus,
     required String studentId,
     required String password,
   }) async {
     await _auth.signInWithPassword(
-      email: studentIdToEmail(studentId),
+      email: studentIdToEmail(studentId, campus.emailDomain),
       password: password,
     );
   }
 
-  /// 가입. 프로필은 DB 트리거가 "승인 대기" 상태로 만든다.
+  /// 가입. 프로필은 DB 트리거가 "승인 대기" 상태로, 이메일 도메인의 캠퍼스에 만든다.
   Future<void> signUp({
+    required Campus campus,
     required String studentId,
     required String name,
     required String password,
   }) async {
     final res = await _auth.signUp(
-      email: studentIdToEmail(studentId),
+      email: studentIdToEmail(studentId, campus.emailDomain),
       password: password,
       data: {'name': name.trim()},
     );

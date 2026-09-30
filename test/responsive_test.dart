@@ -18,6 +18,9 @@ import 'package:ccc_accounting_management/features/auth/presentation/change_pass
 import 'package:ccc_accounting_management/features/auth/presentation/login_page.dart';
 import 'package:ccc_accounting_management/features/auth/presentation/pending_approval_page.dart';
 import 'package:ccc_accounting_management/features/auth/presentation/signup_page.dart';
+import 'package:ccc_accounting_management/features/campus/data/campus_repository.dart';
+import 'package:ccc_accounting_management/features/campus/domain/campus.dart';
+import 'package:ccc_accounting_management/features/campus/presentation/campus_providers.dart';
 import 'package:ccc_accounting_management/features/events/data/event_repository.dart';
 import 'package:ccc_accounting_management/features/events/domain/event.dart';
 import 'package:ccc_accounting_management/features/events/presentation/event_providers.dart';
@@ -72,7 +75,7 @@ Profile _profile(
 );
 
 final _members = [
-  _profile('u1', role: UserRole.admin),
+  _profile('u1', role: UserRole.campusAdmin),
   for (var i = 2; i < 8; i++) _profile('$i'),
   _profile('p1', approved: false),
   _profile('p2', approved: false),
@@ -335,6 +338,21 @@ final _pages = <(String, Widget, bool)>[
   ('/pending', const PendingApprovalPage(), false),
 ];
 
+class _FakeCampuses implements CampusRepository {
+  @override
+  Future<List<Campus>> listCampuses() async => const [
+    Campus(id: 'k', code: 'kaist', name: 'KAIST', emailDomain: 'ccc.local'),
+    Campus(
+      id: 's',
+      code: 'snu',
+      name: '아주 긴 이름의 캠퍼스 (제2캠퍼스 · 국제관)',
+      emailDomain: 'snu.ccc.local',
+    ),
+  ];
+  @override
+  dynamic noSuchMethod(Invocation i) => super.noSuchMethod(i);
+}
+
 List<Override> get _overrides => [
   currentUserIdProvider.overrideWithValue('u1'),
   authRepositoryProvider.overrideWithValue(_FakeAuth()),
@@ -342,6 +360,7 @@ List<Override> get _overrides => [
   eventRepositoryProvider.overrideWithValue(_FakeEvents()),
   settingsRepositoryProvider.overrideWithValue(_FakeSettings()),
   memberRepositoryProvider.overrideWithValue(_FakeMembers()),
+  campusRepositoryProvider.overrideWithValue(_FakeCampuses()),
 ];
 
 Future<void> _pump(
