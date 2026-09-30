@@ -1,9 +1,11 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
 
+import 'core/config/env.dart';
 import 'core/router/app_router.dart';
 import 'core/theme/app_theme.dart';
 import 'core/theme/theme_mode_provider.dart';
+import 'core/widgets/staging_banner.dart';
 
 class CccApp extends ConsumerWidget {
   const CccApp({super.key});
@@ -20,6 +22,8 @@ class CccApp extends ConsumerWidget {
       supportedLocales: const [Locale('ko', 'KR')],
       localizationsDelegates: GlobalMaterialLocalizations.delegates,
       routerConfig: ref.watch(routerProvider),
+      builder: (context, child) =>
+          StagingBanner(enabled: Env.isStaging, child: child!),
     );
   }
 }

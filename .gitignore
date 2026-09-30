@@ -49,6 +49,7 @@ app.*.map.json
 
 # Supabase / 환경 변수 (커밋 금지)
 env.json
+env.staging.json
 .env
 supabase/.temp/
 supabase/.branches/

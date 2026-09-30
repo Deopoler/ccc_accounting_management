@@ -8,6 +8,11 @@ abstract final class Env {
     'SUPABASE_PUBLISHABLE_KEY',
   );
 
+  /// `staging` 이면 테스트 서버. 화면에 표시를 붙여 운영과 헷갈리지 않게 한다.
+  static const appEnv = String.fromEnvironment('APP_ENV');
+
+  static bool get isStaging => appEnv == 'staging';
+
   static bool get isConfigured =>
       supabaseUrl.isNotEmpty && supabasePublishableKey.isNotEmpty;
 }

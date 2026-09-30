@@ -78,6 +78,8 @@ Dashboard > **Authentication** 에서
 6. `20261004000000_textbook_categories.sql` — 교재 카테고리
 7. `20261005000000_textbook_sort_order.sql` — 교재 순서
 8. `20261006000000_order_round_wed_9am.sql` — 신청 마감을 수요일 오전 9시로
+9. `20261007000000_order_delivery.sql` — 교재 배송 / 수령 확인
+10. `20261008000000_admin_order_received.sql` — 관리자 수령 처리 / 확인자 기록
 
 **또는 CLI**:
 
@@ -129,8 +131,50 @@ index.ts 내용을 붙여넣어 배포한 뒤, 함수 설정에서 **Verify JWT*
 ## 3. 실행
 
 ```sh
-flutter run -d chrome --dart-define-from-file=env.json
+flutter run -d chrome --dart-define-from-file=env.json           # 운영 서버
+flutter run -d chrome --dart-define-from-file=env.staging.json   # 테스트 서버
 ```
+
+### 3-1. 테스트 서버 (staging)
+
+운영 데이터와 분리된 Supabase 프로젝트를 하나 더 두고, **DB 변경과 새 기능은 테스트 서버에서 먼저 확인**한다.
+
+| | 운영 | 테스트 서버 |
+| --- | --- | --- |
+| Supabase 프로젝트 | 기존 프로젝트 | 별도 프로젝트 (무료 플랜 조직당 2개) |
+| 접속 정보 | `env.json` | `env.staging.json` (`APP_ENV: staging`) |
+| 앱 | GitHub Pages | 로컬 실행 (`flutter run`) |
+| 화면 표시 | 없음 | 오른쪽 위 주황색 **테스트 서버** 띠 |
+
+#### 만들기 (최초 1회)
+
+1. Supabase 에서 새 프로젝트를 만들고 [2-2 Auth 설정](#2-2-auth-설정-중요)을 운영과 똑같이 한다.
+2. [supabase/migrations/](supabase/migrations/) 전체를 순서대로 적용한다. (2-3 과 같음)
+3. Edge Function 을 배포하고 `DEFAULT_PASSWORD` 를 설정한다. (2-4 와 같음, `--project-ref` 만 테스트 서버 것으로)
+4. `env.staging.example.json` 을 `env.staging.json` 으로 복사해 테스트 서버의 URL / publishable 키를 넣는다.
+5. 테스트 서버로 앱을 띄워 관리자 / 회원 테스트 계정을 가입시키고, 2-6 처럼 관리자를 지정한다.
+
+#### DB 변경 순서
+
+1. 마이그레이션 작성 → `supabase/tests` 에서 `npm test`
+2. **테스트 서버**에 적용 → `env.staging.json` 으로 앱을 띄워 확인
+3. **운영**에 적용 → 확인 (새 컬럼 / 함수가 생겼는지)
+4. `main` 에 push (앱 배포)
+
+> 운영에 적용하기 전에 push 하면 새 앱이 아직 없는 컬럼을 조회해 화면이 깨진다. 3 → 4 순서를 지킨다.
+
+#### CLI 로 적용할 때
+
+두 프로젝트를 오가므로 `link` 대신 대상을 매번 명시한다.
+
+```sh
+npx supabase db push --db-url "postgresql://postgres.<ref>:<DB 비밀번호>@<pooler 호스트>:5432/postgres"
+```
+
+접속 문자열은 Dashboard 상단 **Connect** > Session pooler 에서 복사한다.
+운영 DB 에 처음 CLI 를 쓸 때는 `npx supabase migration list --db-url ...` 로 적용 이력을 먼저 확인한다.
+SQL Editor 로만 적용해 왔다면 이력이 비어 있어 전체를 다시 적용하려 하므로,
+`npx supabase migration repair --status applied <버전...> --db-url ...` 로 이미 적용된 버전을 먼저 표시한다.
 
 ## 4. 테스트
 
