@@ -98,6 +98,30 @@ class _AdminMembersPageState extends ConsumerState<AdminMembersPage> {
     );
   }
 
+  /// 총괄 관리자 지정 / 해제 (총괄 관리자만. 서버도 강제). 해제하면 캠퍼스 관리자로 남는다.
+  Future<void> _toggleCentral(Profile m) async {
+    final toCentral = m.role != UserRole.centralAdmin;
+    final ok = await showConfirmDialog(
+      context,
+      title: toCentral ? '총괄 관리자 지정' : '총괄 관리자 해제',
+      message: toCentral
+          ? '${m.name}(${m.studentId})에게 총괄 관리자 권한을 줍니다. 모든 캠퍼스의 회계 데이터를 보고 수정하고, 캠퍼스를 추가할 수 있게 됩니다.'
+          : '${m.name}(${m.studentId})의 총괄 관리자 권한을 해제합니다. 캠퍼스 관리자로 남습니다.',
+      confirmLabel: toCentral ? '지정' : '해제',
+      destructive: !toCentral,
+    );
+    if (!ok) return;
+    await _run(
+      () => ref
+          .read(memberRepositoryProvider)
+          .setRole(
+            m.id,
+            toCentral ? UserRole.centralAdmin : UserRole.campusAdmin,
+          ),
+      toCentral ? '총괄 관리자로 지정했습니다.' : '총괄 관리자 권한을 해제했습니다.',
+    );
+  }
+
   Future<void> _toggleAdmin(Profile m) async {
     final toAdmin = m.role == UserRole.member;
     final ok = await showConfirmDialog(
@@ -122,6 +146,7 @@ class _AdminMembersPageState extends ConsumerState<AdminMembersPage> {
   Widget build(BuildContext context) {
     final members = ref.watch(membersProvider);
     final me = ref.watch(currentUserIdProvider);
+    final iAmCentral = ref.watch(isCentralAdminProvider);
 
     return AsyncValueView(
       value: members,
@@ -198,9 +223,11 @@ class _AdminMembersPageState extends ConsumerState<AdminMembersPage> {
                         trailing: PopupMenuButton<String>(
                           tooltip: '더보기',
                           enabled: !_busy && m.id != me,
-                          onSelected: (v) => v == 'reset'
-                              ? _resetPassword(m)
-                              : _toggleAdmin(m),
+                          onSelected: (v) => switch (v) {
+                            'reset' => _resetPassword(m),
+                            'central' => _toggleCentral(m),
+                            _ => _toggleAdmin(m),
+                          },
                           itemBuilder: (_) => [
                             const PopupMenuItem(
                               value: 'reset',
@@ -212,6 +239,15 @@ class _AdminMembersPageState extends ConsumerState<AdminMembersPage> {
                                 value: 'role',
                                 child: Text(
                                   m.isAdmin ? '캠퍼스 관리자 해제' : '캠퍼스 관리자로 지정',
+                                ),
+                              ),
+                            if (iAmCentral)
+                              PopupMenuItem(
+                                value: 'central',
+                                child: Text(
+                                  m.role == UserRole.centralAdmin
+                                      ? '총괄 관리자 해제'
+                                      : '총괄 관리자로 지정',
                                 ),
                               ),
                           ],

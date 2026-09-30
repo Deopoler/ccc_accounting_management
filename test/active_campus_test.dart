@@ -22,7 +22,7 @@ Future<String?> _active(Profile? profile, {String? override}) async {
   );
   addTearDown(container.dispose);
   container.read(centralCampusOverrideProvider.notifier).select(override);
-  return container.read(activeCampusIdProvider.future);
+  return container.read(adminCampusIdProvider.future);
 }
 
 void main() {
@@ -41,6 +41,26 @@ void main() {
     final central = _profile(UserRole.centralAdmin);
     expect(await _active(central), 'kaist');
     expect(await _active(central, override: 'snu'), 'snu');
+  });
+
+  test('총괄 관리자가 캠퍼스를 바꿔도 회원 화면은 본인 캠퍼스 그대로', () async {
+    final container = ProviderContainer(
+      overrides: [
+        currentProfileProvider.overrideWith(
+          (ref) async => _profile(UserRole.centralAdmin),
+        ),
+      ],
+    );
+    addTearDown(container.dispose);
+    container.read(centralCampusOverrideProvider.notifier).select('snu');
+    expect(
+      await container.read(campusIdProvider(CampusScope.admin).future),
+      'snu',
+    );
+    expect(
+      await container.read(campusIdProvider(CampusScope.member).future),
+      'kaist',
+    );
   });
 
   test('승인되지 않은 총괄 관리자는 다른 캠퍼스를 고를 수 없다', () async {

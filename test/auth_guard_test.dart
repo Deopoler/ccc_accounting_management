@@ -115,6 +115,18 @@ void main() {
       expect(_profile(role: UserRole.campusAdmin).isCentralAdmin, isFalse);
     });
 
+    test('캠퍼스 관리 화면은 총괄 관리자만', () {
+      expect(
+        _go('/admin/campuses', profile: _profile(role: UserRole.campusAdmin)),
+        AppRoutes.admin,
+      );
+      expect(_go('/admin/campuses', profile: _profile()), AppRoutes.home);
+      expect(
+        _go('/admin/campuses', profile: _profile(role: UserRole.centralAdmin)),
+        isNull,
+      );
+    });
+
     test('회원은 비밀번호 변경 화면에 들어갈 수 있다', () {
       expect(_go('/change-password', profile: _profile()), isNull);
     });

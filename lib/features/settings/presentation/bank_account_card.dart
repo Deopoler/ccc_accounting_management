@@ -7,6 +7,7 @@ import '../../../core/utils/formatters.dart';
 import '../../../core/widgets/feedback.dart';
 import '../../../core/widgets/state_views.dart';
 import 'settings_providers.dart';
+import '../../campus/presentation/campus_providers.dart';
 
 /// 송금 계좌 안내. [amount] 가 있으면 송금할 금액, [depositName] 이 있으면 입금자명도 보여준다.
 class BankAccountCard extends ConsumerWidget {
@@ -27,7 +28,7 @@ class BankAccountCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final account = ref.watch(bankAccountProvider);
+    final account = ref.watch(bankAccountProvider(CampusScope.member));
     final theme = Theme.of(context);
 
     final c = context.colors;

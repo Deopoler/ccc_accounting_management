@@ -10,7 +10,7 @@ final memberRepositoryProvider = Provider<MemberRepository>(
 );
 
 final membersProvider = FutureProvider.autoDispose<List<Profile>>((ref) async {
-  final campusId = await ref.watch(activeCampusIdProvider.future);
+  final campusId = await ref.watch(adminCampusIdProvider.future);
   if (campusId == null) return const [];
   return ref.watch(memberRepositoryProvider).fetchMembers(campusId);
 });

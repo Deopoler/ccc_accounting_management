@@ -16,6 +16,7 @@ import '../../features/auth/presentation/signup_page.dart';
 import '../../features/auth/presentation/splash_page.dart';
 import '../../features/events/presentation/events_page.dart';
 import '../../features/home/presentation/home_page.dart';
+import '../../features/campus/presentation/admin_campuses_page.dart';
 import '../../features/settings/presentation/admin_settings_page.dart';
 import '../../features/textbooks/presentation/my_orders_page.dart';
 import '../../features/textbooks/presentation/order_complete_page.dart';
@@ -111,6 +112,7 @@ final routerProvider = Provider<GoRouter>((ref) {
                 ],
               ),
               _tab('settings', const AdminSettingsPage()),
+              _tab('campuses', const AdminCampusesPage()),
             ],
           ),
         ],

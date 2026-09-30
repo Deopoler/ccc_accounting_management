@@ -13,7 +13,7 @@ class AdminSettingsPage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final account = ref.watch(bankAccountProvider);
+    final account = ref.watch(bankAccountProvider(CampusScope.admin));
     return AsyncValueView(
       value: account,
       onRetry: () => ref.invalidate(bankAccountProvider),
@@ -62,7 +62,7 @@ class _BankAccountFormState extends ConsumerState<_BankAccountForm> {
       await ref
           .read(settingsRepositoryProvider)
           .saveBankAccount(
-            await ref.requireActiveCampusId(),
+            await ref.requireAdminCampusId(),
             BankAccount(
               bankName: _bank.text,
               accountNumber: _number.text,

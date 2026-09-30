@@ -22,7 +22,7 @@ class AdminEventsPage extends ConsumerWidget {
     try {
       final id = await ref
           .read(eventRepositoryProvider)
-          .createEvent(await ref.requireActiveCampusId(), input);
+          .createEvent(await ref.requireAdminCampusId(), input);
       ref
         ..invalidate(eventsProvider)
         ..invalidate(eventSummariesProvider);
@@ -37,7 +37,7 @@ class AdminEventsPage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final events = ref.watch(eventsProvider);
+    final events = ref.watch(eventsProvider(CampusScope.admin));
     final summaries = ref.watch(eventSummariesProvider);
 
     if (events.hasError || summaries.hasError) {

@@ -13,17 +13,16 @@ final textbookRepositoryProvider = Provider<TextbookRepository>(
   (ref) => TextbookRepository(ref.watch(supabaseProvider)),
 );
 
-final textbooksProvider = FutureProvider.autoDispose<List<Textbook>>((
-  ref,
-) async {
-  final campusId = await ref.watch(activeCampusIdProvider.future);
-  if (campusId == null) return const [];
-  return ref.watch(textbookRepositoryProvider).fetchTextbooks(campusId);
-});
+final textbooksProvider = FutureProvider.autoDispose
+    .family<List<Textbook>, CampusScope>((ref, scope) async {
+      final campusId = await ref.watch(campusIdProvider(scope).future);
+      if (campusId == null) return const [];
+      return ref.watch(textbookRepositoryProvider).fetchTextbooks(campusId);
+    });
 
-final textbookCategoriesProvider =
-    FutureProvider.autoDispose<List<TextbookCategory>>((ref) async {
-      final campusId = await ref.watch(activeCampusIdProvider.future);
+final textbookCategoriesProvider = FutureProvider.autoDispose
+    .family<List<TextbookCategory>, CampusScope>((ref, scope) async {
+      final campusId = await ref.watch(campusIdProvider(scope).future);
       if (campusId == null) return const [];
       return ref.watch(textbookRepositoryProvider).fetchCategories(campusId);
     });

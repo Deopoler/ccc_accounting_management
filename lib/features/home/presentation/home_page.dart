@@ -14,6 +14,7 @@ import '../../textbooks/domain/order_round.dart';
 import '../../textbooks/domain/textbook_order.dart';
 import '../../textbooks/presentation/textbook_providers.dart';
 import '../../textbooks/presentation/widgets/order_widgets.dart';
+import '../../campus/presentation/campus_providers.dart';
 
 /// 대시보드: 내 교재 신청 상태 + 내 이벤트 송금 현황 요약.
 class HomePage extends ConsumerWidget {
@@ -327,7 +328,7 @@ class _EventSummaryCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final events = ref.watch(eventsProvider);
+    final events = ref.watch(eventsProvider(CampusScope.member));
     final payments = ref.watch(myEventPaymentsProvider);
     final theme = Theme.of(context);
 

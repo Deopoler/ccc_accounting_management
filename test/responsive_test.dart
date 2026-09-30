@@ -19,6 +19,8 @@ import 'package:ccc_accounting_management/features/auth/presentation/login_page.
 import 'package:ccc_accounting_management/features/auth/presentation/pending_approval_page.dart';
 import 'package:ccc_accounting_management/features/auth/presentation/signup_page.dart';
 import 'package:ccc_accounting_management/features/campus/data/campus_repository.dart';
+import 'package:ccc_accounting_management/features/campus/presentation/admin_campuses_page.dart';
+import 'package:ccc_accounting_management/features/campus/presentation/campus_switcher.dart';
 import 'package:ccc_accounting_management/features/campus/domain/campus.dart';
 import 'package:ccc_accounting_management/features/campus/presentation/campus_providers.dart';
 import 'package:ccc_accounting_management/features/events/data/event_repository.dart';
@@ -203,11 +205,26 @@ List<EventPayment> _payments(String eventId) => [
 // 가짜 저장소
 // ---------------------------------------------------------------------------
 
+/// 로그인한 사용자. null 이면 첫 번째 회원(캠퍼스 관리자).
+Profile? _signedIn;
+
+final _central = Profile(
+  id: 'u1',
+  campusId: 'k',
+  studentId: '20250133',
+  name: _longName,
+  role: UserRole.centralAdmin,
+  mustChangePassword: false,
+  isApproved: true,
+  createdAt: DateTime(2026),
+);
+
 class _FakeAuth implements AuthRepository {
   @override
   String? get currentUserId => 'u1';
   @override
-  Future<Profile?> fetchProfile(String userId) async => _members.first;
+  Future<Profile?> fetchProfile(String userId) async =>
+      _signedIn ?? _members.first;
   @override
   dynamic noSuchMethod(Invocation i) => super.noSuchMethod(i);
 }
@@ -512,6 +529,70 @@ void main() {
       await tester.tap(find.widgetWithText(TextButton, '취소'));
       await tester.pumpAndSettle();
       expect(_calls, isEmpty);
+    });
+  });
+
+  group('총괄 관리자', () {
+    setUp(() => _signedIn = _central);
+    tearDown(() => _signedIn = null);
+
+    for (final (sizeName, dark) in [
+      ('작은 모바일', false),
+      ('모바일', true),
+      ('태블릿 경계', false),
+      ('데스크톱', false),
+      ('데스크톱', true),
+    ]) {
+      final label = '${dark ? '다크 ' : ''}$sizeName';
+      for (final (path, page) in [
+        ('/admin', const AdminHubPage() as Widget),
+        ('/admin/campuses', const AdminCampusesPage()),
+        ('/admin/members', const AdminMembersPage()),
+      ]) {
+        testWidgets('$label $path', (tester) async {
+          await _pump(
+            tester,
+            _sizes[sizeName]!,
+            path,
+            page,
+            true,
+            theme: dark ? AppTheme.dark() : null,
+          );
+          expect(tester.takeException(), isNull);
+        });
+      }
+    }
+
+    testWidgets('캠퍼스를 바꾸면 관리자 화면 제목에 그 캠퍼스가 붙는다', (tester) async {
+      await _pump(
+        tester,
+        _sizes['데스크톱']!,
+        '/admin/members',
+        const AdminMembersPage(),
+        true,
+      );
+      expect(find.text('회원 관리 · KAIST'), findsOneWidget);
+      // 사이드 메뉴의 캠퍼스 전환
+      await tester.tap(find.byType(DropdownMenu<String>));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('아주 긴 이름의 캠퍼스 (제2캠퍼스 · 국제관)').last);
+      await tester.pumpAndSettle();
+      expect(find.text('회원 관리 · 아주 긴 이름의 캠퍼스 (제2캠퍼스 · 국제관)'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('캠퍼스 관리자에게는 전환 / 캠퍼스 관리 메뉴가 없다', (tester) async {
+      _signedIn = null;
+      await _pump(
+        tester,
+        _sizes['데스크톱']!,
+        '/admin/members',
+        const AdminMembersPage(),
+        true,
+      );
+      expect(find.byType(CampusSwitcher), findsNothing);
+      expect(find.text('캠퍼스 관리'), findsNothing);
+      expect(find.text('회원 관리'), findsWidgets);
     });
   });
 

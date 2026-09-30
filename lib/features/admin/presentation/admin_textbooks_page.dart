@@ -62,7 +62,7 @@ class AdminTextbooksPage extends ConsumerWidget {
       () async => ref
           .read(textbookRepositoryProvider)
           .createCategory(
-            await ref.requireActiveCampusId(),
+            await ref.requireAdminCampusId(),
             name,
             sortOrder: next,
           ),
@@ -159,7 +159,7 @@ class AdminTextbooksPage extends ConsumerWidget {
       ref,
       () async => ref
           .read(textbookRepositoryProvider)
-          .createTextbook(await ref.requireActiveCampusId(), withOrder),
+          .createTextbook(await ref.requireAdminCampusId(), withOrder),
       success: '교재를 추가했습니다.',
     );
   }
@@ -227,8 +227,8 @@ class AdminTextbooksPage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final textbooks = ref.watch(textbooksProvider);
-    final categories = ref.watch(textbookCategoriesProvider);
+    final textbooks = ref.watch(textbooksProvider(CampusScope.admin));
+    final categories = ref.watch(textbookCategoriesProvider(CampusScope.admin));
 
     if (textbooks.hasError || categories.hasError) {
       return ErrorView(

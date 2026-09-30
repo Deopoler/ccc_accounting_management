@@ -21,16 +21,26 @@ final centralCampusOverrideProvider =
 
 class CentralCampusOverride extends Notifier<String?> {
   @override
-  String? build() => null;
+  String? build() {
+    // 로그아웃 / 다른 계정으로 로그인하면 본인 캠퍼스로 돌아간다.
+    ref.watch(currentUserIdProvider);
+    return null;
+  }
 
   void select(String? campusId) => state = campusId;
 }
 
-/// 지금 화면에서 다루는 캠퍼스 id. 로그아웃 상태면 null.
+/// 본인 캠퍼스 id. 회원 화면(교재 신청, 이벤트, 입금 안내)은 항상 이것을 쓴다. 로그아웃 상태면 null.
+final myCampusIdProvider = FutureProvider<String?>((ref) async {
+  final profile = await ref.watch(currentProfileProvider.future);
+  return profile?.campusId;
+});
+
+/// 관리자 화면에서 다루는 캠퍼스 id. 로그아웃 상태면 null.
 ///
-/// 회원 / 캠퍼스 관리자는 본인 캠퍼스(서버 RLS 도 그것만 허용한다).
-/// 총괄 관리자는 모든 캠퍼스를 볼 수 있으므로, 목록이 섞이지 않게 모든 조회를 이 캠퍼스로 거른다.
-final activeCampusIdProvider = FutureProvider<String?>((ref) async {
+/// 캠퍼스 관리자는 본인 캠퍼스(서버 RLS 도 그것만 허용한다).
+/// 총괄 관리자는 고른 캠퍼스(기본 본인). 모든 캠퍼스를 볼 수 있으므로, 목록이 섞이지 않게 모든 조회를 이 캠퍼스로 거른다.
+final adminCampusIdProvider = FutureProvider<String?>((ref) async {
   final profile = await ref.watch(currentProfileProvider.future);
   if (profile == null) return null;
   final override = ref.watch(centralCampusOverrideProvider);
@@ -39,10 +49,20 @@ final activeCampusIdProvider = FutureProvider<String?>((ref) async {
       : profile.campusId;
 });
 
-extension ActiveCampusRef on WidgetRef {
-  /// 새 교재 / 카테고리 / 이벤트를 만들 캠퍼스. 없으면 오류.
-  Future<String> requireActiveCampusId() async {
-    final id = await read(activeCampusIdProvider.future);
+/// 회원 화면 / 관리자 화면 중 어느 쪽 캠퍼스 기준인지. (총괄 관리자가 캠퍼스를 바꾸면 관리자 화면만 바뀐다)
+enum CampusScope { member, admin }
+
+final campusIdProvider = FutureProvider.family<String?, CampusScope>(
+  (ref, scope) => ref.watch(
+    (scope == CampusScope.member ? myCampusIdProvider : adminCampusIdProvider)
+        .future,
+  ),
+);
+
+extension AdminCampusRef on WidgetRef {
+  /// 관리자 화면에서 새 교재 / 카테고리 / 이벤트를 만들거나 계좌를 저장할 캠퍼스. 없으면 오류.
+  Future<String> requireAdminCampusId() async {
+    final id = await read(adminCampusIdProvider.future);
     if (id == null || id.isEmpty) {
       throw const AppException('캠퍼스 정보를 불러오지 못했습니다. 다시 로그인해 주세요.');
     }

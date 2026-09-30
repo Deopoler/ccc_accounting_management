@@ -18,7 +18,7 @@ class AdminOrdersNotifier extends AsyncNotifier<List<TextbookOrder>> {
 
   @override
   Future<List<TextbookOrder>> build() async {
-    final campusId = await ref.watch(activeCampusIdProvider.future);
+    final campusId = await ref.watch(adminCampusIdProvider.future);
     if (campusId == null) return const [];
     return ref
         .watch(textbookRepositoryProvider)
@@ -89,7 +89,7 @@ class AdminOrdersNotifier extends AsyncNotifier<List<TextbookOrder>> {
     } finally {
       // 다시 불러오기가 실패해도 원래 오류를 가리지 않게 한다.
       try {
-        final campusId = await ref.read(activeCampusIdProvider.future);
+        final campusId = await ref.read(adminCampusIdProvider.future);
         final repo = ref.read(textbookRepositoryProvider);
         final fresh = campusId == null
             ? const <TextbookOrder>[]

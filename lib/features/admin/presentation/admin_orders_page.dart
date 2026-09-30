@@ -16,6 +16,7 @@ import '../../textbooks/presentation/textbook_providers.dart';
 import '../../textbooks/presentation/widgets/order_widgets.dart';
 import '../domain/csv_exports.dart';
 import 'admin_order_providers.dart';
+import '../../campus/presentation/campus_providers.dart';
 
 /// 회차 선택: 0 = 이번 회차, n = n회차 전, [_allRounds] = 전체.
 const _allRounds = -1;
@@ -200,7 +201,7 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
   @override
   Widget build(BuildContext context) {
     final round = ref.watch(currentRoundProvider);
-    final textbooks = ref.watch(textbooksProvider);
+    final textbooks = ref.watch(textbooksProvider(CampusScope.admin));
 
     if (round.hasError) {
       return ErrorView(

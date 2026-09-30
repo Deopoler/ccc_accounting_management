@@ -10,11 +10,12 @@ final eventRepositoryProvider = Provider<EventRepository>(
   (ref) => EventRepository(ref.watch(supabaseProvider)),
 );
 
-final eventsProvider = FutureProvider.autoDispose<List<Event>>((ref) async {
-  final campusId = await ref.watch(activeCampusIdProvider.future);
-  if (campusId == null) return const [];
-  return ref.watch(eventRepositoryProvider).fetchEvents(campusId);
-});
+final eventsProvider = FutureProvider.autoDispose
+    .family<List<Event>, CampusScope>((ref, scope) async {
+      final campusId = await ref.watch(campusIdProvider(scope).future);
+      if (campusId == null) return const [];
+      return ref.watch(eventRepositoryProvider).fetchEvents(campusId);
+    });
 
 final eventProvider = FutureProvider.autoDispose.family<Event?, String>(
   (ref, id) => ref.watch(eventRepositoryProvider).fetchEvent(id),

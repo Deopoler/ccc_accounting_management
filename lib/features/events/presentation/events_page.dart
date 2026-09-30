@@ -10,6 +10,7 @@ import '../../auth/presentation/auth_providers.dart';
 import '../domain/event.dart';
 import 'event_providers.dart';
 import 'widgets/event_widgets.dart';
+import '../../campus/presentation/campus_providers.dart';
 
 /// 회원: 이벤트 목록과 내 송금 여부. 송금은 이벤트마다 따로 한다.
 class EventsPage extends ConsumerWidget {
@@ -17,7 +18,7 @@ class EventsPage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final events = ref.watch(eventsProvider);
+    final events = ref.watch(eventsProvider(CampusScope.member));
     final payments = ref.watch(myEventPaymentsProvider);
 
     if (events.hasError || payments.hasError) {
