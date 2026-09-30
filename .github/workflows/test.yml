@@ -1,0 +1,35 @@
+# 공통 테스트 (analyze · flutter test · DB 권한 테스트).
+# 운영 배포(deploy-pages.yml)와 테스트 서버 적용(staging.yml)이 먼저 이것을 통과해야 DB 를 바꾼다.
+name: Test
+
+on:
+  workflow_call:
+
+env:
+  FLUTTER_VERSION: '3.47.5'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: DB 권한 테스트 (PGlite)
+        working-directory: supabase/tests
+        run: |
+          npm install
+          npm test
