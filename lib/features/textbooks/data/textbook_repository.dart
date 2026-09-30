@@ -167,7 +167,11 @@ class TextbookRepository {
   Future<List<TextbookOrder>> fetchAllOrders({DateTime? roundStart}) async {
     var query = _client
         .from('textbook_orders')
-        .select('$_orderColumns, profiles(student_id, name)');
+        // shipped_by 도 profiles 를 참조하므로 신청자 FK 를 지정한다.
+        .select(
+          '$_orderColumns, '
+          'profiles:profiles!textbook_orders_user_id_fkey(student_id, name)',
+        );
     if (roundStart != null) {
       query = query.eq('round_start', toDateOnly(roundStart));
     }
