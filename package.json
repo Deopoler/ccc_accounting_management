@@ -1,0 +1,7 @@
+{
+  "private": true,
+  "description": "로컬 Supabase CLI (npx supabase). 앱 / 테스트 의존성이 아니다.",
+  "devDependencies": {
+    "supabase": "^2.118.0"
+  }
+}

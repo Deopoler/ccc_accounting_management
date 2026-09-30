@@ -51,6 +51,7 @@ test/                  Flutter 단위 / 반응형 레이아웃 테스트
 
 ```sh
 flutter pub get
+npm install        # 선택: 루트 package.json 의 Supabase CLI (npx supabase 로 실행)
 ```
 
 ## 2. Supabase 설정
