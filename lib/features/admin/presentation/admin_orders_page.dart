@@ -125,6 +125,59 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
     }
   }
 
+  /// 현재 목록(필터 적용)의 대상 전체를 체크/해제한다. 건수를 보여 주고 확인받는다.
+  Future<void> _bulk(
+    DateTime? round,
+    List<TextbookOrder> orders,
+    _BulkField field,
+    bool value,
+  ) async {
+    final targets = orders
+        .where((o) => field.isTarget(o) && field.isChecked(o) != value)
+        .toList();
+    if (targets.isEmpty) return;
+
+    // 해제하면 함께 지워지는 기록을 알린다.
+    final lost = switch ((field, value)) {
+      (_BulkField.shipped, false) =>
+        targets.where((o) => o.receivedAt != null).length,
+      (_BulkField.received, false) =>
+        targets.where((o) => !o.receivedByAdmin).length,
+      _ => 0,
+    };
+    final lostNote = lost == 0
+        ? ''
+        : field == _BulkField.shipped
+        ? '\n수령 기록 $lost건도 함께 초기화됩니다.'
+        : '\n회원이 직접 확인한 기록 $lost건도 지워집니다.';
+    final action = '${field.label} ${value ? '체크' : '해제'}';
+
+    final ok = await showConfirmDialog(
+      context,
+      title: '$action (${targets.length}건)',
+      message: '현재 목록에서 ${targets.length}건을 $action합니다.$lostNote',
+      confirmLabel: action,
+      destructive: !value,
+    );
+    if (!ok || !mounted) return;
+
+    final ids = [for (final o in targets) o.id];
+    final notifier = ref.read(adminOrdersProvider(round).notifier);
+    setState(() => _busy.addAll(ids));
+    try {
+      await switch (field) {
+        _BulkField.paid => notifier.bulkSetPaid(ids, paid: value),
+        _BulkField.shipped => notifier.bulkSetShipped(ids, shipped: value),
+        _BulkField.received => notifier.bulkSetReceived(ids, received: value),
+      };
+      if (mounted) showSnack(context, '${ids.length}건을 $action했습니다.');
+    } catch (e) {
+      if (mounted) showErrorSnack(context, e);
+    } finally {
+      if (mounted) setState(() => _busy.removeAll(ids));
+    }
+  }
+
   void _export(
     List<TextbookOrder> orders,
     DateTime? roundStart, {
@@ -223,6 +276,7 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
                           onStatus: (o, s) => _setStatus(roundStart, o, s),
                           onShipped: (o, v) => _setShipped(roundStart, o, v),
                           onReceived: (o, v) => _setReceived(roundStart, o, v),
+                          onBulk: (f, v) => _bulk(roundStart, filtered, f, v),
                         ),
                     ],
                   );
@@ -539,6 +593,110 @@ class _StatCard extends StatelessWidget {
 
 typedef _OnStatus = void Function(TextbookOrder order, OrderStatus status);
 typedef _OnToggle = void Function(TextbookOrder order, bool value);
+typedef _OnBulk = void Function(_BulkField field, bool value);
+
+/// 전체 체크할 수 있는 항목. 취소된 신청은 모두 대상이 아니다.
+enum _BulkField {
+  paid('입금확인'),
+  shipped('배송'),
+  received('수령');
+
+  const _BulkField(this.label);
+
+  final String label;
+
+  bool isTarget(TextbookOrder o) =>
+      o.status != OrderStatus.cancelled &&
+      (this != _BulkField.received || o.isShipped);
+
+  bool isChecked(TextbookOrder o) => switch (this) {
+    _BulkField.paid => o.status == OrderStatus.paid,
+    _BulkField.shipped => o.isShipped,
+    _BulkField.received => o.receivedAt != null,
+  };
+
+  /// 대상이 모두 체크됐으면 true, 하나도 없으면 false, 일부면 null. 대상이 없으면 false.
+  bool? stateOf(Iterable<TextbookOrder> orders) {
+    final targets = orders.where(isTarget);
+    if (targets.isEmpty) return false;
+    final checked = targets.where(isChecked).length;
+    if (checked == 0) return false;
+    return checked == targets.length ? true : null;
+  }
+}
+
+/// 전체 체크박스. 모두 체크된 상태에서 누르면 전체 해제, 그 외에는 전체 체크.
+class _BulkCheckbox extends StatelessWidget {
+  const _BulkCheckbox({
+    required this.field,
+    required this.orders,
+    required this.enabled,
+    required this.onBulk,
+  });
+
+  final _BulkField field;
+  final List<TextbookOrder> orders;
+  final bool enabled;
+  final _OnBulk onBulk;
+
+  @override
+  Widget build(BuildContext context) {
+    final state = field.stateOf(orders);
+    final hasTargets = orders.any(field.isTarget);
+    return Tooltip(
+      message: '${field.label} 전체 ${state == true ? '해제' : '체크'}',
+      child: Checkbox(
+        tristate: true,
+        value: state,
+        onChanged: !enabled || !hasTargets
+            ? null
+            : (_) => onBulk(field, state != true),
+      ),
+    );
+  }
+}
+
+/// 모바일용 전체 체크 줄 (표 머리행 대신).
+class _BulkBar extends StatelessWidget {
+  const _BulkBar({
+    required this.orders,
+    required this.enabled,
+    required this.onBulk,
+  });
+
+  final List<TextbookOrder> orders;
+  final bool enabled;
+  final _OnBulk onBulk;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return Padding(
+      padding: const EdgeInsets.only(left: 4, bottom: 8),
+      child: Wrap(
+        crossAxisAlignment: WrapCrossAlignment.center,
+        spacing: 4,
+        children: [
+          Text('전체', style: TextStyle(fontSize: 13, color: c.textSecondary)),
+          for (final f in _BulkField.values)
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _BulkCheckbox(
+                  field: f,
+                  orders: orders,
+                  enabled: enabled,
+                  onBulk: onBulk,
+                ),
+                Text(f.label),
+                const SizedBox(width: 8),
+              ],
+            ),
+        ],
+      ),
+    );
+  }
+}
 
 String _itemsText(TextbookOrder o) =>
     o.items.map((i) => '${i.title} ×${i.quantity}').join(', ');
@@ -550,6 +708,7 @@ class _OrdersList extends StatelessWidget {
     required this.onStatus,
     required this.onShipped,
     required this.onReceived,
+    required this.onBulk,
   });
 
   final List<TextbookOrder> orders;
@@ -557,9 +716,26 @@ class _OrdersList extends StatelessWidget {
   final _OnStatus onStatus;
   final _OnToggle onShipped;
   final _OnToggle onReceived;
+  final _OnBulk onBulk;
 
   @override
   Widget build(BuildContext context) {
+    // 처리 중인 행이 있으면 전체 체크를 막는다.
+    final bulkEnabled = busy.isEmpty;
+    DataColumn bulkColumn(_BulkField f) => DataColumn(
+      label: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(f.label),
+          _BulkCheckbox(
+            field: f,
+            orders: orders,
+            enabled: bulkEnabled,
+            onBulk: onBulk,
+          ),
+        ],
+      ),
+    );
     return LayoutBuilder(
       builder: (context, constraints) {
         if (constraints.maxWidth >= 760) {
@@ -570,27 +746,25 @@ class _OrdersList extends StatelessWidget {
               child: ConstrainedBox(
                 constraints: BoxConstraints(minWidth: constraints.maxWidth),
                 child: DataTable(
-                  columnSpacing: 20,
-                  columns: const [
-                    DataColumn(label: Text('학번')),
-                    DataColumn(label: Text('이름')),
-                    DataColumn(label: Text('교재')),
-                    DataColumn(label: Text('금액'), numeric: true),
-                    DataColumn(label: Text('상태')),
-                    DataColumn(label: Text('신청일')),
-                    DataColumn(label: Text('입금확인')),
-                    DataColumn(label: Text('배송')),
-                    DataColumn(label: Text('수령')),
+                  // 체크 열까지 가로 스크롤 없이 보이도록 열을 좁게 둔다.
+                  columnSpacing: 12,
+                  horizontalMargin: 16,
+                  columns: [
+                    const DataColumn(label: Text('회원')),
+                    const DataColumn(label: Text('교재')),
+                    const DataColumn(label: Text('금액'), numeric: true),
+                    const DataColumn(label: Text('상태')),
+                    const DataColumn(label: Text('신청일')),
+                    for (final f in _BulkField.values) bulkColumn(f),
                   ],
                   rows: [
                     for (final o in orders)
                       DataRow(
                         cells: [
-                          DataCell(Text(o.member?.studentId ?? '-')),
-                          DataCell(Text(o.member?.name ?? '-')),
+                          DataCell(_MemberCell(o.member)),
                           DataCell(
                             ConstrainedBox(
-                              constraints: const BoxConstraints(maxWidth: 320),
+                              constraints: const BoxConstraints(maxWidth: 180),
                               child: Text(
                                 _itemsText(o),
                                 maxLines: 2,
@@ -606,7 +780,7 @@ class _OrdersList extends StatelessWidget {
                               onStatus: onStatus,
                             ),
                           ),
-                          DataCell(Text(formatDateTime(o.createdAt))),
+                          DataCell(Text(formatShortDateTime(o.createdAt))),
                           DataCell(
                             _PaidCheckbox(
                               order: o,
@@ -645,6 +819,7 @@ class _OrdersList extends StatelessWidget {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            _BulkBar(orders: orders, enabled: bulkEnabled, onBulk: onBulk),
             for (final o in orders) ...[
               _OrderCard(
                 order: o,
@@ -658,6 +833,35 @@ class _OrdersList extends StatelessWidget {
           ],
         );
       },
+    );
+  }
+}
+
+/// 표의 회원 칸: 이름 + 학번 두 줄. 긴 이름은 말줄임.
+class _MemberCell extends StatelessWidget {
+  const _MemberCell(this.member);
+
+  final OrderMember? member;
+
+  @override
+  Widget build(BuildContext context) {
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 110),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            member?.name ?? '-',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          Text(
+            member?.studentId ?? '',
+            style: TextStyle(fontSize: 12, color: context.colors.textSecondary),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -837,7 +1041,10 @@ class _ReceiptText extends StatelessWidget {
         ? '-'
         : at == null
         ? '미수령'
-        : [formatDateTime(at), if (order.receivedByAdmin) '관리자'].join(' · ');
+        : [
+            formatShortDateTime(at),
+            if (order.receivedByAdmin) '관리자',
+          ].join(' · ');
     return Text(
       text,
       style: TextStyle(

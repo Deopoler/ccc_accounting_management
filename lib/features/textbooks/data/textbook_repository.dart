@@ -211,6 +211,31 @@ class TextbookRepository {
     );
   }
 
+  // ---------------------------------------------------------------- 관리자 일괄 처리
+
+  /// 여러 신청의 상태를 한 번에 바꾼다. (한 번의 update 라 전부 성공하거나 전부 실패)
+  Future<void> updateOrdersStatus(List<String> orderIds, OrderStatus status) =>
+      _updateMany(orderIds, {'status': status.name});
+
+  /// 여러 신청의 배송 여부를 한 번에 바꾼다. 시각 기록 / 수령 초기화는 트리거가 한다.
+  Future<void> setShippedMany(List<String> orderIds, {required bool shipped}) =>
+      _updateMany(orderIds, {'is_shipped': shipped});
+
+  Future<void> _updateMany(
+    List<String> orderIds,
+    Map<String, Object> values,
+  ) async {
+    if (orderIds.isEmpty) return;
+    final rows = await _client
+        .from('textbook_orders')
+        .update(values)
+        .inFilter('id', orderIds)
+        .select('id');
+    if (rows.length != orderIds.length) {
+      throw const AppException('일부 신청을 처리하지 못했습니다. 목록을 새로 불러와 확인해 주세요.');
+    }
+  }
+
   /// 관리자 수령 체크/해제. 서버가 기록한 수령 시각을 돌려준다. (해제하면 null)
   /// 배송된 신청만 체크할 수 있다. (서버 RPC 가 강제)
   Future<DateTime?> setReceived(

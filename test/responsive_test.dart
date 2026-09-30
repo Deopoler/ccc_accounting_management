@@ -41,6 +41,7 @@ import 'package:flutter_riverpod/misc.dart' show Override;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:intl/intl.dart';
+import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
 // ---------------------------------------------------------------------------
@@ -223,8 +224,25 @@ class _FakeTextbooks implements TextbookRepository {
   Future<List<TextbookOrder>> fetchAllOrders({DateTime? roundStart}) async =>
       _orders;
   @override
+  Future<void> updateOrdersStatus(List<String> ids, OrderStatus status) async =>
+      _calls.add('status ${status.name} ${ids.join(',')}');
+  @override
+  Future<void> setShippedMany(
+    List<String> ids, {
+    required bool shipped,
+  }) async => _calls.add('shipped $shipped ${ids.join(',')}');
+  @override
+  Future<DateTime?> setReceived(String id, {required bool received}) async {
+    _calls.add('received $received $id');
+    return received ? DateTime(2026, 10, 9) : null;
+  }
+
+  @override
   dynamic noSuchMethod(Invocation i) => super.noSuchMethod(i);
 }
+
+/// 관리자 일괄 처리 테스트에서 저장소에 보낸 요청 기록.
+final _calls = <String>[];
 
 class _FakeEvents implements EventRepository {
   @override
@@ -358,6 +376,12 @@ void main() {
   setUpAll(() async {
     Intl.defaultLocale = 'ko_KR';
     await initializeDateFormatting('ko_KR');
+    // 테스트 기본 폰트는 모든 글자를 정사각형으로 그려 폭이 실제보다 훨씬 넓다.
+    // 앱에 포함한 Pretendard 를 실제로 로드해 넘침 / 폭 검사를 현실에 맞춘다.
+    final pretendard = FontLoader(AppTheme.fontFamily)
+      ..addFont(rootBundle.load('assets/fonts/Pretendard-Regular.ttf'))
+      ..addFont(rootBundle.load('assets/fonts/Pretendard-Bold.ttf'));
+    await pretendard.load();
   });
 
   for (final MapEntry(key: sizeName, value: size) in _sizes.entries) {
@@ -402,6 +426,95 @@ void main() {
       }
     });
   }
+
+  group('신청 현황 전체 체크', () {
+    setUp(_calls.clear);
+
+    // 데이터: o1 신청, o2 입금확인, o3 취소, o4 배송됨, o5 수령 완료
+    Future<void> tapAndConfirm(
+      WidgetTester tester,
+      String tooltip,
+      String confirmTitle,
+    ) async {
+      await tester.ensureVisible(find.byTooltip(tooltip));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip(tooltip));
+      await tester.pumpAndSettle();
+      expect(find.text(confirmTitle), findsOneWidget);
+      await tester.tap(
+        find.widgetWithText(FilledButton, confirmTitle.split(' (').first),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    for (final sizeName in ['데스크톱', '모바일']) {
+      testWidgets('$sizeName: 취소 건을 빼고 바뀌어야 할 신청만 처리한다', (tester) async {
+        await _pump(
+          tester,
+          _sizes[sizeName]!,
+          '/admin/orders',
+          const AdminOrdersPage(),
+          true,
+        );
+
+        // 배송: 4건 중 2건 배송 → 일부 체크 상태, 누르면 나머지(o1, o2)를 배송
+        await tapAndConfirm(tester, '배송 전체 체크', '배송 체크 (2건)');
+        // 입금확인: o2, o4, o5 입금확인 → o1 만
+        await tapAndConfirm(tester, '입금확인 전체 체크', '입금확인 체크 (1건)');
+        // 수령: 배송된 o4, o5 중 o4 만
+        await tapAndConfirm(tester, '수령 전체 체크', '수령 체크 (1건)');
+
+        expect(_calls, [
+          'shipped true o1,o2',
+          'status paid o1',
+          'received true o4',
+        ]);
+        expect(tester.takeException(), isNull);
+      });
+    }
+
+    testWidgets('확인창에서 취소하면 아무것도 바꾸지 않는다', (tester) async {
+      await _pump(
+        tester,
+        _sizes['데스크톱']!,
+        '/admin/orders',
+        const AdminOrdersPage(),
+        true,
+      );
+      await tester.ensureVisible(find.byTooltip('배송 전체 체크'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('배송 전체 체크'));
+      await tester.pumpAndSettle();
+      expect(find.text('배송 체크 (2건)'), findsOneWidget);
+      await tester.tap(find.widgetWithText(TextButton, '취소'));
+      await tester.pumpAndSettle();
+      expect(_calls, isEmpty);
+    });
+  });
+
+  testWidgets('데스크톱 신청 현황 표는 가로 스크롤 없이 모든 열이 보인다', (tester) async {
+    await _pump(
+      tester,
+      _sizes['데스크톱']!,
+      '/admin/orders',
+      const AdminOrdersPage(),
+      true,
+    );
+    final scrollable = find.descendant(
+      of: find.ancestor(
+        of: find.byType(DataTable),
+        matching: find.byType(SingleChildScrollView),
+      ),
+      matching: find.byType(Scrollable),
+    );
+    final position = tester.state<ScrollableState>(scrollable.first).position;
+    expect(position.axis, Axis.horizontal);
+    expect(
+      position.maxScrollExtent,
+      0,
+      reason: '넘친 폭 ${position.maxScrollExtent}',
+    );
+  });
 
   testWidgets('데스크톱 신청 현황은 표, 모바일은 카드', (tester) async {
     await _pump(

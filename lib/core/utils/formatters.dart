@@ -12,3 +12,7 @@ String formatDate(DateTime date) =>
 /// 로컬(한국) 시간 기준 `2026.09.29 14:05`
 String formatDateTime(DateTime date) =>
     DateFormat('yyyy.MM.dd HH:mm').format(date.toLocal());
+
+/// 로컬(한국) 시간 기준 `09.29 14:05` (연도가 문맥상 분명한 표 등)
+String formatShortDateTime(DateTime date) =>
+    DateFormat('MM.dd HH:mm').format(date.toLocal());

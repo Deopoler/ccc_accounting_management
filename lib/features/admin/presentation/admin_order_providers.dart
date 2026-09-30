@@ -52,6 +52,47 @@ class AdminOrdersNotifier extends AsyncNotifier<List<TextbookOrder>> {
     ]);
   }
 
+  /// 일괄 처리. 여러 행이 바뀌므로 끝나면(실패해도) 목록을 다시 불러온다.
+  Future<void> bulkSetPaid(List<String> ids, {required bool paid}) => _bulk(
+    () => ref
+        .read(textbookRepositoryProvider)
+        .updateOrdersStatus(
+          ids,
+          paid ? OrderStatus.paid : OrderStatus.requested,
+        ),
+  );
+
+  Future<void> bulkSetShipped(List<String> ids, {required bool shipped}) =>
+      _bulk(
+        () => ref
+            .read(textbookRepositoryProvider)
+            .setShippedMany(ids, shipped: shipped),
+      );
+
+  /// 수령은 행마다 RPC 로 처리한다. (서버가 배송 여부 / 권한을 행마다 검사)
+  Future<void> bulkSetReceived(List<String> ids, {required bool received}) =>
+      _bulk(() async {
+        final repo = ref.read(textbookRepositoryProvider);
+        for (final id in ids) {
+          await repo.setReceived(id, received: received);
+        }
+      });
+
+  Future<void> _bulk(Future<void> Function() action) async {
+    try {
+      await action();
+    } finally {
+      // 다시 불러오기가 실패해도 원래 오류를 가리지 않게 한다.
+      try {
+        final repo = ref.read(textbookRepositoryProvider);
+        final fresh = await repo.fetchAllOrders(roundStart: roundStart);
+        if (ref.mounted) state = AsyncData(fresh);
+      } catch (_) {
+        if (ref.mounted) ref.invalidateSelf();
+      }
+    }
+  }
+
   /// 관리자 수령 체크/해제. 서버가 기록한 시각으로 해당 행만 바꾼다.
   Future<void> setReceived(String orderId, {required bool received}) async {
     final at = await ref
