@@ -23,20 +23,21 @@ let inactiveBook;
 
 before(async () => {
   db = await createDb();
-  admin = await createUser(db, { studentId: '20200001', name: '관리자', role: 'admin' });
+  admin = await createUser(db, { studentId: '20200001', name: '관리자', role: 'campus_admin' });
   alice = await createUser(db, { studentId: '20240001', name: '앨리스' });
   bob = await createUser(db, { studentId: '20240002', name: '밥' });
 
   const { rows } = await db.query(`
-    insert into public.textbooks (title, price, is_active) values
-      ('교재 A', 10000, true), ('교재 B', 7000, true), ('비활성 교재', 5000, false)
+    insert into public.textbooks (campus_id, title, price, is_active)
+    select (select id from public.campuses where code = 'kaist'), t, p, a from (values
+      ('교재 A', 10000, true), ('교재 B', 7000, true), ('비활성 교재', 5000, false)) v (t, p, a)
     returning id`);
   [bookA, bookB, inactiveBook] = rows.map((r) => r.id);
 });
 
 describe('anon', () => {
   test('어떤 테이블도 조회할 수 없다', async () => {
-    for (const t of ['profiles', 'textbooks', 'textbook_orders', 'events', 'event_payments', 'app_settings']) {
+    for (const t of ['profiles', 'textbooks', 'textbook_orders', 'events', 'event_payments', 'app_settings', 'campuses']) {
       await assertDenied(asAnon(db, `select * from public.${t}`));
     }
   });
@@ -60,7 +61,7 @@ describe('profiles', () => {
   test('회원은 본인 role / 플래그를 바꿀 수 없다', async () => {
     // 관리자 비밀번호 초기화 상황
     await db.query('update public.profiles set must_change_password = true where id = $1', [alice]);
-    const r1 = await asUser(db, alice, `update public.profiles set role = 'admin' where id = $1`, [alice]);
+    const r1 = await asUser(db, alice, `update public.profiles set role = 'campus_admin' where id = $1`, [alice]);
     assert.equal(r1.affectedRows, 0);
     const r2 = await asUser(db, alice, `update public.profiles set must_change_password = false where id = $1`, [alice]);
     assert.equal(r2.affectedRows, 0);
@@ -106,11 +107,11 @@ describe('교재', () => {
     assert.equal(rows.length, 3);
     const r = await asUser(db, alice, 'update public.textbooks set price = 0');
     assert.equal(r.affectedRows, 0);
-    await assert.rejects(asUser(db, alice, `insert into public.textbooks (title, price) values ('x', 1)`));
+    await assert.rejects(asUser(db, alice, `insert into public.textbooks (campus_id, title, price) values ((select id from public.campuses where code = 'kaist'), 'x', 1)`));
   });
 
   test('관리자는 교재를 추가/수정할 수 있다', async () => {
-    const { rows } = await asUser(db, admin, `insert into public.textbooks (title, price) values ('임시', 1000) returning id`);
+    const { rows } = await asUser(db, admin, `insert into public.textbooks (campus_id, title, price) values ((select id from public.campuses where code = 'kaist'), '임시', 1000) returning id`);
     const r = await asUser(db, admin, 'update public.textbooks set price = 2000 where id = $1', [rows[0].id]);
     assert.equal(r.affectedRows, 1);
     await asUser(db, admin, 'delete from public.textbooks where id = $1', [rows[0].id]);
@@ -244,7 +245,7 @@ describe('이벤트 송금', () => {
 
   before(async () => {
     const { rows } = await asUser(db, admin, `
-      insert into public.events (title, amount, due_date) values ('수련회', 50000, current_date + 30) returning id`);
+      insert into public.events (campus_id, title, amount, due_date) values ((select id from public.campuses where code = 'kaist'), '수련회', 50000, current_date + 30) returning id`);
     eventId = rows[0].id;
   });
 
@@ -318,14 +319,16 @@ describe('app_settings', () => {
     assert.equal(r.affectedRows, 0);
   });
 
-  test('관리자는 계좌 정보를 수정할 수 있다', async () => {
+  test('계좌는 캠퍼스로 옮겨졌다: 이전 설정은 총괄 관리자만 수정한다', async () => {
     const r = await asUser(db, admin, `update public.app_settings set value = '123-456' where key = 'account_number'`);
-    assert.equal(r.affectedRows, 1);
+    assert.equal(r.affectedRows, 0);
+    const c = await asUser(db, admin, `update public.campuses set account_number = '123-456' where code = 'kaist'`);
+    assert.equal(c.affectedRows, 1);
   });
 });
 
 describe('내부 함수', () => {
-  test('private 스키마 함수는 is_admin 외에 호출할 수 없다', async () => {
+  test('private 스키마 내부 함수는 호출할 수 없다', async () => {
     await assertDenied(asUser(db, alice, `select private.replace_order_items(gen_random_uuid(), '[]'::jsonb)`));
     await assertDenied(asUser(db, alice, `select private.lock_own_editable_order(gen_random_uuid())`));
   });
@@ -335,7 +338,7 @@ describe('이벤트 개인별 금액', () => {
   let ev;
 
   before(async () => {
-    ev = (await asUser(db, admin, `insert into public.events (title, amount) values ('MT', 30000) returning id`)).rows[0].id;
+    ev = (await asUser(db, admin, `insert into public.events (campus_id, title, amount) values ((select id from public.campuses where code = 'kaist'), 'MT', 30000) returning id`)).rows[0].id;
     await asUser(db, admin, `insert into public.event_payments (event_id, user_id) values ($1, $2), ($1, $3)`, [ev, alice, bob]);
   });
 
@@ -373,7 +376,7 @@ describe('이벤트 개인별 금액', () => {
 describe('이벤트 입금자명', () => {
   test('관리자는 입금자명 형식을 지정할 수 있다', async () => {
     const { rows } = await asUser(db, admin,
-      `insert into public.events (title, amount, deposit_name) values ('MT2', 1000, '{이름}MT') returning deposit_name`);
+      `insert into public.events (campus_id, title, amount, deposit_name) values ((select id from public.campuses where code = 'kaist'), 'MT2', 1000, '{이름}MT') returning deposit_name`);
     assert.equal(rows[0].deposit_name, '{이름}MT');
   });
 
@@ -395,7 +398,7 @@ describe('교재 카테고리', () => {
 
   test('관리자는 카테고리를 만들고 교재를 넣을 수 있다', async () => {
     categoryId = (await asUser(db, admin,
-      `insert into public.textbook_categories (name, sort_order) values ('성경공부', 1) returning id`)).rows[0].id;
+      `insert into public.textbook_categories (campus_id, name, sort_order) values ((select id from public.campuses where code = 'kaist'), '성경공부', 1) returning id`)).rows[0].id;
     const r = await asUser(db, admin,
       `update public.textbooks set category_id = $1 where title = '교재 A'`, [categoryId]);
     assert.equal(r.affectedRows, 1);
@@ -404,7 +407,7 @@ describe('교재 카테고리', () => {
   test('회원은 카테고리를 볼 수 있지만 만들거나 바꿀 수 없다', async () => {
     const { rows } = await asUser(db, alice, 'select name from public.textbook_categories');
     assert.deepEqual(rows.map((r) => r.name), ['성경공부']);
-    await assert.rejects(asUser(db, alice, `insert into public.textbook_categories (name) values ('x')`));
+    await assert.rejects(asUser(db, alice, `insert into public.textbook_categories (campus_id, name) values ((select id from public.campuses where code = 'kaist'), 'x')`));
     const r = await asUser(db, alice, `update public.textbook_categories set name = 'x'`);
     assert.equal(r.affectedRows, 0);
     const r2 = await asUser(db, alice, `update public.textbooks set category_id = null`);
@@ -425,8 +428,8 @@ describe('교재 카테고리', () => {
   });
 
   test('이름이 비었거나 중복이면 거부된다', async () => {
-    await assert.rejects(asUser(db, admin, `insert into public.textbook_categories (name) values ('  ')`));
-    await assert.rejects(asUser(db, admin, `insert into public.textbook_categories (name) values ('성경공부')`));
+    await assert.rejects(asUser(db, admin, `insert into public.textbook_categories (campus_id, name) values ((select id from public.campuses where code = 'kaist'), '  ')`));
+    await assert.rejects(asUser(db, admin, `insert into public.textbook_categories (campus_id, name) values ((select id from public.campuses where code = 'kaist'), '성경공부')`));
   });
 });
 

@@ -68,7 +68,11 @@ Dashboard > **Authentication** 에서
 
 ### 2-3. 스키마 / RLS 적용
 
+평소에는 **CI 가 자동으로 적용**한다. ([5. 배포](#5-배포-github-pages), [3-1 테스트 서버](#3-1-테스트-서버-staging))
+새 프로젝트를 처음 만들 때만 아래처럼 직접 적용한다.
+
 **SQL Editor**: [supabase/migrations/](supabase/migrations/) 의 파일을 **이름 순서대로** 하나씩 붙여넣고 실행한다.
+SQL Editor 로 적용했다면 CI 를 쓰기 전에 [적용 이력 맞추기](#적용-이력-맞추기-sql-editor-로-적용해-온-db)를 한다.
 
 1. `20260929000000_init.sql` — 스키마 / RLS / 교재 신청 RPC
 2. `20260930000000_self_signup_approval.sql` — 자유 가입 + 관리자 승인
@@ -80,25 +84,25 @@ Dashboard > **Authentication** 에서
 8. `20261006000000_order_round_wed_9am.sql` — 신청 마감을 수요일 오전 9시로
 9. `20261007000000_order_delivery.sql` — 교재 배송 / 수령 확인
 10. `20261008000000_admin_order_received.sql` — 관리자 수령 처리 / 확인자 기록
+11. `20261009000000_campuses.sql` — 캠퍼스 / 역할(회원·캠퍼스 관리자·총괄 관리자) / 캠퍼스별 RLS.
+    회원이 있는 DB 에서는 학번 20250133(KAIST) 계정이 있어야 적용된다.
 
-**또는 CLI**:
+**또는 CLI** (접속 문자열은 [CLI 로 적용할 때](#cli-로-적용할-때) 참고):
 
 ```sh
-npx supabase init          # supabase/config.toml 생성 (기존 migrations 유지)
-npx supabase login
-npx supabase link --project-ref <프로젝트 ref>
-npx supabase db push
+npx supabase db push --db-url "<Session pooler 접속 문자열>"
 ```
 
 ### 2-4. Edge Function (비밀번호 초기화 / 가입 거절)
 
 [supabase/functions/admin-members/index.ts](supabase/functions/admin-members/index.ts) 를 배포하고 기본 비밀번호를 secret 으로 설정한다.
-호출자의 토큰과 관리자 여부는 함수 안에서 직접 검증하므로 `--no-verify-jwt` 로 배포한다.
+호출자의 토큰과 관리자 여부는 함수 안에서 직접 검증하므로 JWT 검증을 끈다. ([supabase/config.toml](supabase/config.toml) 의 `verify_jwt = false`)
+배포는 평소 CI 가 한다. `DEFAULT_PASSWORD` 만 프로젝트마다 한 번 설정한다.
 
 ```sh
 npx supabase login
 npx supabase secrets set DEFAULT_PASSWORD='영문숫자8자이상' --project-ref <프로젝트 ref>
-npx supabase functions deploy admin-members --no-verify-jwt --project-ref <프로젝트 ref>
+npx supabase functions deploy admin-members --project-ref <프로젝트 ref>   # 직접 배포할 때만
 ```
 
 CLI 없이: Dashboard > **Edge Functions** > Deploy a new function > Via Editor 에서 이름을 `admin-members` 로 하고
@@ -149,32 +153,45 @@ flutter run -d chrome --dart-define-from-file=env.staging.json   # 테스트 서
 #### 만들기 (최초 1회)
 
 1. Supabase 에서 새 프로젝트를 만들고 [2-2 Auth 설정](#2-2-auth-설정-중요)을 운영과 똑같이 한다.
-2. [supabase/migrations/](supabase/migrations/) 전체를 순서대로 적용한다. (2-3 과 같음)
-3. Edge Function 을 배포하고 `DEFAULT_PASSWORD` 를 설정한다. (2-4 와 같음, `--project-ref` 만 테스트 서버 것으로)
+2. `DEFAULT_PASSWORD` 를 설정한다. (2-4, `--project-ref` 만 테스트 서버 것으로)
+3. 저장소 Secrets 에 `STAGING_DB_URL`, `STAGING_PROJECT_REF` 를 넣는다. ([5. 배포](#5-배포-github-pages) 표 참고)
+   이후 `feature/**` 브랜치에 push 하면 마이그레이션 / Edge Function 이 테스트 서버에 적용된다.
 4. `env.staging.example.json` 을 `env.staging.json` 으로 복사해 테스트 서버의 URL / publishable 키를 넣는다.
 5. 테스트 서버로 앱을 띄워 관리자 / 회원 테스트 계정을 가입시키고, 2-6 처럼 관리자를 지정한다.
 
-#### DB 변경 순서
+#### 작업 순서
 
-1. 마이그레이션 작성 → `supabase/tests` 에서 `npm test`
-2. **테스트 서버**에 적용 → `env.staging.json` 으로 앱을 띄워 확인
-3. **운영**에 적용 → 확인 (새 컬럼 / 함수가 생겼는지)
-4. `main` 에 push (앱 배포)
+1. `feature/<이름>` 브랜치에서 작업한다. 마이그레이션을 추가하면 `supabase/tests` 에서 `npm test`
+2. 브랜치에 push → CI([staging.yml](.github/workflows/staging.yml))가 테스트 후 **테스트 서버**에
+   마이그레이션 / Edge Function 을 적용한다. `env.staging.json` 으로 앱을 띄워 확인한다.
+3. `main` 에 merge → CI([deploy-pages.yml](.github/workflows/deploy-pages.yml))가 테스트 후 **운영**에
+   마이그레이션 / Edge Function 을 적용하고, 그다음 앱을 배포한다.
 
-> 운영에 적용하기 전에 push 하면 새 앱이 아직 없는 컬럼을 조회해 화면이 깨진다. 3 → 4 순서를 지킨다.
+> **`main` 에 merge 하는 순간 운영 DB 가 바뀐다.** 앱이 준비되지 않은 DB 변경은 `main` 에 넣지 않는다.
+> 적용된 마이그레이션 파일은 고치지 말고 새 마이그레이션을 추가한다. (CI 는 이미 적용된 버전을 다시 실행하지 않는다)
 
 #### CLI 로 적용할 때
 
 두 프로젝트를 오가므로 `link` 대신 대상을 매번 명시한다.
 
 ```sh
-npx supabase db push --db-url "postgresql://postgres.<ref>:<DB 비밀번호>@<pooler 호스트>:5432/postgres"
+npx supabase migration list --db-url "postgresql://postgres.<ref>:<DB 비밀번호>@<pooler 호스트>:5432/postgres"
 ```
 
-접속 문자열은 Dashboard 상단 **Connect** > Session pooler 에서 복사한다.
-운영 DB 에 처음 CLI 를 쓸 때는 `npx supabase migration list --db-url ...` 로 적용 이력을 먼저 확인한다.
-SQL Editor 로만 적용해 왔다면 이력이 비어 있어 전체를 다시 적용하려 하므로,
-`npx supabase migration repair --status applied <버전...> --db-url ...` 로 이미 적용된 버전을 먼저 표시한다.
+- 접속 문자열: Dashboard 상단 **Connect** > Connection String > **Session pooler** (5432).
+  Direct connection 은 IPv6 전용이라 GitHub Actions 에서 접속되지 않을 수 있고, Transaction pooler(6543)는 마이그레이션에 맞지 않는다.
+- DB 비밀번호는 프로젝트를 만들 때 정한 것. Project Settings > Database 에서 재설정할 수 있다. (앱은 API 키를 쓰므로 영향 없음)
+  특수문자는 URL 인코딩해야 하므로 영문 / 숫자로 된 비밀번호가 편하다.
+- PowerShell 에서는 여러 줄 명령의 `\` 를 쓸 수 없으니 한 줄로 실행하고, 비밀번호에 `$` 가 있으면 작은따옴표로 감싼다.
+
+#### 적용 이력 맞추기 (SQL Editor 로 적용해 온 DB)
+
+CLI 는 `supabase_migrations.schema_migrations` 의 이력으로 적용 여부를 판단한다. SQL Editor 로만 적용한 DB 는 이력이 비어 있어
+CI 가 전부 다시 적용하려다 실패하므로, 이미 적용된 버전을 한 번 표시한다. (스키마는 바꾸지 않는다)
+
+```sh
+npx supabase migration repair --status applied <적용된 버전들...> --db-url "<접속 문자열>"
+```
 
 ## 4. 테스트
 
@@ -201,15 +218,25 @@ DB 테스트는 실제 Supabase 없이 PGlite(WASM Postgres)에 Supabase 의 `au
 ## 5. 배포 (GitHub Pages)
 
 [.github/workflows/deploy-pages.yml](.github/workflows/deploy-pages.yml) 이 `main` 에 push 될 때마다
-**테스트(analyze · flutter test · DB 권한 테스트) → 웹 빌드 → Pages 배포**를 한다. 테스트가 실패하면 배포하지 않는다.
+**테스트(analyze · flutter test · DB 권한 테스트) → 운영 DB 마이그레이션 / Edge Function → 웹 빌드 → Pages 배포**를 한다.
+테스트가 실패하면 DB 도 바꾸지 않고 배포하지 않는다. 새 앱이 새 컬럼을 조회하므로 DB 를 먼저 바꾼다.
 
 ### 최초 1회 설정
 
 1. GitHub 에 저장소를 만들고 이 프로젝트를 push 한다.
    무료 플랜에서 Pages 는 **public 저장소**만 가능하다. (코드에 비밀값은 없다: `env.json` 은 커밋되지 않고, publishable 키는 공개 키다)
 2. 저장소 **Settings > Secrets and variables > Actions > New repository secret**
-   - `SUPABASE_URL` = `https://<ref>.supabase.co`
-   - `SUPABASE_PUBLISHABLE_KEY` = `sb_publishable_...`
+
+   | Secret | 값 | 용도 |
+   | --- | --- | --- |
+   | `SUPABASE_URL` | `https://<운영 ref>.supabase.co` | 앱 빌드 |
+   | `SUPABASE_PUBLISHABLE_KEY` | 운영 `sb_publishable_...` | 앱 빌드 |
+   | `PROD_DB_URL` / `STAGING_DB_URL` | 각 프로젝트 Session pooler 접속 문자열 (DB 비밀번호 포함) | 마이그레이션 적용 |
+   | `PROD_PROJECT_REF` / `STAGING_PROJECT_REF` | 각 프로젝트 ref | Edge Function 배포 대상 |
+   | `SUPABASE_ACCESS_TOKEN` | Supabase 계정 > Access Tokens (`sbp_...`). 가능하면 두 프로젝트의 Edge Functions 배포 권한만 | Edge Function 배포 |
+
+   선택: **Settings > Environments** 에 `production` 을 만들고 **Required reviewers** 를 지정하면
+   운영 DB 를 바꾸기 전에 Actions 화면에서 승인을 기다린다.
 3. 저장소 **Settings > Pages > Build and deployment > Source** 를 **GitHub Actions** 로 선택
 4. **Actions** 탭에서 워크플로가 끝나면 주소가 나온다: `https://<아이디>.github.io/<저장소>/`
 5. Supabase Dashboard > Authentication > **URL Configuration** 의 Site URL 을 위 주소로 바꾼다.

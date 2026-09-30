@@ -1,13 +1,16 @@
 -- =============================================================================
--- 최초 관리자 지정 (한 번만 실행)
+-- 최초 총괄 관리자 지정 (새 프로젝트에서 한 번만 실행)
 --
--- 1) 앱에서 "가입하기"로 관리자 본인 계정을 만든다. (승인 대기 화면이 나오면 정상)
--- 2) 아래 학번을 바꿔서 Supabase SQL Editor 에서 실행한다.
+-- 1) 앱에서 "가입하기"로 본인 계정을 만든다. (승인 대기 화면이 나오면 정상)
+-- 2) 아래 학번 / 캠퍼스 코드를 바꿔서 Supabase SQL Editor 에서 실행한다.
 -- 3) 앱의 승인 대기 화면에서 "승인 여부 다시 확인"을 누른다.
 --
--- 이후 관리자 추가는 앱의 관리자 > 회원 관리 > "관리자로 지정" 에서 한다.
+-- 이후 캠퍼스 추가 / 관리자 지정은 앱에서 한다.
+--   * 총괄 관리자: 캠퍼스 추가, 모든 캠퍼스의 관리자 지정
+--   * 캠퍼스 관리자: 자기 캠퍼스 회원을 캠퍼스 관리자로 지정
 -- =============================================================================
 
 update public.profiles
-set role = 'admin', is_approved = true, must_change_password = false
-where student_id = '20200001';
+set role = 'central_admin', is_approved = true, must_change_password = false
+where student_id = '20250133'
+  and campus_id = (select id from public.campuses where code = 'kaist');
