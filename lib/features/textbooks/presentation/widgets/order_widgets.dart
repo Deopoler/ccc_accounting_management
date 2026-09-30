@@ -24,6 +24,25 @@ class OrderStatusChip extends StatelessWidget {
   }
 }
 
+/// 배송 상태 배지. 회원이 수령 확인해야 하는 "배송됨"만 파랑으로 강조한다.
+class DeliveryStatusChip extends StatelessWidget {
+  const DeliveryStatusChip(this.delivery, {super.key});
+
+  final DeliveryStatus delivery;
+
+  @override
+  Widget build(BuildContext context) {
+    return AppBadge(
+      delivery.label,
+      tone: switch (delivery) {
+        DeliveryStatus.pending => BadgeTone.muted,
+        DeliveryStatus.shipped => BadgeTone.accent,
+        DeliveryStatus.received => BadgeTone.neutral,
+      },
+    );
+  }
+}
+
 /// `- 1 +` 수량 선택.
 class QuantityStepper extends StatelessWidget {
   const QuantityStepper({

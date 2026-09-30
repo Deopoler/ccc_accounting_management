@@ -179,6 +179,8 @@ class _TextbookSummaryCard extends ConsumerWidget {
       final unpaid = list
           .where((o) => o.status == OrderStatus.requested)
           .fold(0, (s, o) => s + o.totalPrice);
+      // 배송은 보통 마감 뒤에 되므로 회차와 관계없이 수령 대기 건을 보여준다.
+      final awaiting = list.where((o) => o.canConfirmReceipt).toList();
 
       body = Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -207,6 +209,96 @@ class _TextbookSummaryCard extends ConsumerWidget {
           ),
           for (final o in thisRound.take(3)) ...[
             const SizedBox(height: 10),
+            _OrderRow(order: o),
+          ],
+          if (awaiting.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            _ReceiptNotice(orders: awaiting),
+          ],
+        ],
+      );
+    }
+
+    final hasOrders = orders.value?.isNotEmpty ?? false;
+    final hasAwaiting = orders.value?.any((o) => o.canConfirmReceipt) ?? false;
+    return _DashboardCard(
+      icon: Icons.menu_book_outlined,
+      title: '내 교재 신청',
+      actionLabel: hasAwaiting
+          ? '수령 확인하기'
+          : hasOrders
+          ? '신청 내역 보기'
+          : '교재 신청하기',
+      onAction: () =>
+          context.go(hasOrders ? AppRoutes.myOrders : AppRoutes.textbooks),
+      child: body,
+    );
+  }
+}
+
+/// 신청 품목 한 줄 + 배송/신청 상태 배지.
+class _OrderRow extends StatelessWidget {
+  const _OrderRow({required this.order});
+
+  final TextbookOrder order;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: Text(
+            order.items.map((i) => '${i.title} ×${i.quantity}').join(', '),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+        const SizedBox(width: 8),
+        if (order.status != OrderStatus.cancelled) ...[
+          DeliveryStatusChip(order.delivery),
+          const SizedBox(width: 6),
+        ],
+        OrderStatusChip(order.status),
+      ],
+    );
+  }
+}
+
+/// 배송됐지만 아직 수령 확인하지 않은 신청 안내.
+class _ReceiptNotice extends StatelessWidget {
+  const _ReceiptNotice({required this.orders});
+
+  final List<TextbookOrder> orders;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: c.primarySoft,
+        borderRadius: BorderRadius.circular(AppRadius.sm),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.local_shipping_outlined, size: 18, color: c.primary),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  '배송된 교재 ${orders.length}건 · 받으셨다면 수령 확인해 주세요',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    color: c.primary,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          for (final o in orders.take(3)) ...[
+            const SizedBox(height: 8),
             Row(
               children: [
                 Expanded(
@@ -217,22 +309,15 @@ class _TextbookSummaryCard extends ConsumerWidget {
                   ),
                 ),
                 const SizedBox(width: 8),
-                OrderStatusChip(o.status),
+                Text(
+                  '${o.roundStart.month}/${o.roundStart.day} 회차',
+                  style: TextStyle(fontSize: 13, color: c.textSecondary),
+                ),
               ],
             ),
           ],
         ],
-      );
-    }
-
-    final hasOrders = orders.value?.isNotEmpty ?? false;
-    return _DashboardCard(
-      icon: Icons.menu_book_outlined,
-      title: '내 교재 신청',
-      actionLabel: hasOrders ? '신청 내역 보기' : '교재 신청하기',
-      onAction: () =>
-          context.go(hasOrders ? AppRoutes.myOrders : AppRoutes.textbooks),
-      child: body,
+      ),
     );
   }
 }

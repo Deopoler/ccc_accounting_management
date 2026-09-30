@@ -13,6 +13,17 @@ enum OrderStatus {
       OrderStatus.values.firstWhere((s) => s.name == value);
 }
 
+/// 배송 상태. 신청 → (관리자) 배송됨 → (회원) 수령 완료.
+enum DeliveryStatus {
+  pending('배송 전'),
+  shipped('배송됨'),
+  received('수령 완료');
+
+  const DeliveryStatus(this.label);
+
+  final String label;
+}
+
 class TextbookOrderItem {
   const TextbookOrderItem({
     required this.textbookId,
@@ -59,6 +70,9 @@ class TextbookOrder {
     required this.createdAt,
     required this.items,
     this.member,
+    this.isShipped = false,
+    this.shippedAt,
+    this.receivedAt,
   });
 
   factory TextbookOrder.fromJson(Map<String, dynamic> json) {
@@ -77,6 +91,9 @@ class TextbookOrder {
       totalPrice: json['total_price'] as int,
       createdAt: DateTime.parse(json['created_at'] as String),
       items: items,
+      isShipped: json['is_shipped'] as bool? ?? false,
+      shippedAt: _parseTime(json['shipped_at']),
+      receivedAt: _parseTime(json['received_at']),
       member: profile == null
           ? null
           : OrderMember(
@@ -95,14 +112,37 @@ class TextbookOrder {
   final List<TextbookOrderItem> items;
   final OrderMember? member;
 
+  /// 관리자가 배송 처리했는지. 처리 시각은 서버가 기록한다.
+  final bool isShipped;
+  final DateTime? shippedAt;
+
+  /// 회원이 수령을 확인한 시각. 배송됨 상태에서만 값이 있다.
+  final DateTime? receivedAt;
+
+  DeliveryStatus get delivery => receivedAt != null
+      ? DeliveryStatus.received
+      : isShipped
+      ? DeliveryStatus.shipped
+      : DeliveryStatus.pending;
+
   int get totalQuantity => items.fold(0, (sum, i) => sum + i.quantity);
 
   /// 회원이 수정/취소할 수 있는지. 실제 제한은 서버 RPC 가 강제한다.
   bool canMemberEdit(DateTime currentRoundStart) =>
       status == OrderStatus.requested &&
+      !isShipped &&
       isSameDate(roundStart, currentRoundStart);
 
-  TextbookOrder copyWith({OrderStatus? status}) => TextbookOrder(
+  /// 회원이 수령 확인할 수 있는지 (배송됨 + 아직 미수령). 서버 RPC 가 강제한다.
+  bool get canConfirmReceipt =>
+      status != OrderStatus.cancelled && delivery == DeliveryStatus.shipped;
+
+  TextbookOrder copyWith({
+    OrderStatus? status,
+    bool? isShipped,
+    DateTime? Function()? shippedAt,
+    DateTime? Function()? receivedAt,
+  }) => TextbookOrder(
     id: id,
     userId: userId,
     roundStart: roundStart,
@@ -111,8 +151,14 @@ class TextbookOrder {
     createdAt: createdAt,
     items: items,
     member: member,
+    isShipped: isShipped ?? this.isShipped,
+    shippedAt: shippedAt == null ? this.shippedAt : shippedAt(),
+    receivedAt: receivedAt == null ? this.receivedAt : receivedAt(),
   );
 }
+
+DateTime? _parseTime(Object? value) =>
+    value == null ? null : DateTime.parse(value as String);
 
 /// 교재별 집계 (취소 제외).
 class TextbookTally {

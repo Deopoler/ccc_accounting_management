@@ -118,38 +118,48 @@ final _textbooks = [
   ),
 ];
 
-TextbookOrder _order(String id, OrderStatus status, String userId) =>
-    TextbookOrder(
-      id: id,
-      userId: userId,
-      roundStart: _round.start,
-      status: status,
-      totalPrice: 2475000,
-      createdAt: DateTime(2026, 9, 29, 13, 5),
-      items: const [
-        TextbookOrderItem(
-          textbookId: 'b1',
-          title: _longTitle,
-          quantity: 2,
-          unitPrice: 1234000,
-        ),
-        TextbookOrderItem(
-          textbookId: 'b2',
-          title: '교재 B',
-          quantity: 1,
-          unitPrice: 7000,
-        ),
-      ],
-      member: OrderMember(
-        studentId: '2024$userId',
-        name: userId == 'u1' ? _longName : '회원$userId',
-      ),
-    );
+TextbookOrder _order(
+  String id,
+  OrderStatus status,
+  String userId, {
+  bool shipped = false,
+  bool received = false,
+}) => TextbookOrder(
+  isShipped: shipped,
+  shippedAt: shipped ? DateTime(2026, 10, 7, 10) : null,
+  receivedAt: received ? DateTime(2026, 10, 8, 18, 30) : null,
+  id: id,
+  userId: userId,
+  roundStart: _round.start,
+  status: status,
+  totalPrice: 2475000,
+  createdAt: DateTime(2026, 9, 29, 13, 5),
+  items: const [
+    TextbookOrderItem(
+      textbookId: 'b1',
+      title: _longTitle,
+      quantity: 2,
+      unitPrice: 1234000,
+    ),
+    TextbookOrderItem(
+      textbookId: 'b2',
+      title: '교재 B',
+      quantity: 1,
+      unitPrice: 7000,
+    ),
+  ],
+  member: OrderMember(
+    studentId: '2024$userId',
+    name: userId == 'u1' ? _longName : '회원$userId',
+  ),
+);
 
 final _orders = [
   _order('o1', OrderStatus.requested, 'u1'),
   _order('o2', OrderStatus.paid, '2'),
   _order('o3', OrderStatus.cancelled, '3'),
+  _order('o4', OrderStatus.paid, 'u1', shipped: true),
+  _order('o5', OrderStatus.paid, '5', shipped: true, received: true),
 ];
 
 final _events = [

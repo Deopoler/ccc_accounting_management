@@ -26,7 +26,19 @@ String _dateTime(DateTime d) =>
 
 /// 교재 신청 현황: 신청 1건 = 1행.
 List<List<Object?>> textbookOrdersCsvRows(Iterable<TextbookOrder> orders) => [
-  ['학번', '이름', '회차 시작일', '교재', '총 수량', '금액', '상태', '신청일시'],
+  [
+    '학번',
+    '이름',
+    '회차 시작일',
+    '교재',
+    '총 수량',
+    '금액',
+    '상태',
+    '신청일시',
+    '배송',
+    '배송일시',
+    '수령일시',
+  ],
   for (final o in orders)
     [
       o.member?.studentId,
@@ -37,6 +49,9 @@ List<List<Object?>> textbookOrdersCsvRows(Iterable<TextbookOrder> orders) => [
       o.totalPrice,
       o.status.label,
       _dateTime(o.createdAt),
+      o.status == OrderStatus.cancelled ? '' : o.delivery.label,
+      o.shippedAt == null ? '' : _dateTime(o.shippedAt!),
+      o.receivedAt == null ? '' : _dateTime(o.receivedAt!),
     ],
 ];
 

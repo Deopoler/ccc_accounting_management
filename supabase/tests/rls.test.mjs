@@ -440,3 +440,90 @@ describe('교재 순서', () => {
     assert.equal(rows[0].sort_order, 99);
   });
 });
+
+describe('교재 배송 / 수령', () => {
+  const one = (bookId) => JSON.stringify([{ textbook_id: bookId, quantity: 1 }]);
+  const order = async (id) =>
+    (await db.query('select * from public.textbook_orders where id = $1', [id])).rows[0];
+  let orderId;
+
+  before(async () => {
+    orderId = (await asUser(db, alice, 'select public.place_textbook_order($1::jsonb) as id', [one(bookA)])).rows[0].id;
+  });
+
+  test('배송 전에는 회원이 수령 확인할 수 없다', async () => {
+    await assertRaises(asUser(db, alice, 'select public.confirm_textbook_received($1)', [orderId]), /아직 배송되지/);
+  });
+
+  test('회원은 배송 여부 / 시각을 직접 바꿀 수 없다', async () => {
+    const r = await asUser(db, alice, 'update public.textbook_orders set is_shipped = true where id = $1', [orderId]);
+    assert.equal(r.affectedRows, 0);
+    await assertDenied(asUser(db, alice, 'update public.textbook_orders set received_at = now()'));
+  });
+
+  test('관리자 배송 처리 시 처리자/시각이 서버에서 기록된다', async () => {
+    const r = await asUser(db, admin, 'update public.textbook_orders set is_shipped = true where id = $1', [orderId]);
+    assert.equal(r.affectedRows, 1);
+    const o = await order(orderId);
+    assert.equal(o.shipped_by, admin);
+    assert.ok(o.shipped_at instanceof Date);
+    assert.equal(o.received_at, null);
+  });
+
+  test('배송 시각/수령 시각은 관리자도 직접 조작할 수 없다', async () => {
+    await assertDenied(asUser(db, admin, 'update public.textbook_orders set shipped_at = now()'));
+    await assertDenied(asUser(db, admin, 'update public.textbook_orders set shipped_by = $1', [admin]));
+    await assertDenied(asUser(db, admin, 'update public.textbook_orders set received_at = now()'));
+  });
+
+  test('배송된 신청은 회원이 수정/취소할 수 없다', async () => {
+    await assertRaises(asUser(db, alice, 'select public.cancel_textbook_order($1)', [orderId]), /배송된 신청/);
+  });
+
+  test('다른 회원은 수령 확인할 수 없다', async () => {
+    await assertRaises(asUser(db, bob, 'select public.confirm_textbook_received($1)', [orderId]), /찾을 수 없습니다/);
+    await assertRaises(asUser(db, admin, 'select public.confirm_textbook_received($1)', [orderId]), /찾을 수 없습니다/);
+    assert.equal((await order(orderId)).received_at, null);
+  });
+
+  test('본인은 배송된 신청의 수령을 확인할 수 있고, 다시 확인해도 시각이 바뀌지 않는다', async () => {
+    const first = (await asUser(db, alice, 'select public.confirm_textbook_received($1) as t', [orderId])).rows[0].t;
+    assert.ok(first instanceof Date);
+    const again = (await asUser(db, alice, 'select public.confirm_textbook_received($1) as t', [orderId])).rows[0].t;
+    assert.equal(again.getTime(), first.getTime());
+    assert.equal((await order(orderId)).received_at.getTime(), first.getTime());
+  });
+
+  test('관리자가 다른 컬럼을 바꿔도 배송/수령 기록은 유지된다', async () => {
+    const before = await order(orderId);
+    await asUser(db, admin, `update public.textbook_orders set status = 'paid' where id = $1`, [orderId]);
+    const after = await order(orderId);
+    assert.equal(after.shipped_at.getTime(), before.shipped_at.getTime());
+    assert.equal(after.received_at.getTime(), before.received_at.getTime());
+  });
+
+  test('배송된 신청은 취소 상태로 바꿀 수 없다', async () => {
+    await assertRaises(
+      asUser(db, admin, `update public.textbook_orders set status = 'cancelled' where id = $1`, [orderId]),
+      /취소된 신청은 배송/,
+    );
+  });
+
+  test('배송을 해제하면 배송/수령 기록이 함께 초기화된다', async () => {
+    await asUser(db, admin, 'update public.textbook_orders set is_shipped = false where id = $1', [orderId]);
+    const o = await order(orderId);
+    assert.equal(o.is_shipped, false);
+    assert.equal(o.shipped_at, null);
+    assert.equal(o.shipped_by, null);
+    assert.equal(o.received_at, null);
+  });
+
+  test('취소된 신청은 배송 처리할 수 없다', async () => {
+    const id = (await asUser(db, alice, 'select public.place_textbook_order($1::jsonb) as id', [one(bookA)])).rows[0].id;
+    await asUser(db, alice, 'select public.cancel_textbook_order($1)', [id]);
+    await assertRaises(
+      asUser(db, admin, 'update public.textbook_orders set is_shipped = true where id = $1', [id]),
+      /취소된 신청은 배송/,
+    );
+  });
+});

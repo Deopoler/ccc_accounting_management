@@ -98,6 +98,61 @@ void main() {
     expect(ids(const OrderFilter(query: '홍길')), ['a']);
   });
 
+  test('배송 상태: 배송 전 → 배송됨 → 수령 완료', () {
+    final o = TextbookOrder.fromJson(_orderJson());
+    expect(o.delivery, DeliveryStatus.pending);
+    expect(o.canConfirmReceipt, isFalse);
+
+    final shipped = TextbookOrder.fromJson({
+      ..._orderJson(),
+      'is_shipped': true,
+      'shipped_at': '2026-10-07T03:00:00+00:00',
+      'received_at': null,
+    });
+    expect(shipped.delivery, DeliveryStatus.shipped);
+    expect(shipped.shippedAt, DateTime.utc(2026, 10, 7, 3));
+    expect(shipped.canConfirmReceipt, isTrue);
+    // 배송된 신청은 이번 회차여도 회원이 수정/취소할 수 없다.
+    expect(shipped.canMemberEdit(DateTime(2026, 9, 30)), isFalse);
+
+    final received = shipped.copyWith(
+      receivedAt: () => DateTime.utc(2026, 10, 8),
+    );
+    expect(received.delivery, DeliveryStatus.received);
+    expect(received.canConfirmReceipt, isFalse);
+
+    final unshipped = received.copyWith(
+      isShipped: false,
+      shippedAt: () => null,
+      receivedAt: () => null,
+    );
+    expect(unshipped.delivery, DeliveryStatus.pending);
+  });
+
+  test('배송 필터 / 건수는 취소를 제외한다', () {
+    final orders = [
+      TextbookOrder.fromJson(_orderJson(id: 'a')),
+      TextbookOrder.fromJson({..._orderJson(id: 'b'), 'is_shipped': true}),
+      TextbookOrder.fromJson({
+        ..._orderJson(id: 'c', status: 'paid'),
+        'is_shipped': true,
+        'received_at': '2026-10-08T00:00:00+00:00',
+      }),
+      TextbookOrder.fromJson(_orderJson(id: 'd', status: 'cancelled')),
+    ];
+    List<String> ids(DeliveryStatus d) =>
+        OrderFilter(delivery: d).apply(orders).map((o) => o.id).toList();
+
+    expect(ids(DeliveryStatus.pending), ['a']);
+    expect(ids(DeliveryStatus.shipped), ['b']);
+    expect(ids(DeliveryStatus.received), ['c']);
+    expect(countByDelivery(orders), {
+      DeliveryStatus.pending: 1,
+      DeliveryStatus.shipped: 1,
+      DeliveryStatus.received: 1,
+    });
+  });
+
   test('회차 라벨과 마감 표시', () {
     final round = OrderRound(
       start: DateTime(2026, 9, 30),

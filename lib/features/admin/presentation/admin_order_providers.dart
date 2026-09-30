@@ -30,4 +30,23 @@ class AdminOrdersNotifier extends AsyncNotifier<List<TextbookOrder>> {
       for (final o in current) o.id == orderId ? o.copyWith(status: status) : o,
     ]);
   }
+
+  /// 배송 완료 체크/해제. 서버가 기록한 시각으로 해당 행만 바꾼다.
+  Future<void> setShipped(String orderId, {required bool shipped}) async {
+    final saved = await ref
+        .read(textbookRepositoryProvider)
+        .setShipped(orderId, shipped: shipped);
+    final current = state.value;
+    if (!ref.mounted || current == null) return;
+    state = AsyncData([
+      for (final o in current)
+        o.id == orderId
+            ? o.copyWith(
+                isShipped: saved.isShipped,
+                shippedAt: () => saved.shippedAt,
+                receivedAt: () => saved.receivedAt,
+              )
+            : o,
+    ]);
+  }
 }

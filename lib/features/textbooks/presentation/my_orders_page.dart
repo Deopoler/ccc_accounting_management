@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../../../core/router/routes.dart';
+import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../core/widgets/feedback.dart';
 import '../../../core/widgets/responsive.dart';
@@ -98,6 +99,28 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
     }
   }
 
+  Future<void> _confirmReceipt() async {
+    final ok = await showConfirmDialog(
+      context,
+      title: '교재 수령 확인',
+      message: '교재를 받으셨나요?\n수령 완료로 표시하면 되돌릴 수 없어요.',
+      confirmLabel: '수령 완료',
+    );
+    if (!ok || !mounted) return;
+    setState(() => _busy = true);
+    try {
+      await ref
+          .read(textbookRepositoryProvider)
+          .confirmReceived(widget.order.id);
+      ref.invalidate(myOrdersProvider);
+      if (mounted) showSnack(context, '수령 완료로 표시했어요.');
+    } catch (e) {
+      if (mounted) showErrorSnack(context, e);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final order = widget.order;
@@ -134,11 +157,23 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                     ],
                   ),
                 ),
+                if (order.status != OrderStatus.cancelled) ...[
+                  DeliveryStatusChip(order.delivery),
+                  const SizedBox(width: 6),
+                ],
                 OrderStatusChip(order.status),
               ],
             ),
             const SizedBox(height: 16),
             OrderItemsSummary(items: order.items, total: order.totalPrice),
+            if (order.isShipped && order.status != OrderStatus.cancelled) ...[
+              const SizedBox(height: 16),
+              _DeliveryPanel(
+                order: order,
+                busy: _busy,
+                onConfirm: _confirmReceipt,
+              ),
+            ],
             if (editable) ...[
               const SizedBox(height: 16),
               Row(
@@ -173,6 +208,77 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
             ],
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// 배송된 신청의 배송/수령 안내. 미수령이면 수령 확인 버튼을 보여준다.
+class _DeliveryPanel extends StatelessWidget {
+  const _DeliveryPanel({
+    required this.order,
+    required this.busy,
+    required this.onConfirm,
+  });
+
+  final TextbookOrder order;
+  final bool busy;
+  final VoidCallback onConfirm;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final received = order.receivedAt;
+    final waiting = order.canConfirmReceipt;
+    final lines = [
+      if (order.shippedAt != null) '배송 ${formatDateTime(order.shippedAt!)}',
+      if (received != null) '수령 ${formatDateTime(received)}',
+    ];
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 14, 12, 14),
+      decoration: BoxDecoration(
+        // 해야 할 일(수령 확인)이 있을 때만 파란 면으로 강조한다.
+        color: waiting ? c.primarySoft : c.background,
+        borderRadius: BorderRadius.circular(AppRadius.sm),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            received != null
+                ? Icons.check_circle_outline
+                : Icons.local_shipping_outlined,
+            size: 22,
+            color: waiting ? c.primary : c.textSecondary,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  waiting ? '교재가 배송되었어요' : '교재를 받았어요',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    color: c.textPrimary,
+                  ),
+                ),
+                if (lines.isNotEmpty)
+                  Text(
+                    lines.join(' · '),
+                    style: TextStyle(fontSize: 13, color: c.textSecondary),
+                  ),
+              ],
+            ),
+          ),
+          if (waiting) ...[
+            const SizedBox(width: 8),
+            OutlinedButton(
+              onPressed: busy ? null : onConfirm,
+              child: const Text('수령 확인'),
+            ),
+          ],
+        ],
       ),
     );
   }

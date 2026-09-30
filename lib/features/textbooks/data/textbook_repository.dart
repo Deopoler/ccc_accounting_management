@@ -1,13 +1,22 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../core/supabase/postgrest_ext.dart';
+import '../../../core/utils/app_exception.dart';
 import '../domain/order_round.dart';
 import '../domain/textbook.dart';
 import '../domain/textbook_category.dart';
 import '../domain/textbook_order.dart';
 
+/// 배송 처리 후 서버에 저장된 값.
+typedef ShipmentState = ({
+  bool isShipped,
+  DateTime? shippedAt,
+  DateTime? receivedAt,
+});
+
 const _orderColumns =
     'id, user_id, round_start, status, total_price, created_at, '
+    'is_shipped, shipped_at, received_at, '
     'textbook_order_items(textbook_id, quantity, unit_price, textbooks(title))';
 
 class TextbookRepository {
@@ -124,6 +133,15 @@ class TextbookRepository {
     params: {'p_order_id': orderId},
   );
 
+  /// 배송된 본인 신청의 수령을 확인한다. 서버가 기록한 수령 시각을 돌려준다.
+  Future<DateTime> confirmReceived(String orderId) async {
+    final at = await _client.rpc<String>(
+      'confirm_textbook_received',
+      params: {'p_order_id': orderId},
+    );
+    return DateTime.parse(at);
+  }
+
   /// 본인 신청 내역 (RLS 가 본인 것만 돌려준다).
   Future<List<TextbookOrder>> fetchMyOrders(String userId) async {
     final rows = await _client
@@ -162,6 +180,30 @@ class TextbookRepository {
       .update({'status': status.name})
       .eq('id', orderId)
       .expectAffected();
+
+  /// 배송 완료 체크/해제. 배송 시각은 서버 트리거가 기록하고, 해제하면 수령 기록도 지워진다.
+  /// 서버에 저장된 배송/수령 값을 돌려준다.
+  Future<ShipmentState> setShipped(
+    String orderId, {
+    required bool shipped,
+  }) async {
+    final rows = await _client
+        .from('textbook_orders')
+        .update({'is_shipped': shipped})
+        .eq('id', orderId)
+        .select('is_shipped, shipped_at, received_at');
+    if (rows.isEmpty) {
+      throw const AppException('권한이 없거나 이미 삭제된 항목입니다.');
+    }
+    final row = rows.first;
+    DateTime? time(String key) =>
+        row[key] == null ? null : DateTime.parse(row[key] as String);
+    return (
+      isShipped: row['is_shipped'] as bool,
+      shippedAt: time('shipped_at'),
+      receivedAt: time('received_at'),
+    );
+  }
 
   List<Map<String, dynamic>> _items(Map<String, int> quantities) => [
     for (final e in quantities.entries)

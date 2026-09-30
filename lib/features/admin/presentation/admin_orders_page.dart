@@ -32,6 +32,7 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
   int _roundOffset = 0;
   String? _textbookId;
   OrderStatus? _status;
+  DeliveryStatus? _delivery;
   final _search = TextEditingController();
   final Set<String> _busy = {};
 
@@ -55,6 +56,37 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
       await ref
           .read(adminOrdersProvider(round).notifier)
           .setStatus(order.id, status);
+    } catch (e) {
+      if (mounted) showErrorSnack(context, e);
+    } finally {
+      if (mounted) setState(() => _busy.remove(order.id));
+    }
+  }
+
+  Future<void> _setShipped(
+    DateTime? round,
+    TextbookOrder order,
+    bool shipped,
+  ) async {
+    if (order.isShipped == shipped) return;
+    // 회원이 이미 수령 확인한 건은 해제하면 수령 기록도 지워지므로 한 번 더 묻는다.
+    if (!shipped && order.receivedAt != null) {
+      final ok = await showConfirmDialog(
+        context,
+        title: '배송 해제',
+        message:
+            '${order.member?.name ?? '회원'}님이 이미 수령 확인한 신청입니다.\n'
+            '배송을 해제하면 수령 기록도 함께 초기화됩니다.',
+        confirmLabel: '배송 해제',
+        destructive: true,
+      );
+      if (!ok || !mounted) return;
+    }
+    setState(() => _busy.add(order.id));
+    try {
+      await ref
+          .read(adminOrdersProvider(round).notifier)
+          .setShipped(order.id, shipped: shipped);
     } catch (e) {
       if (mounted) showErrorSnack(context, e);
     } finally {
@@ -98,6 +130,17 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
     final roundStart = _roundStart(current);
     final orders = ref.watch(adminOrdersProvider(roundStart));
     final books = textbooks.value ?? const <Textbook>[];
+    final filter = OrderFilter(
+      textbookId: _textbookId,
+      status: _status,
+      delivery: _delivery,
+      query: _search.text,
+    );
+    // 배송 칩의 건수는 배송 조건을 뺀 나머지 필터 기준으로 센다.
+    final loaded = orders.value;
+    final deliveryCounts = loaded == null
+        ? null
+        : countByDelivery(filter.withDelivery(null).apply(loaded));
 
     return ListView(
       children: [
@@ -115,6 +158,9 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
                 onTextbookChanged: (v) => setState(() => _textbookId = v),
                 status: _status,
                 onStatusChanged: (v) => setState(() => _status = v),
+                delivery: _delivery,
+                deliveryCounts: deliveryCounts,
+                onDeliveryChanged: (v) => setState(() => _delivery = v),
                 search: _search,
                 onSearchChanged: () => setState(() {}),
               ),
@@ -123,11 +169,7 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
                 value: orders,
                 onRetry: () => ref.invalidate(adminOrdersProvider(roundStart)),
                 data: (all) {
-                  final filtered = OrderFilter(
-                    textbookId: _textbookId,
-                    status: _status,
-                    query: _search.text,
-                  ).apply(all);
+                  final filtered = filter.apply(all);
                   return Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
@@ -148,6 +190,7 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
                           orders: filtered,
                           busy: _busy,
                           onStatus: (o, s) => _setStatus(roundStart, o, s),
+                          onShipped: (o, v) => _setShipped(roundStart, o, v),
                         ),
                     ],
                   );
@@ -175,6 +218,9 @@ class _Filters extends StatelessWidget {
     required this.onTextbookChanged,
     required this.status,
     required this.onStatusChanged,
+    required this.delivery,
+    required this.deliveryCounts,
+    required this.onDeliveryChanged,
     required this.search,
     required this.onSearchChanged,
   });
@@ -187,6 +233,11 @@ class _Filters extends StatelessWidget {
   final ValueChanged<String?> onTextbookChanged;
   final OrderStatus? status;
   final ValueChanged<OrderStatus?> onStatusChanged;
+  final DeliveryStatus? delivery;
+
+  /// 배송 상태별 건수 (취소 제외). 목록을 불러오는 중이면 null.
+  final Map<DeliveryStatus, int>? deliveryCounts;
+  final ValueChanged<DeliveryStatus?> onDeliveryChanged;
   final TextEditingController search;
   final VoidCallback onSearchChanged;
 
@@ -267,6 +318,28 @@ class _Filters extends StatelessWidget {
                 label: Text(s.label),
                 selected: status == s,
                 onSelected: (_) => onStatusChanged(s),
+              ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            ChoiceChip(
+              label: const Text('전체 배송'),
+              selected: delivery == null,
+              onSelected: (_) => onDeliveryChanged(null),
+            ),
+            for (final d in DeliveryStatus.values)
+              ChoiceChip(
+                label: Text(
+                  deliveryCounts == null
+                      ? d.label
+                      : '${d.label} ${deliveryCounts![d]}',
+                ),
+                selected: delivery == d,
+                onSelected: (_) => onDeliveryChanged(d),
               ),
           ],
         ),
@@ -433,6 +506,7 @@ class _StatCard extends StatelessWidget {
 // ----------------------------------------------------------------------------
 
 typedef _OnStatus = void Function(TextbookOrder order, OrderStatus status);
+typedef _OnShipped = void Function(TextbookOrder order, bool shipped);
 
 String _itemsText(TextbookOrder o) =>
     o.items.map((i) => '${i.title} ×${i.quantity}').join(', ');
@@ -442,11 +516,13 @@ class _OrdersList extends StatelessWidget {
     required this.orders,
     required this.busy,
     required this.onStatus,
+    required this.onShipped,
   });
 
   final List<TextbookOrder> orders;
   final Set<String> busy;
   final _OnStatus onStatus;
+  final _OnShipped onShipped;
 
   @override
   Widget build(BuildContext context) {
@@ -469,6 +545,8 @@ class _OrdersList extends StatelessWidget {
                     DataColumn(label: Text('상태')),
                     DataColumn(label: Text('신청일')),
                     DataColumn(label: Text('입금확인')),
+                    DataColumn(label: Text('배송')),
+                    DataColumn(label: Text('수령')),
                   ],
                   rows: [
                     for (final o in orders)
@@ -502,6 +580,14 @@ class _OrdersList extends StatelessWidget {
                               onStatus: onStatus,
                             ),
                           ),
+                          DataCell(
+                            _ShippedCheckbox(
+                              order: o,
+                              enabled: !busy.contains(o.id),
+                              onShipped: onShipped,
+                            ),
+                          ),
+                          DataCell(_ReceiptText(o)),
                         ],
                       ),
                   ],
@@ -518,6 +604,7 @@ class _OrdersList extends StatelessWidget {
                 order: o,
                 enabled: !busy.contains(o.id),
                 onStatus: onStatus,
+                onShipped: onShipped,
               ),
               const SizedBox(height: 8),
             ],
@@ -533,11 +620,13 @@ class _OrderCard extends StatelessWidget {
     required this.order,
     required this.enabled,
     required this.onStatus,
+    required this.onShipped,
   });
 
   final TextbookOrder order;
   final bool enabled;
   final _OnStatus onStatus;
+  final _OnShipped onShipped;
 
   @override
   Widget build(BuildContext context) {
@@ -578,6 +667,22 @@ class _OrderCard extends StatelessWidget {
                 ),
               ],
             ),
+            Row(
+              children: [
+                Expanded(
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: _ReceiptText(order),
+                  ),
+                ),
+                const Text('배송'),
+                _ShippedCheckbox(
+                  order: order,
+                  enabled: enabled,
+                  onShipped: onShipped,
+                ),
+              ],
+            ),
           ],
         ),
       ),
@@ -607,6 +712,63 @@ class _PaidCheckbox extends StatelessWidget {
               order,
               v == true ? OrderStatus.paid : OrderStatus.requested,
             ),
+    );
+  }
+}
+
+/// 배송 완료 체크. 취소된 신청은 배송할 수 없다. (서버 트리거가 강제)
+class _ShippedCheckbox extends StatelessWidget {
+  const _ShippedCheckbox({
+    required this.order,
+    required this.enabled,
+    required this.onShipped,
+  });
+
+  final TextbookOrder order;
+  final bool enabled;
+  final _OnShipped onShipped;
+
+  @override
+  Widget build(BuildContext context) {
+    final cancelled = order.status == OrderStatus.cancelled;
+    final box = Checkbox(
+      value: order.isShipped,
+      onChanged: !enabled || cancelled
+          ? null
+          : (v) => onShipped(order, v == true),
+    );
+    final at = order.shippedAt;
+    return at == null
+        ? box
+        : Tooltip(message: '배송 처리 ${formatDateTime(at)}', child: box);
+  }
+}
+
+/// 수령 여부 / 시각. 배송 전이거나 취소된 신청은 `-`.
+class _ReceiptText extends StatelessWidget {
+  const _ReceiptText(this.order);
+
+  final TextbookOrder order;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    if (order.status == OrderStatus.cancelled || !order.isShipped) {
+      return Text('-', style: TextStyle(color: c.textTertiary));
+    }
+    final at = order.receivedAt;
+    // 좁은 카드에서는 시각이 다음 줄로 내려간다.
+    return Wrap(
+      spacing: 6,
+      runSpacing: 4,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        DeliveryStatusChip(order.delivery),
+        Text(
+          at == null ? '미수령' : formatDateTime(at),
+          style: TextStyle(fontSize: 13, color: c.textSecondary),
+        ),
+      ],
     );
   }
 }

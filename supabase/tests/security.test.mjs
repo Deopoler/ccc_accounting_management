@@ -69,6 +69,7 @@ describe('스키마 회귀 검사', () => {
       'private.is_admin',
       'private.is_approved_user',
       'public.cancel_textbook_order',
+      'public.confirm_textbook_received',
       'public.current_order_round',
       'public.get_order_round',
       'public.order_round_deadline',

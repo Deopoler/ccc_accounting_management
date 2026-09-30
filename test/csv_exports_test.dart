@@ -70,8 +70,25 @@ void main() {
       27000,
       '신청',
       isA<String>(),
+      '배송 전',
+      '',
+      '',
     ]);
     expect(rows[2][6], '입금확인');
+  });
+
+  test('신청 목록: 배송/수령 일시, 취소 건은 배송 상태를 비운다', () {
+    final shipped = _order().copyWith(
+      isShipped: true,
+      shippedAt: () => DateTime.utc(2026, 10, 7, 3),
+      receivedAt: () => DateTime.utc(2026, 10, 8, 3),
+    );
+    final rows = textbookOrdersCsvRows([shipped, _order(status: 'cancelled')]);
+    expect(rows[0].sublist(8), ['배송', '배송일시', '수령일시']);
+    expect(rows[1][8], '수령 완료');
+    expect(rows[1][9], isNotEmpty);
+    expect(rows[1][10], isNotEmpty);
+    expect(rows[2].sublist(8), ['', '', '']);
   });
 
   test('교재별 집계는 취소를 제외한다', () {
