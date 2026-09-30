@@ -4,6 +4,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../../features/auth/presentation/account_menu_button.dart';
 import '../../features/auth/presentation/auth_providers.dart';
+import '../../features/campus/presentation/campus_switcher.dart';
 import '../router/routes.dart';
 import '../theme/app_theme.dart';
 import 'responsive.dart';
@@ -18,8 +19,13 @@ class AppShell extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final isAdmin = ref.watch(isAdminProvider);
+    final isCentral = ref.watch(isCentralAdminProvider);
     final desktop = isDesktop(context);
     final meta = routeMetaFor(location);
+    // 총괄 관리자는 여러 캠퍼스를 오가므로, 관리자 화면 제목에 지금 캠퍼스를 붙인다.
+    final campusName = isCentral && _isCampusScopedAdminPath(location)
+        ? ref.watch(adminCampusProvider).value?.name
+        : null;
     // 데스크톱에서는 사이드 네비게이션에 관리자 메뉴가 모두 보이므로 허브로 돌아갈 필요가 없다.
     final backTo = (desktop && meta.parent == AppRoutes.admin)
         ? null
@@ -30,7 +36,10 @@ class AppShell extends ConsumerWidget {
       leading: backTo == null
           ? null
           : BackButton(onPressed: () => context.go(backTo)),
-      title: Text(meta.title),
+      title: Text(
+        campusName == null ? meta.title : '${meta.title} · $campusName',
+        overflow: TextOverflow.ellipsis,
+      ),
       actions: const [AccountMenuButton(), SizedBox(width: 8)],
     );
 
@@ -38,7 +47,11 @@ class AppShell extends ConsumerWidget {
       return Scaffold(
         body: Row(
           children: [
-            _SideNav(location: location, isAdmin: isAdmin),
+            _SideNav(
+              location: location,
+              isAdmin: isAdmin,
+              isCentral: isCentral,
+            ),
             const VerticalDivider(width: 1, thickness: 1),
             Expanded(
               child: Scaffold(appBar: appBar, body: child),
@@ -85,16 +98,30 @@ class AppShell extends ConsumerWidget {
   }
 }
 
+/// 캠퍼스별 데이터를 다루는 관리자 화면 (허브 / 캠퍼스 관리 제외).
+bool _isCampusScopedAdminPath(String location) =>
+    location.startsWith('${AppRoutes.admin}/') &&
+    !location.startsWith(AppRoutes.adminCampuses);
+
 class _SideNav extends StatelessWidget {
-  const _SideNav({required this.location, required this.isAdmin});
+  const _SideNav({
+    required this.location,
+    required this.isAdmin,
+    required this.isCentral,
+  });
 
   final String location;
   final bool isAdmin;
+  final bool isCentral;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final all = [...memberDestinations, if (isAdmin) ...adminDestinations];
+    final all = [
+      ...memberDestinations,
+      if (isAdmin) ...adminDestinations,
+      if (isCentral) ...centralDestinations,
+    ];
     final selected = matchDestination(all, location);
     final selectedPath = selected == null ? null : all[selected].path;
 
@@ -157,7 +184,14 @@ class _SideNav extends StatelessWidget {
                     ),
                   ),
                 ),
+                if (isCentral)
+                  const Padding(
+                    padding: EdgeInsets.fromLTRB(24, 4, 12, 8),
+                    child: CampusSwitcher(width: 200),
+                  ),
                 for (final d in adminDestinations) tile(d),
+                if (isCentral)
+                  for (final d in centralDestinations) tile(d),
               ],
             ],
           ),

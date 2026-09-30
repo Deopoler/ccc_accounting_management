@@ -18,6 +18,11 @@ import 'package:ccc_accounting_management/features/auth/presentation/change_pass
 import 'package:ccc_accounting_management/features/auth/presentation/login_page.dart';
 import 'package:ccc_accounting_management/features/auth/presentation/pending_approval_page.dart';
 import 'package:ccc_accounting_management/features/auth/presentation/signup_page.dart';
+import 'package:ccc_accounting_management/features/campus/data/campus_repository.dart';
+import 'package:ccc_accounting_management/features/campus/presentation/admin_campuses_page.dart';
+import 'package:ccc_accounting_management/features/campus/presentation/campus_switcher.dart';
+import 'package:ccc_accounting_management/features/campus/domain/campus.dart';
+import 'package:ccc_accounting_management/features/campus/presentation/campus_providers.dart';
 import 'package:ccc_accounting_management/features/events/data/event_repository.dart';
 import 'package:ccc_accounting_management/features/events/domain/event.dart';
 import 'package:ccc_accounting_management/features/events/presentation/event_providers.dart';
@@ -72,7 +77,7 @@ Profile _profile(
 );
 
 final _members = [
-  _profile('u1', role: UserRole.admin),
+  _profile('u1', role: UserRole.campusAdmin),
   for (var i = 2; i < 8; i++) _profile('$i'),
   _profile('p1', approved: false),
   _profile('p2', approved: false),
@@ -200,20 +205,36 @@ List<EventPayment> _payments(String eventId) => [
 // 가짜 저장소
 // ---------------------------------------------------------------------------
 
+/// 로그인한 사용자. null 이면 첫 번째 회원(캠퍼스 관리자).
+Profile? _signedIn;
+
+final _central = Profile(
+  id: 'u1',
+  campusId: 'k',
+  studentId: '20250133',
+  name: _longName,
+  role: UserRole.centralAdmin,
+  mustChangePassword: false,
+  isApproved: true,
+  createdAt: DateTime(2026),
+);
+
 class _FakeAuth implements AuthRepository {
   @override
   String? get currentUserId => 'u1';
   @override
-  Future<Profile?> fetchProfile(String userId) async => _members.first;
+  Future<Profile?> fetchProfile(String userId) async =>
+      _signedIn ?? _members.first;
   @override
   dynamic noSuchMethod(Invocation i) => super.noSuchMethod(i);
 }
 
 class _FakeTextbooks implements TextbookRepository {
   @override
-  Future<List<Textbook>> fetchTextbooks() async => _textbooks;
+  Future<List<Textbook>> fetchTextbooks(String campusId) async => _textbooks;
   @override
-  Future<List<TextbookCategory>> fetchCategories() async => _categories;
+  Future<List<TextbookCategory>> fetchCategories(String campusId) async =>
+      _categories;
   @override
   Future<OrderRound> fetchCurrentRound() async => _round;
   @override
@@ -221,8 +242,10 @@ class _FakeTextbooks implements TextbookRepository {
   @override
   Future<TextbookOrder?> fetchOrder(String orderId) async => _orders.first;
   @override
-  Future<List<TextbookOrder>> fetchAllOrders({DateTime? roundStart}) async =>
-      _orders;
+  Future<List<TextbookOrder>> fetchAllOrders(
+    String campusId, {
+    DateTime? roundStart,
+  }) async => _orders;
   @override
   Future<void> updateOrdersStatus(List<String> ids, OrderStatus status) async =>
       _calls.add('status ${status.name} ${ids.join(',')}');
@@ -246,7 +269,7 @@ final _calls = <String>[];
 
 class _FakeEvents implements EventRepository {
   @override
-  Future<List<Event>> fetchEvents() async => _events;
+  Future<List<Event>> fetchEvents(String campusId) async => _events;
   @override
   Future<Event?> fetchEvent(String id) async => _events.first;
   @override
@@ -281,18 +304,19 @@ class _FakeEvents implements EventRepository {
 
 class _FakeSettings implements SettingsRepository {
   @override
-  Future<BankAccount> fetchBankAccount() async => const BankAccount(
-    bankName: '카카오뱅크',
-    accountNumber: '3333-01-2345678',
-    holder: '대학생선교회 회계',
-  );
+  Future<BankAccount> fetchBankAccount(String campusId) async =>
+      const BankAccount(
+        bankName: '카카오뱅크',
+        accountNumber: '3333-01-2345678',
+        holder: '대학생선교회 회계',
+      );
   @override
   dynamic noSuchMethod(Invocation i) => super.noSuchMethod(i);
 }
 
 class _FakeMembers implements MemberRepository {
   @override
-  Future<List<Profile>> fetchMembers() async => _members;
+  Future<List<Profile>> fetchMembers(String campusId) async => _members;
   @override
   dynamic noSuchMethod(Invocation i) => super.noSuchMethod(i);
 }
@@ -335,6 +359,21 @@ final _pages = <(String, Widget, bool)>[
   ('/pending', const PendingApprovalPage(), false),
 ];
 
+class _FakeCampuses implements CampusRepository {
+  @override
+  Future<List<Campus>> listCampuses() async => const [
+    Campus(id: 'k', code: 'kaist', name: 'KAIST', emailDomain: 'ccc.local'),
+    Campus(
+      id: 's',
+      code: 'snu',
+      name: '아주 긴 이름의 캠퍼스 (제2캠퍼스 · 국제관)',
+      emailDomain: 'snu.ccc.local',
+    ),
+  ];
+  @override
+  dynamic noSuchMethod(Invocation i) => super.noSuchMethod(i);
+}
+
 List<Override> get _overrides => [
   currentUserIdProvider.overrideWithValue('u1'),
   authRepositoryProvider.overrideWithValue(_FakeAuth()),
@@ -342,6 +381,7 @@ List<Override> get _overrides => [
   eventRepositoryProvider.overrideWithValue(_FakeEvents()),
   settingsRepositoryProvider.overrideWithValue(_FakeSettings()),
   memberRepositoryProvider.overrideWithValue(_FakeMembers()),
+  campusRepositoryProvider.overrideWithValue(_FakeCampuses()),
 ];
 
 Future<void> _pump(
@@ -489,6 +529,70 @@ void main() {
       await tester.tap(find.widgetWithText(TextButton, '취소'));
       await tester.pumpAndSettle();
       expect(_calls, isEmpty);
+    });
+  });
+
+  group('총괄 관리자', () {
+    setUp(() => _signedIn = _central);
+    tearDown(() => _signedIn = null);
+
+    for (final (sizeName, dark) in [
+      ('작은 모바일', false),
+      ('모바일', true),
+      ('태블릿 경계', false),
+      ('데스크톱', false),
+      ('데스크톱', true),
+    ]) {
+      final label = '${dark ? '다크 ' : ''}$sizeName';
+      for (final (path, page) in [
+        ('/admin', const AdminHubPage() as Widget),
+        ('/admin/campuses', const AdminCampusesPage()),
+        ('/admin/members', const AdminMembersPage()),
+      ]) {
+        testWidgets('$label $path', (tester) async {
+          await _pump(
+            tester,
+            _sizes[sizeName]!,
+            path,
+            page,
+            true,
+            theme: dark ? AppTheme.dark() : null,
+          );
+          expect(tester.takeException(), isNull);
+        });
+      }
+    }
+
+    testWidgets('캠퍼스를 바꾸면 관리자 화면 제목에 그 캠퍼스가 붙는다', (tester) async {
+      await _pump(
+        tester,
+        _sizes['데스크톱']!,
+        '/admin/members',
+        const AdminMembersPage(),
+        true,
+      );
+      expect(find.text('회원 관리 · KAIST'), findsOneWidget);
+      // 사이드 메뉴의 캠퍼스 전환
+      await tester.tap(find.byType(DropdownMenu<String>));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('아주 긴 이름의 캠퍼스 (제2캠퍼스 · 국제관)').last);
+      await tester.pumpAndSettle();
+      expect(find.text('회원 관리 · 아주 긴 이름의 캠퍼스 (제2캠퍼스 · 국제관)'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('캠퍼스 관리자에게는 전환 / 캠퍼스 관리 메뉴가 없다', (tester) async {
+      _signedIn = null;
+      await _pump(
+        tester,
+        _sizes['데스크톱']!,
+        '/admin/members',
+        const AdminMembersPage(),
+        true,
+      );
+      expect(find.byType(CampusSwitcher), findsNothing);
+      expect(find.text('캠퍼스 관리'), findsNothing);
+      expect(find.text('회원 관리'), findsWidgets);
     });
   });
 

@@ -1,0 +1,22 @@
+{
+  // F5 로 실행. 접속 정보 파일(env.json / env.staging.json)은 README 2-5, 3-1 참고.
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "테스트 서버 (staging)",
+      "request": "launch",
+      "type": "dart",
+      "program": "lib/main.dart",
+      "deviceId": "chrome",
+      "args": ["--dart-define-from-file=env.staging.json"]
+    },
+    {
+      "name": "운영 서버",
+      "request": "launch",
+      "type": "dart",
+      "program": "lib/main.dart",
+      "deviceId": "chrome",
+      "args": ["--dart-define-from-file=env.json"]
+    }
+  ]
+}

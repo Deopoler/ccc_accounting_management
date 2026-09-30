@@ -1,10 +1,12 @@
 # CCC 회계 관리 시스템
 
-동아리(CCC) 회계 업무용 웹앱. 회원은 교재를 신청하고 이벤트 송금 여부를 확인하며, 회계 관리자는 가입 승인·입금 확인·송금 현황을 관리한다.
+동아리(CCC) 회계 업무용 웹앱. 여러 캠퍼스가 함께 쓴다. 회원은 교재를 신청하고 이벤트 송금 여부를 확인하며,
+캠퍼스 관리자는 자기 캠퍼스의 가입 승인·입금 확인·송금 현황을, 총괄 관리자는 모든 캠퍼스를 관리한다.
 
 - Flutter Web (Material 3, 반응형) + Riverpod + go_router
 - Supabase (Auth + Postgres + RLS + Edge Functions)
-- 로그인은 **학번 / 비밀번호**. 내부적으로 `{학번}@ccc.local` 가상 이메일로 Supabase Auth 를 사용한다.
+- 로그인은 **캠퍼스 / 학번 / 비밀번호**. 내부적으로 가상 이메일로 Supabase Auth 를 사용한다.
+  KAIST 는 `{학번}@ccc.local`, 다른 캠퍼스는 `{학번}@{캠퍼스 코드}.ccc.local`.
 
 ## 기능
 
@@ -15,7 +17,9 @@
 | 교재 신청: 카테고리 → 교재 선택(교재명 검색), 주간 회차, 완료 시 송금 계좌 안내·복사 | 교재 신청 현황: 회차·교재·상태·검색 필터, 입금확인, 교재별 집계, CSV |
 | 내 신청 내역: 이번 회차 신청은 수정·취소 | 이벤트 등록 / 수정 / 삭제, 입금자명 지정, 송금 대상 지정(전체 선택), 개인별 금액 조정 |
 | 이벤트별 내 송금 여부와 송금 안내(금액·계좌·입금자명 복사) | 이벤트별 송금률·수금액, 송금 토글, 미납자 복사·CSV |
-| 비밀번호 변경 | 송금 계좌 설정 |
+| 비밀번호 변경 | 송금 계좌 설정 (캠퍼스별) |
+
+총괄 관리자는 위 관리자 기능을 **모든 캠퍼스**에서 쓰고(캠퍼스 전환), 캠퍼스 추가·이름 변경, 총괄 관리자 지정을 한다.
 
 ## 폴더 구조
 
@@ -68,7 +72,11 @@ Dashboard > **Authentication** 에서
 
 ### 2-3. 스키마 / RLS 적용
 
+평소에는 **CI 가 자동으로 적용**한다. ([5. 배포](#5-배포-github-pages), [3-1 테스트 서버](#3-1-테스트-서버-staging))
+새 프로젝트를 처음 만들 때만 아래처럼 직접 적용한다.
+
 **SQL Editor**: [supabase/migrations/](supabase/migrations/) 의 파일을 **이름 순서대로** 하나씩 붙여넣고 실행한다.
+SQL Editor 로 적용했다면 CI 를 쓰기 전에 [적용 이력 맞추기](#적용-이력-맞추기-sql-editor-로-적용해-온-db)를 한다.
 
 1. `20260929000000_init.sql` — 스키마 / RLS / 교재 신청 RPC
 2. `20260930000000_self_signup_approval.sql` — 자유 가입 + 관리자 승인
@@ -80,25 +88,25 @@ Dashboard > **Authentication** 에서
 8. `20261006000000_order_round_wed_9am.sql` — 신청 마감을 수요일 오전 9시로
 9. `20261007000000_order_delivery.sql` — 교재 배송 / 수령 확인
 10. `20261008000000_admin_order_received.sql` — 관리자 수령 처리 / 확인자 기록
+11. `20261009000000_campuses.sql` — 캠퍼스 / 역할(회원·캠퍼스 관리자·총괄 관리자) / 캠퍼스별 RLS.
+    회원이 있는 DB 에서는 학번 20250133(KAIST) 계정이 있어야 적용된다.
 
-**또는 CLI**:
+**또는 CLI** (접속 문자열은 [CLI 로 적용할 때](#cli-로-적용할-때) 참고):
 
 ```sh
-npx supabase init          # supabase/config.toml 생성 (기존 migrations 유지)
-npx supabase login
-npx supabase link --project-ref <프로젝트 ref>
-npx supabase db push
+npx supabase db push --db-url "<Session pooler 접속 문자열>"
 ```
 
 ### 2-4. Edge Function (비밀번호 초기화 / 가입 거절)
 
 [supabase/functions/admin-members/index.ts](supabase/functions/admin-members/index.ts) 를 배포하고 기본 비밀번호를 secret 으로 설정한다.
-호출자의 토큰과 관리자 여부는 함수 안에서 직접 검증하므로 `--no-verify-jwt` 로 배포한다.
+호출자의 토큰과 관리자 여부는 함수 안에서 직접 검증하므로 JWT 검증을 끈다. ([supabase/config.toml](supabase/config.toml) 의 `verify_jwt = false`)
+배포는 평소 CI 가 한다. `DEFAULT_PASSWORD` 만 프로젝트마다 한 번 설정한다.
 
 ```sh
 npx supabase login
 npx supabase secrets set DEFAULT_PASSWORD='영문숫자8자이상' --project-ref <프로젝트 ref>
-npx supabase functions deploy admin-members --no-verify-jwt --project-ref <프로젝트 ref>
+npx supabase functions deploy admin-members --project-ref <프로젝트 ref>   # 직접 배포할 때만
 ```
 
 CLI 없이: Dashboard > **Edge Functions** > Deploy a new function > Via Editor 에서 이름을 `admin-members` 로 하고
@@ -122,11 +130,13 @@ index.ts 내용을 붙여넣어 배포한 뒤, 함수 설정에서 **Verify JWT*
 > publishable 키는 브라우저에 노출되는 공개 키다. 실제 권한은 RLS 가 강제한다.
 > **secret / service_role 키는 절대 앱이나 env.json 에 넣지 않는다.** (Edge Function 에서만 사용)
 
-### 2-6. 최초 관리자 지정
+### 2-6. 최초 총괄 관리자 지정
 
-1. 앱에서 **가입하기**로 관리자 본인 계정을 만든다. (승인 대기 화면이 나오면 정상)
-2. [supabase/bootstrap_admin.sql](supabase/bootstrap_admin.sql) 의 학번을 바꿔 SQL Editor 에서 실행
+1. 앱에서 **가입하기**로 본인 계정을 만든다. (승인 대기 화면이 나오면 정상)
+2. [supabase/bootstrap_admin.sql](supabase/bootstrap_admin.sql) 의 학번 / 캠퍼스를 바꿔 SQL Editor 에서 실행
 3. 승인 대기 화면에서 **승인 여부 다시 확인**
+
+이후 캠퍼스 추가, 캠퍼스 관리자 지정은 앱에서 한다. ([6. 관리자 운영 가이드](#6-관리자-운영-가이드))
 
 ## 3. 실행
 
@@ -149,32 +159,45 @@ flutter run -d chrome --dart-define-from-file=env.staging.json   # 테스트 서
 #### 만들기 (최초 1회)
 
 1. Supabase 에서 새 프로젝트를 만들고 [2-2 Auth 설정](#2-2-auth-설정-중요)을 운영과 똑같이 한다.
-2. [supabase/migrations/](supabase/migrations/) 전체를 순서대로 적용한다. (2-3 과 같음)
-3. Edge Function 을 배포하고 `DEFAULT_PASSWORD` 를 설정한다. (2-4 와 같음, `--project-ref` 만 테스트 서버 것으로)
+2. `DEFAULT_PASSWORD` 를 설정한다. (2-4, `--project-ref` 만 테스트 서버 것으로)
+3. 저장소 Secrets 에 `STAGING_DB_URL`, `STAGING_PROJECT_REF` 를 넣는다. ([5. 배포](#5-배포-github-pages) 표 참고)
+   이후 `feature/**` 브랜치에 push 하면 마이그레이션 / Edge Function 이 테스트 서버에 적용된다.
 4. `env.staging.example.json` 을 `env.staging.json` 으로 복사해 테스트 서버의 URL / publishable 키를 넣는다.
 5. 테스트 서버로 앱을 띄워 관리자 / 회원 테스트 계정을 가입시키고, 2-6 처럼 관리자를 지정한다.
 
-#### DB 변경 순서
+#### 작업 순서
 
-1. 마이그레이션 작성 → `supabase/tests` 에서 `npm test`
-2. **테스트 서버**에 적용 → `env.staging.json` 으로 앱을 띄워 확인
-3. **운영**에 적용 → 확인 (새 컬럼 / 함수가 생겼는지)
-4. `main` 에 push (앱 배포)
+1. `feature/<이름>` 브랜치에서 작업한다. 마이그레이션을 추가하면 `supabase/tests` 에서 `npm test`
+2. 브랜치에 push → CI([staging.yml](.github/workflows/staging.yml))가 테스트 후 **테스트 서버**에
+   마이그레이션 / Edge Function 을 적용한다. `env.staging.json` 으로 앱을 띄워 확인한다.
+3. `main` 에 merge → CI([deploy-pages.yml](.github/workflows/deploy-pages.yml))가 테스트 후 **운영**에
+   마이그레이션 / Edge Function 을 적용하고, 그다음 앱을 배포한다.
 
-> 운영에 적용하기 전에 push 하면 새 앱이 아직 없는 컬럼을 조회해 화면이 깨진다. 3 → 4 순서를 지킨다.
+> **`main` 에 merge 하는 순간 운영 DB 가 바뀐다.** 앱이 준비되지 않은 DB 변경은 `main` 에 넣지 않는다.
+> 적용된 마이그레이션 파일은 고치지 말고 새 마이그레이션을 추가한다. (CI 는 이미 적용된 버전을 다시 실행하지 않는다)
 
 #### CLI 로 적용할 때
 
 두 프로젝트를 오가므로 `link` 대신 대상을 매번 명시한다.
 
 ```sh
-npx supabase db push --db-url "postgresql://postgres.<ref>:<DB 비밀번호>@<pooler 호스트>:5432/postgres"
+npx supabase migration list --db-url "postgresql://postgres.<ref>:<DB 비밀번호>@<pooler 호스트>:5432/postgres"
 ```
 
-접속 문자열은 Dashboard 상단 **Connect** > Session pooler 에서 복사한다.
-운영 DB 에 처음 CLI 를 쓸 때는 `npx supabase migration list --db-url ...` 로 적용 이력을 먼저 확인한다.
-SQL Editor 로만 적용해 왔다면 이력이 비어 있어 전체를 다시 적용하려 하므로,
-`npx supabase migration repair --status applied <버전...> --db-url ...` 로 이미 적용된 버전을 먼저 표시한다.
+- 접속 문자열: Dashboard 상단 **Connect** > Connection String > **Session pooler** (5432).
+  Direct connection 은 IPv6 전용이라 GitHub Actions 에서 접속되지 않을 수 있고, Transaction pooler(6543)는 마이그레이션에 맞지 않는다.
+- DB 비밀번호는 프로젝트를 만들 때 정한 것. Project Settings > Database 에서 재설정할 수 있다. (앱은 API 키를 쓰므로 영향 없음)
+  특수문자는 URL 인코딩해야 하므로 영문 / 숫자로 된 비밀번호가 편하다.
+- PowerShell 에서는 여러 줄 명령의 `\` 를 쓸 수 없으니 한 줄로 실행하고, 비밀번호에 `$` 가 있으면 작은따옴표로 감싼다.
+
+#### 적용 이력 맞추기 (SQL Editor 로 적용해 온 DB)
+
+CLI 는 `supabase_migrations.schema_migrations` 의 이력으로 적용 여부를 판단한다. SQL Editor 로만 적용한 DB 는 이력이 비어 있어
+CI 가 전부 다시 적용하려다 실패하므로, 이미 적용된 버전을 한 번 표시한다. (스키마는 바꾸지 않는다)
+
+```sh
+npx supabase migration repair --status applied <적용된 버전들...> --db-url "<접속 문자열>"
+```
 
 ## 4. 테스트
 
@@ -201,15 +224,25 @@ DB 테스트는 실제 Supabase 없이 PGlite(WASM Postgres)에 Supabase 의 `au
 ## 5. 배포 (GitHub Pages)
 
 [.github/workflows/deploy-pages.yml](.github/workflows/deploy-pages.yml) 이 `main` 에 push 될 때마다
-**테스트(analyze · flutter test · DB 권한 테스트) → 웹 빌드 → Pages 배포**를 한다. 테스트가 실패하면 배포하지 않는다.
+**테스트(analyze · flutter test · DB 권한 테스트) → 운영 DB 마이그레이션 / Edge Function → 웹 빌드 → Pages 배포**를 한다.
+테스트가 실패하면 DB 도 바꾸지 않고 배포하지 않는다. 새 앱이 새 컬럼을 조회하므로 DB 를 먼저 바꾼다.
 
 ### 최초 1회 설정
 
 1. GitHub 에 저장소를 만들고 이 프로젝트를 push 한다.
    무료 플랜에서 Pages 는 **public 저장소**만 가능하다. (코드에 비밀값은 없다: `env.json` 은 커밋되지 않고, publishable 키는 공개 키다)
 2. 저장소 **Settings > Secrets and variables > Actions > New repository secret**
-   - `SUPABASE_URL` = `https://<ref>.supabase.co`
-   - `SUPABASE_PUBLISHABLE_KEY` = `sb_publishable_...`
+
+   | Secret | 값 | 용도 |
+   | --- | --- | --- |
+   | `SUPABASE_URL` | `https://<운영 ref>.supabase.co` | 앱 빌드 |
+   | `SUPABASE_PUBLISHABLE_KEY` | 운영 `sb_publishable_...` | 앱 빌드 |
+   | `PROD_DB_URL` / `STAGING_DB_URL` | 각 프로젝트 Session pooler 접속 문자열 (DB 비밀번호 포함) | 마이그레이션 적용 |
+   | `PROD_PROJECT_REF` / `STAGING_PROJECT_REF` | 각 프로젝트 ref | Edge Function 배포 대상 |
+   | `SUPABASE_ACCESS_TOKEN` | Supabase 계정 > Access Tokens (`sbp_...`). 가능하면 두 프로젝트의 Edge Functions 배포 권한만 | Edge Function 배포 |
+
+   선택: **Settings > Environments** 에 `production` 을 만들고 **Required reviewers** 를 지정하면
+   운영 DB 를 바꾸기 전에 Actions 화면에서 승인을 기다린다.
 3. 저장소 **Settings > Pages > Build and deployment > Source** 를 **GitHub Actions** 로 선택
 4. **Actions** 탭에서 워크플로가 끝나면 주소가 나온다: `https://<아이디>.github.io/<저장소>/`
 5. Supabase Dashboard > Authentication > **URL Configuration** 의 Site URL 을 위 주소로 바꾼다.
@@ -230,30 +263,46 @@ cp build/web/index.html build/web/404.html
 
 - **가입 승인**: 관리자 > 회원 관리 > 승인 대기. 학번·이름이 실제 회원과 맞는지 확인 후 승인. 잘못된 가입은 **거절**(계정 삭제, 재가입 가능).
 - **비밀번호 분실**: 회원 관리 > ⋮ > **비밀번호 초기화** → 회원에게 기본 비밀번호를 직접 전달. 다음 로그인 때 새 비밀번호로 변경이 강제된다.
-- **관리자 추가**: 회원 관리 > ⋮ > **관리자로 지정**. 마지막 관리자는 해제할 수 없다.
+- **캠퍼스 관리자 추가**: 회원 관리 > ⋮ > **캠퍼스 관리자로 지정**. 캠퍼스 관리자도 자기 캠퍼스 회원을 지정할 수 있다.
+  캠퍼스의 마지막 관리자는 해제할 수 없다. (총괄 관리자는 가능)
 - **교재 입금 확인**: 교재 신청 현황에서 회차를 고르고 **입금확인** 체크. 입금확인된 신청은 회원이 수정·취소할 수 없다.
 - **이벤트**: 이벤트 추가(입금자명 형식 지정) → 이벤트 화면에서 **대상 추가 > 회원 전체 선택** → 금액이 다른 회원은 ⋮ > **금액 변경** → 송금이 확인되면 스위치를 켠다.
-- **송금 계좌 / 기본 비밀번호**: 계좌는 관리자 > 설정. 기본 비밀번호는 Supabase Dashboard > Edge Functions > Secrets 의 `DEFAULT_PASSWORD`.
+- **송금 계좌 / 기본 비밀번호**: 계좌는 관리자 > 설정 (캠퍼스별). 기본 비밀번호는 Supabase Dashboard > Edge Functions > Secrets 의 `DEFAULT_PASSWORD`.
+
+### 총괄 관리자
+
+- **캠퍼스 전환**: 사이드 메뉴(모바일은 관리 탭) 위의 **관리 중인 캠퍼스**. 관리자 화면만 바뀌고 제목에 캠퍼스가 붙는다.
+  회원 화면(교재 신청, 이벤트, 입금 안내)은 본인 캠퍼스 그대로다.
+- **캠퍼스 추가**: 관리자 > 캠퍼스 관리 > 캠퍼스 추가. 이름과 영문 코드(예: `snu`)를 정한다.
+  코드는 그 캠퍼스 회원의 로그인 아이디(`학번@snu.ccc.local`)에 쓰이므로 **바꿀 수 없다**. 이름은 바꿀 수 있다.
+- **새 캠퍼스 시작**: 캠퍼스 추가 → 그 캠퍼스 담당자가 앱에서 캠퍼스를 골라 가입 → 캠퍼스 관리 > **이 캠퍼스 관리하기** →
+  회원 관리에서 승인하고 **캠퍼스 관리자로 지정** → 이후 교재 / 이벤트 / 계좌는 캠퍼스 관리자가 관리한다.
+- **총괄 관리자 지정 / 해제**: 회원 관리 > ⋮. 해제하면 캠퍼스 관리자로 남는다. 마지막 총괄 관리자는 해제할 수 없다.
 
 ## 인증 흐름
 
-- 로그인: 학번 → `{학번 소문자}@ccc.local` 로 변환해 Supabase Auth 이메일/비밀번호 로그인.
-- 가입: `/signup` 에서 학번·이름·비밀번호 → `signUp`. DB 트리거가 프로필을 **승인 대기**로 만든다.
-  학번은 가입 이메일에서 추출하고 role 은 항상 member 다. (user_metadata 는 사용자가 조작할 수 있으므로 이름만 사용)
+- 로그인: 캠퍼스(로그인 전 `list_campuses` 로 목록) + 학번 → `{학번 소문자}@{캠퍼스 이메일 도메인}` 으로 Supabase Auth 로그인.
+  캠퍼스가 하나면 선택 칸 없이 자동 선택하고, 마지막으로 쓴 캠퍼스를 브라우저에 기억한다.
+- 가입: `/signup` 에서 캠퍼스·학번·이름·비밀번호 → `signUp`. DB 트리거가 프로필을 **승인 대기**로 만든다.
+  학번과 캠퍼스는 가입 이메일에서 서버가 정하고 role 은 항상 member 다. (user_metadata 는 사용자가 조작할 수 있으므로 이름만 사용)
 - 라우터 가드 ([lib/core/router/auth_guard.dart](lib/core/router/auth_guard.dart))
   1. 로그인 안 됨 → `/login?from=<원래 경로>` (`/signup` 은 허용)
   2. 프로필 로딩 중 / 프로필 없음 → `/loading`
   3. 가입 승인 전 → `/pending` 외 모든 화면 차단
   4. `must_change_password` (관리자 비밀번호 초기화 후) → `/change-password` 외 모든 화면 차단
-  5. member 가 `/admin/**` 접근 → `/home`
+  5. member 가 `/admin/**` 접근 → `/home`, 총괄 관리자가 아닌데 `/admin/campuses` 접근 → `/admin`
 - 비밀번호 변경: 현재 비밀번호로 재인증 후 변경. 비밀번호가 실제로 바뀌면 DB 트리거가 `must_change_password` 를 해제한다.
 - 역할 체크는 화면 표시용이다. 데이터 권한은 RLS 가 강제한다.
 
 ## 권한 모델
 
 - 모든 테이블 RLS ON, `anon` 은 모든 테이블/함수 접근 불가. `private` 스키마는 API 에 노출되지 않는다.
-- admin / member 모두 Postgres 롤은 `authenticated` 이다. 역할 구분은 RLS 정책의
-  `private.is_admin()` / `private.is_approved_user()` (profiles 조회)로 한다.
+- 모든 사용자의 Postgres 롤은 `authenticated` 이다. 역할 / 캠퍼스 구분은 RLS 정책의
+  `private.my_campus_id()` (승인된 사용자의 캠퍼스), `private.admin_campus_id()` (캠퍼스 관리자의 캠퍼스),
+  `private.is_central_admin()` 으로 한다. 캠퍼스 관리자는 자기 캠퍼스, 총괄 관리자는 전체를 다룬다.
+- 캠퍼스가 섞이지 않게 DB 가 막는다: 다른 캠퍼스 교재 신청(RPC), 다른 캠퍼스 카테고리(복합 FK),
+  다른 캠퍼스 회원을 송금 대상으로 지정(트리거). 교재 / 이벤트는 다른 캠퍼스로 옮길 수 없다.
+- 총괄 관리자 지정 / 해제, 회원의 캠퍼스 이동은 총괄 관리자만 한다. (트리거)
 - 컬럼 권한(GRANT)으로 **관리자도 클라이언트에서 바꿀 수 없는 컬럼**을 막는다.
   - `profiles.id / student_id / created_at`, `textbook_orders.total_price / user_id / round_start`,
     `textbook_order_items.*`, `event_payments.paid_at / confirmed_by`
@@ -261,17 +310,21 @@ cp build/web/index.html build/web/404.html
   주문자는 `auth.uid()`, 가격은 교재 테이블에서 서버가 계산한다.
 - `must_change_password` 는 클라이언트가 바꿀 수 없고, 비밀번호가 실제로 바뀔 때만 트리거가 해제한다. (강제 변경 우회 불가)
 - 로그인 아이디(이메일 = 학번)는 트리거로 변경을 막는다. (남의 학번 선점 방지)
-- 비밀번호 초기화 / 가입 거절은 Edge Function(service role)에서 호출자가 **승인된 admin** 인지 검증 후 수행한다.
+- 비밀번호 초기화 / 가입 거절은 Edge Function(service role)에서 호출자가 **승인된 관리자**이고 대상이 자기 캠퍼스 회원인지
+  (총괄 관리자는 전체) 검증 후 수행한다. 총괄 관리자 계정은 총괄 관리자만 다룬다.
   본인 계정은 대상이 될 수 없고, 승인된 회원은 삭제하지 않는다. (회계 기록 보존)
 
-| 테이블 | 승인 대기 | member | admin |
-| --- | --- | --- | --- |
-| profiles | 본인 조회 | 본인 조회 | 전체 조회, 이름/역할/승인 수정 |
-| textbooks / textbook_categories | - | 조회 | CRUD |
-| textbook_orders / items | - | 본인 조회, RPC 로 신청·수정·취소 | 전체 조회, 상태 변경, 삭제 |
-| events | - | 조회 | CRUD |
-| event_payments | - | 본인 조회 | 전체 조회, 송금 여부 토글, 개인별 금액, 대상 추가/제외 |
-| app_settings | - | 조회 | 수정 |
+| 테이블 | 승인 대기 | member | campus_admin (자기 캠퍼스) | central_admin |
+| --- | --- | --- | --- | --- |
+| campuses | - | 자기 캠퍼스 조회 | 자기 캠퍼스 이름 / 계좌 수정 | 전체, 추가 / 삭제 |
+| profiles | 본인 조회 | 본인 조회 | 조회, 이름 / 승인 / 캠퍼스 관리자 지정 | 전체, 총괄 관리자 지정, 캠퍼스 이동 |
+| textbooks / textbook_categories | - | 자기 캠퍼스 조회 | CRUD | 전체 CRUD |
+| textbook_orders / items | - | 본인 조회, RPC 로 신청·수정·취소 | 조회, 상태 / 배송 / 수령 처리, 삭제 | 전체 |
+| events | - | 자기 캠퍼스 조회 | CRUD | 전체 CRUD |
+| event_payments | - | 본인 조회 | 조회, 송금 여부 토글, 개인별 금액, 대상 추가/제외 | 전체 |
+| app_settings (이전 앱 호환) | - | 조회 | - | 수정 |
+
+로그인 전(`anon`)에는 `list_campuses()` (캠퍼스 이름 / 코드 / 로그인 도메인)만 호출할 수 있다.
 
 > 새 테이블을 추가하는 마이그레이션에서는 Supabase 기본 권한 때문에 `anon`, `authenticated` 에
 > 모든 권한이 자동으로 부여된다. 반드시 RLS 를 켜고 권한을 회수한 뒤 필요한 것만 다시 GRANT 한다.

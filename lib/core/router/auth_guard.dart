@@ -48,6 +48,11 @@ String? authRedirect(AuthSnapshot auth, Uri uri) {
       (path == AppRoutes.admin || path.startsWith('${AppRoutes.admin}/'))) {
     return AppRoutes.home;
   }
+  if (!profile.isCentralAdmin &&
+      (path == AppRoutes.adminCampuses ||
+          path.startsWith('${AppRoutes.adminCampuses}/'))) {
+    return AppRoutes.admin;
+  }
   return null;
 }
 

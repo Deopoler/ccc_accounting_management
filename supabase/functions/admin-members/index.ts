@@ -6,8 +6,10 @@
 //   POST { action: "reject_signup",  user_id }  승인 대기 가입 신청 거절 (계정 삭제)
 //
 // 보안
-//   * 호출자의 access token 을 서버에서 검증하고, profiles 에서 승인된 admin 인지 확인한다.
+//   * 호출자의 access token 을 서버에서 검증하고, profiles 에서 승인된 관리자인지 확인한다.
 //     (클라이언트의 역할 체크는 신뢰하지 않는다)
+//   * 캠퍼스 관리자는 자기 캠퍼스 회원만, 총괄 관리자는 모든 회원을 다룬다.
+//     총괄 관리자 계정은 총괄 관리자만 다룬다.
 //   * 기본 비밀번호는 Edge Function secret(DEFAULT_PASSWORD)에만 있고 DB/클라이언트에 없다.
 //   * 본인 계정에는 사용할 수 없다. 승인된 회원은 삭제할 수 없다(회계 기록 보존).
 // =============================================================================
@@ -53,10 +55,11 @@ Deno.serve(async (req) => {
 
   const { data: callerProfile } = await admin
     .from('profiles')
-    .select('role, is_approved')
+    .select('role, is_approved, campus_id')
     .eq('id', caller.user.id)
     .maybeSingle();
-  if (callerProfile?.role !== 'admin' || !callerProfile.is_approved) {
+  const isCentral = callerProfile?.role === 'central_admin';
+  if (!callerProfile?.is_approved || (!isCentral && callerProfile.role !== 'campus_admin')) {
     return fail(403, '관리자만 사용할 수 있습니다.');
   }
 
@@ -77,10 +80,16 @@ Deno.serve(async (req) => {
 
   const { data: target } = await admin
     .from('profiles')
-    .select('id, student_id, name, is_approved')
+    .select('id, student_id, name, is_approved, role, campus_id')
     .eq('id', userId)
     .maybeSingle();
-  if (!target) return fail(404, '회원을 찾을 수 없습니다.');
+  // 캠퍼스 관리자는 자기 캠퍼스 회원만. (다른 캠퍼스 회원은 존재 여부도 알려주지 않는다)
+  if (!target || (!isCentral && target.campus_id !== callerProfile.campus_id)) {
+    return fail(404, '회원을 찾을 수 없습니다.');
+  }
+  if (target.role === 'central_admin' && !isCentral) {
+    return fail(403, '총괄 관리자 계정은 총괄 관리자만 관리할 수 있습니다.');
+  }
 
   // ---- 작업 ------------------------------------------------------------------
   switch (action) {

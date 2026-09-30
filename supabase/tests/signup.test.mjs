@@ -16,8 +16,8 @@ let admin;
 
 before(async () => {
   db = await createDb();
-  admin = await createUser(db, { studentId: '20200001', name: '관리자', role: 'admin' });
-  await db.query(`insert into public.textbooks (title, price) values ('교재 A', 10000)`);
+  admin = await createUser(db, { studentId: '20200001', name: '관리자', role: 'campus_admin' });
+  await db.query(`insert into public.textbooks (campus_id, title, price) values ((select id from public.campuses where code = 'kaist'), '교재 A', 10000)`);
 });
 
 describe('가입 트리거', () => {
@@ -99,7 +99,7 @@ describe('승인 전', () => {
 
 describe('승인', () => {
   test('관리자가 승인하면 데이터를 볼 수 있다 (이벤트 대상 자동 등록은 없음)', async () => {
-    await asUser(db, admin, `insert into public.events (title, amount) values ('수련회', 50000)`);
+    await asUser(db, admin, `insert into public.events (campus_id, title, amount) values ((select id from public.campuses where code = 'kaist'), '수련회', 50000)`);
 
     const user = await createUser(db, { studentId: '20242000', approved: false });
     const r = await asUser(db, admin, 'update public.profiles set is_approved = true where id = $1', [user]);
@@ -116,7 +116,7 @@ describe('승인', () => {
   });
 
   test('승인이 해제된 관리자는 관리자 권한을 잃는다', async () => {
-    const admin2 = await createUser(db, { studentId: '20200002', role: 'admin' });
+    const admin2 = await createUser(db, { studentId: '20200002', role: 'campus_admin' });
     await asUser(db, admin, 'update public.profiles set is_approved = false where id = $1', [admin2]);
     const { rows } = await asUser(db, admin2, 'select id from public.profiles');
     assert.deepEqual(rows.map((r) => r.id), [admin2]);

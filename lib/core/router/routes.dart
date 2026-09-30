@@ -23,6 +23,7 @@ abstract final class AppRoutes {
   static const adminEvents = '/admin/events';
   static String adminEventDetail(String eventId) => '/admin/events/$eventId';
   static const adminSettings = '/admin/settings';
+  static const adminCampuses = '/admin/campuses';
 }
 
 class NavDestination {
@@ -99,6 +100,16 @@ const adminDestinations = <NavDestination>[
   ),
 ];
 
+/// 총괄 관리자에게만 보이는 메뉴.
+const centralDestinations = <NavDestination>[
+  NavDestination(
+    path: AppRoutes.adminCampuses,
+    label: '캠퍼스 관리',
+    icon: Icons.domain_outlined,
+    selectedIcon: Icons.domain,
+  ),
+];
+
 /// 화면 제목과 뒤로가기 대상(상위 경로).
 typedef RouteMeta = ({String title, String? parent});
 
@@ -118,7 +129,7 @@ RouteMeta routeMetaFor(String path) {
   for (final d in memberDestinations) {
     if (d.path == path) return (title: d.label, parent: null);
   }
-  for (final d in adminDestinations) {
+  for (final d in [...adminDestinations, ...centralDestinations]) {
     if (d.path == path) return (title: d.label, parent: AppRoutes.admin);
   }
   if (path == AppRoutes.admin) return (title: '관리자 메뉴', parent: null);

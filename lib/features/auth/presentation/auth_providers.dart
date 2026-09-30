@@ -30,3 +30,8 @@ final currentProfileProvider = FutureProvider<Profile?>((ref) async {
 final isAdminProvider = Provider<bool>(
   (ref) => ref.watch(currentProfileProvider).value?.isAdmin ?? false,
 );
+
+/// 화면 표시용 총괄 관리자 여부.
+final isCentralAdminProvider = Provider<bool>(
+  (ref) => ref.watch(currentProfileProvider).value?.isCentralAdmin ?? false,
+);

@@ -15,6 +15,7 @@ import '../domain/textbook_category.dart';
 import '../domain/textbook_order.dart';
 import 'textbook_providers.dart';
 import 'widgets/order_widgets.dart';
+import '../../campus/presentation/campus_providers.dart';
 
 /// 교재 신청: 카테고리 선택 → 교재 선택. [editOrderId] 가 있으면 해당 신청을 수정한다.
 ///
@@ -120,8 +121,10 @@ class _TextbooksPageState extends ConsumerState<TextbooksPage> {
 
   @override
   Widget build(BuildContext context) {
-    final textbooks = ref.watch(textbooksProvider);
-    final categories = ref.watch(textbookCategoriesProvider);
+    final textbooks = ref.watch(textbooksProvider(CampusScope.member));
+    final categories = ref.watch(
+      textbookCategoriesProvider(CampusScope.member),
+    );
     final round = ref.watch(currentRoundProvider);
     final editOrder = _editing
         ? ref.watch(orderProvider(widget.editOrderId!))

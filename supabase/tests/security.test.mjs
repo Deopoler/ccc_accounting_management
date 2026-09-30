@@ -19,13 +19,13 @@ let bobOrderId;
 
 before(async () => {
   db = await createDb();
-  admin = await createUser(db, { studentId: '20200001', name: '관리자', role: 'admin' });
+  admin = await createUser(db, { studentId: '20200001', name: '관리자', role: 'campus_admin' });
   alice = await createUser(db, { studentId: '20240001', name: '앨리스' });
   bob = await createUser(db, { studentId: '20240002', name: '밥' });
   pending = await createUser(db, { studentId: '20249999', approved: false });
 
-  bookId = (await db.query(`insert into public.textbooks (title, price) values ('교재', 10000) returning id`)).rows[0].id;
-  eventId = (await db.query(`insert into public.events (title, amount) values ('행사', 5000) returning id`)).rows[0].id;
+  bookId = (await db.query(`insert into public.textbooks (campus_id, title, price) values ((select id from public.campuses where code = 'kaist'), '교재', 10000) returning id`)).rows[0].id;
+  eventId = (await db.query(`insert into public.events (campus_id, title, amount) values ((select id from public.campuses where code = 'kaist'), '행사', 5000) returning id`)).rows[0].id;
   await db.query(
     `insert into public.event_payments (event_id, user_id) values ($1, $2), ($1, $3)`,
     [eventId, alice, bob],
@@ -52,11 +52,11 @@ describe('스키마 회귀 검사', () => {
     assert.deepEqual(rows, []);
   });
 
-  test('anon 이 실행할 수 있는 public / private 함수가 없다', async () => {
+  test('anon 이 실행할 수 있는 함수는 캠퍼스 목록(로그인 화면용)뿐이다', async () => {
     const { rows } = await db.query(`
-      select n.nspname, p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      select n.nspname || '.' || p.proname as fn from pg_proc p join pg_namespace n on n.oid = p.pronamespace
       where n.nspname in ('public', 'private') and has_function_privilege('anon', p.oid, 'execute')`);
-    assert.deepEqual(rows, []);
+    assert.deepEqual(rows.map((r) => r.fn), ['public.list_campuses']);
   });
 
   test('authenticated 가 실행할 수 있는 함수는 허용 목록뿐이다', async () => {
@@ -66,13 +66,16 @@ describe('스키마 회귀 검사', () => {
         and has_function_privilege('authenticated', p.oid, 'execute')
       order by 1`);
     assert.deepEqual(rows.map((r) => r.fn), [
-      'private.is_admin',
+      'private.admin_campus_id',
       'private.is_approved_user',
+      'private.is_central_admin',
+      'private.my_campus_id',
       'public.admin_set_textbook_received',
       'public.cancel_textbook_order',
       'public.confirm_textbook_received',
       'public.current_order_round',
       'public.get_order_round',
+      'public.list_campuses',
       'public.order_round_deadline',
       'public.place_textbook_order',
       'public.update_textbook_order',
@@ -126,7 +129,7 @@ describe('회원의 우회 시도', () => {
 
   test('upsert 로 교재 가격 / 계좌를 덮어쓸 수 없다', async () => {
     await assert.rejects(asUser(db, alice, `
-      insert into public.textbooks (title, price) values ('x', 0)`));
+      insert into public.textbooks (campus_id, title, price) values ((select id from public.campuses where code = 'kaist'), 'x', 0)`));
     await assert.rejects(asUser(db, alice, `
       insert into public.app_settings (key, value) values ('account_number', 'hacked')
       on conflict (key) do update set value = excluded.value`));

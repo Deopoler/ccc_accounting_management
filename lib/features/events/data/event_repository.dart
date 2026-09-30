@@ -15,10 +15,11 @@ class EventRepository {
   // ---------------------------------------------------------------- 이벤트
 
   /// 화면 표시 순서는 [sortEventsForDisplay] 참고.
-  Future<List<Event>> fetchEvents() async {
+  Future<List<Event>> fetchEvents(String campusId) async {
     final rows = await _client
         .from('events')
         .select()
+        .eq('campus_id', campusId)
         .order('created_at', ascending: false);
     return sortEventsForDisplay(rows.map(Event.fromJson), DateTime.now());
   }
@@ -33,10 +34,10 @@ class EventRepository {
   }
 
   /// 이벤트를 만들고 id 를 돌려준다. 송금 대상은 관리자가 따로 추가한다.
-  Future<String> createEvent(EventInput input) async {
+  Future<String> createEvent(String campusId, EventInput input) async {
     final row = await _client
         .from('events')
-        .insert(input.toJson())
+        .insert({...input.toJson(), 'campus_id': campusId})
         .select('id')
         .single();
     return row['id'] as String;

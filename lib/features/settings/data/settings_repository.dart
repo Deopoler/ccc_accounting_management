@@ -3,27 +3,31 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/supabase/postgrest_ext.dart';
 import '../domain/bank_account.dart';
 
+/// 캠퍼스별 설정. 송금 계좌는 campuses 행에 있다.
 class SettingsRepository {
   SettingsRepository(this._client);
 
   final SupabaseClient _client;
 
-  Future<Map<String, String>> _fetchAll() async {
-    final rows = await _client.from('app_settings').select('key, value');
-    return {for (final r in rows) r['key'] as String: r['value'] as String};
+  static const _bankColumns = 'bank_name, account_number, account_holder';
+
+  Future<BankAccount> fetchBankAccount(String campusId) async {
+    final row = await _client
+        .from('campuses')
+        .select(_bankColumns)
+        .eq('id', campusId)
+        .maybeSingle();
+    return BankAccount.fromSettings(
+      row == null ? const {} : row.map((k, v) => MapEntry(k, v as String)),
+    );
   }
 
-  Future<BankAccount> fetchBankAccount() async =>
-      BankAccount.fromSettings(await _fetchAll());
-
-  /// 키는 마이그레이션에서 미리 만들어 두므로 value 만 갱신한다.
-  Future<void> saveBankAccount(BankAccount account) async {
-    for (final e in account.toSettings().entries) {
-      await _client
-          .from('app_settings')
-          .update({'value': e.value.trim()})
-          .eq('key', e.key)
-          .expectAffected(column: 'key');
-    }
-  }
+  /// 캠퍼스 관리자는 자기 캠퍼스, 총괄 관리자는 모든 캠퍼스를 저장할 수 있다. (RLS)
+  Future<void> saveBankAccount(String campusId, BankAccount account) => _client
+      .from('campuses')
+      .update({
+        for (final e in account.toSettings().entries) e.key: e.value.trim(),
+      })
+      .eq('id', campusId)
+      .expectAffected();
 }

@@ -9,9 +9,13 @@ class MemberRepository {
 
   final SupabaseClient _client;
 
-  /// 전체 회원 (관리자만 전체가 조회된다 - RLS).
-  Future<List<Profile>> fetchMembers() async {
-    final rows = await _client.from('profiles').select().order('student_id');
+  /// 캠퍼스 회원 (관리자만 조회된다 - RLS).
+  Future<List<Profile>> fetchMembers(String campusId) async {
+    final rows = await _client
+        .from('profiles')
+        .select()
+        .eq('campus_id', campusId)
+        .order('student_id');
     return rows.map(Profile.fromJson).toList();
   }
 
@@ -31,7 +35,7 @@ class MemberRepository {
 
   Future<void> setRole(String userId, UserRole role) => _client
       .from('profiles')
-      .update({'role': role.name})
+      .update({'role': role.dbValue})
       .eq('id', userId)
       .expectAffected();
 

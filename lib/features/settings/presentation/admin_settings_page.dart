@@ -4,6 +4,7 @@ import 'package:material_ui/material_ui.dart';
 import '../../../core/widgets/feedback.dart';
 import '../../../core/widgets/responsive.dart';
 import '../../../core/widgets/state_views.dart';
+import '../../campus/presentation/campus_providers.dart';
 import '../domain/bank_account.dart';
 import 'settings_providers.dart';
 
@@ -12,7 +13,7 @@ class AdminSettingsPage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final account = ref.watch(bankAccountProvider);
+    final account = ref.watch(bankAccountProvider(CampusScope.admin));
     return AsyncValueView(
       value: account,
       onRetry: () => ref.invalidate(bankAccountProvider),
@@ -61,6 +62,7 @@ class _BankAccountFormState extends ConsumerState<_BankAccountForm> {
       await ref
           .read(settingsRepositoryProvider)
           .saveBankAccount(
+            await ref.requireAdminCampusId(),
             BankAccount(
               bankName: _bank.text,
               accountNumber: _number.text,
