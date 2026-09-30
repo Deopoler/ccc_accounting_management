@@ -214,9 +214,10 @@ class _FakeAuth implements AuthRepository {
 
 class _FakeTextbooks implements TextbookRepository {
   @override
-  Future<List<Textbook>> fetchTextbooks() async => _textbooks;
+  Future<List<Textbook>> fetchTextbooks(String campusId) async => _textbooks;
   @override
-  Future<List<TextbookCategory>> fetchCategories() async => _categories;
+  Future<List<TextbookCategory>> fetchCategories(String campusId) async =>
+      _categories;
   @override
   Future<OrderRound> fetchCurrentRound() async => _round;
   @override
@@ -224,8 +225,10 @@ class _FakeTextbooks implements TextbookRepository {
   @override
   Future<TextbookOrder?> fetchOrder(String orderId) async => _orders.first;
   @override
-  Future<List<TextbookOrder>> fetchAllOrders({DateTime? roundStart}) async =>
-      _orders;
+  Future<List<TextbookOrder>> fetchAllOrders(
+    String campusId, {
+    DateTime? roundStart,
+  }) async => _orders;
   @override
   Future<void> updateOrdersStatus(List<String> ids, OrderStatus status) async =>
       _calls.add('status ${status.name} ${ids.join(',')}');
@@ -249,7 +252,7 @@ final _calls = <String>[];
 
 class _FakeEvents implements EventRepository {
   @override
-  Future<List<Event>> fetchEvents() async => _events;
+  Future<List<Event>> fetchEvents(String campusId) async => _events;
   @override
   Future<Event?> fetchEvent(String id) async => _events.first;
   @override
@@ -284,18 +287,19 @@ class _FakeEvents implements EventRepository {
 
 class _FakeSettings implements SettingsRepository {
   @override
-  Future<BankAccount> fetchBankAccount() async => const BankAccount(
-    bankName: '카카오뱅크',
-    accountNumber: '3333-01-2345678',
-    holder: '대학생선교회 회계',
-  );
+  Future<BankAccount> fetchBankAccount(String campusId) async =>
+      const BankAccount(
+        bankName: '카카오뱅크',
+        accountNumber: '3333-01-2345678',
+        holder: '대학생선교회 회계',
+      );
   @override
   dynamic noSuchMethod(Invocation i) => super.noSuchMethod(i);
 }
 
 class _FakeMembers implements MemberRepository {
   @override
-  Future<List<Profile>> fetchMembers() async => _members;
+  Future<List<Profile>> fetchMembers(String campusId) async => _members;
   @override
   dynamic noSuchMethod(Invocation i) => super.noSuchMethod(i);
 }

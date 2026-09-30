@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../auth/presentation/auth_providers.dart';
+import '../../campus/presentation/campus_providers.dart';
 import '../../textbooks/domain/textbook_order.dart';
 import '../../textbooks/presentation/textbook_providers.dart';
 
@@ -16,9 +17,13 @@ class AdminOrdersNotifier extends AsyncNotifier<List<TextbookOrder>> {
   final DateTime? roundStart;
 
   @override
-  Future<List<TextbookOrder>> build() => ref
-      .watch(textbookRepositoryProvider)
-      .fetchAllOrders(roundStart: roundStart);
+  Future<List<TextbookOrder>> build() async {
+    final campusId = await ref.watch(activeCampusIdProvider.future);
+    if (campusId == null) return const [];
+    return ref
+        .watch(textbookRepositoryProvider)
+        .fetchAllOrders(campusId, roundStart: roundStart);
+  }
 
   /// 서버에 상태를 저장하고, 성공하면 목록을 다시 불러오지 않고 해당 행만 바꾼다.
   Future<void> setStatus(String orderId, OrderStatus status) async {
@@ -84,8 +89,11 @@ class AdminOrdersNotifier extends AsyncNotifier<List<TextbookOrder>> {
     } finally {
       // 다시 불러오기가 실패해도 원래 오류를 가리지 않게 한다.
       try {
+        final campusId = await ref.read(activeCampusIdProvider.future);
         final repo = ref.read(textbookRepositoryProvider);
-        final fresh = await repo.fetchAllOrders(roundStart: roundStart);
+        final fresh = campusId == null
+            ? const <TextbookOrder>[]
+            : await repo.fetchAllOrders(campusId, roundStart: roundStart);
         if (ref.mounted) state = AsyncData(fresh);
       } catch (_) {
         if (ref.mounted) ref.invalidateSelf();

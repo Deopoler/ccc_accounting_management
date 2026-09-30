@@ -1,4 +1,4 @@
-/// 송금 계좌 정보 (app_settings 의 bank_name / account_number / account_holder).
+/// 송금 계좌 정보 (campuses 의 bank_name / account_number / account_holder).
 class BankAccount {
   const BankAccount({
     required this.bankName,

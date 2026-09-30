@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/supabase/supabase_providers.dart';
 import '../../auth/presentation/auth_providers.dart';
+import '../../campus/presentation/campus_providers.dart';
 import '../data/event_repository.dart';
 import '../domain/event.dart';
 
@@ -9,9 +10,11 @@ final eventRepositoryProvider = Provider<EventRepository>(
   (ref) => EventRepository(ref.watch(supabaseProvider)),
 );
 
-final eventsProvider = FutureProvider.autoDispose<List<Event>>(
-  (ref) => ref.watch(eventRepositoryProvider).fetchEvents(),
-);
+final eventsProvider = FutureProvider.autoDispose<List<Event>>((ref) async {
+  final campusId = await ref.watch(activeCampusIdProvider.future);
+  if (campusId == null) return const [];
+  return ref.watch(eventRepositoryProvider).fetchEvents(campusId);
+});
 
 final eventProvider = FutureProvider.autoDispose.family<Event?, String>(
   (ref, id) => ref.watch(eventRepositoryProvider).fetchEvent(id),

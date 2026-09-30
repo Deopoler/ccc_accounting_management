@@ -7,6 +7,7 @@ import '../../../core/utils/formatters.dart';
 import '../../../core/widgets/feedback.dart';
 import '../../../core/widgets/responsive.dart';
 import '../../../core/widgets/state_views.dart';
+import '../../campus/presentation/campus_providers.dart';
 import '../../textbooks/domain/textbook.dart';
 import '../../textbooks/domain/textbook_category.dart';
 import '../../textbooks/presentation/textbook_providers.dart';
@@ -58,9 +59,13 @@ class AdminTextbooksPage extends ConsumerWidget {
     await _run(
       context,
       ref,
-      () => ref
+      () async => ref
           .read(textbookRepositoryProvider)
-          .createCategory(name, sortOrder: next),
+          .createCategory(
+            await ref.requireActiveCampusId(),
+            name,
+            sortOrder: next,
+          ),
       success: '카테고리를 추가했습니다.',
     );
   }
@@ -152,7 +157,9 @@ class AdminTextbooksPage extends ConsumerWidget {
     await _run(
       context,
       ref,
-      () => ref.read(textbookRepositoryProvider).createTextbook(withOrder),
+      () async => ref
+          .read(textbookRepositoryProvider)
+          .createTextbook(await ref.requireActiveCampusId(), withOrder),
       success: '교재를 추가했습니다.',
     );
   }

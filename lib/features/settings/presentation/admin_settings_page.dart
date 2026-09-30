@@ -4,6 +4,7 @@ import 'package:material_ui/material_ui.dart';
 import '../../../core/widgets/feedback.dart';
 import '../../../core/widgets/responsive.dart';
 import '../../../core/widgets/state_views.dart';
+import '../../campus/presentation/campus_providers.dart';
 import '../domain/bank_account.dart';
 import 'settings_providers.dart';
 
@@ -61,6 +62,7 @@ class _BankAccountFormState extends ConsumerState<_BankAccountForm> {
       await ref
           .read(settingsRepositoryProvider)
           .saveBankAccount(
+            await ref.requireActiveCampusId(),
             BankAccount(
               bankName: _bank.text,
               accountNumber: _number.text,

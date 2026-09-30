@@ -27,17 +27,19 @@ class TextbookRepository {
 
   // ---------------------------------------------------------------- 교재
 
-  Future<List<Textbook>> fetchTextbooks() async {
+  Future<List<Textbook>> fetchTextbooks(String campusId) async {
     final rows = await _client
         .from('textbooks')
         .select()
+        .eq('campus_id', campusId)
         .order('sort_order')
         .order('title');
     return rows.map(Textbook.fromJson).toList();
   }
 
-  Future<void> createTextbook(TextbookInput input) =>
-      _client.from('textbooks').insert(input.toJson());
+  Future<void> createTextbook(String campusId, TextbookInput input) => _client
+      .from('textbooks')
+      .insert({...input.toJson(), 'campus_id': campusId});
 
   Future<void> updateTextbook(String id, TextbookInput input) => _client
       .from('textbooks')
@@ -56,19 +58,26 @@ class TextbookRepository {
 
   // ---------------------------------------------------------------- 카테고리
 
-  Future<List<TextbookCategory>> fetchCategories() async {
+  Future<List<TextbookCategory>> fetchCategories(String campusId) async {
     final rows = await _client
         .from('textbook_categories')
         .select('id, name, sort_order')
+        .eq('campus_id', campusId)
         .order('sort_order')
         .order('name');
     return rows.map(TextbookCategory.fromJson).toList();
   }
 
   /// 맨 뒤 순서로 추가한다.
-  Future<void> createCategory(String name, {required int sortOrder}) => _client
-      .from('textbook_categories')
-      .insert({'name': name.trim(), 'sort_order': sortOrder});
+  Future<void> createCategory(
+    String campusId,
+    String name, {
+    required int sortOrder,
+  }) => _client.from('textbook_categories').insert({
+    'campus_id': campusId,
+    'name': name.trim(),
+    'sort_order': sortOrder,
+  });
 
   Future<void> renameCategory(String id, String name) => _client
       .from('textbook_categories')
@@ -164,15 +173,19 @@ class TextbookRepository {
 
   // ---------------------------------------------------------------- 관리자
 
-  /// 전체 신청 현황. [roundStart] 가 null 이면 모든 회차.
-  Future<List<TextbookOrder>> fetchAllOrders({DateTime? roundStart}) async {
+  /// 캠퍼스의 신청 현황. [roundStart] 가 null 이면 모든 회차.
+  Future<List<TextbookOrder>> fetchAllOrders(
+    String campusId, {
+    DateTime? roundStart,
+  }) async {
     var query = _client
         .from('textbook_orders')
         // shipped_by 도 profiles 를 참조하므로 신청자 FK 를 지정한다.
         .select(
           '$_orderColumns, '
           'profiles:profiles!textbook_orders_user_id_fkey(student_id, name)',
-        );
+        )
+        .eq('campus_id', campusId);
     if (roundStart != null) {
       query = query.eq('round_start', toDateOnly(roundStart));
     }

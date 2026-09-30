@@ -8,6 +8,7 @@ import '../../../core/utils/formatters.dart';
 import '../../../core/widgets/feedback.dart';
 import '../../../core/widgets/responsive.dart';
 import '../../../core/widgets/state_views.dart';
+import '../../campus/presentation/campus_providers.dart';
 import '../../events/domain/event.dart';
 import '../../events/presentation/event_providers.dart';
 import '../../events/presentation/widgets/event_widgets.dart';
@@ -19,7 +20,9 @@ class AdminEventsPage extends ConsumerWidget {
     final input = await showEventFormDialog(context);
     if (input == null || !context.mounted) return;
     try {
-      final id = await ref.read(eventRepositoryProvider).createEvent(input);
+      final id = await ref
+          .read(eventRepositoryProvider)
+          .createEvent(await ref.requireActiveCampusId(), input);
       ref
         ..invalidate(eventsProvider)
         ..invalidate(eventSummariesProvider);
