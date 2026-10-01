@@ -70,36 +70,42 @@ class QuantityStepper extends StatelessWidget {
       fixedSize: const Size(36, 36),
       padding: EdgeInsets.zero,
     );
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        IconButton(
-          tooltip: '빼기',
-          style: style,
-          onPressed: value > 0 ? () => onChanged(value - 1) : null,
-          icon: const Icon(Icons.remove, size: 18),
-        ),
-        SizedBox(
-          width: 36,
-          child: Text(
-            '$value',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 17,
-              fontWeight: FontWeight.w700,
-              color: value > 0 ? c.textPrimary : c.textTertiary,
+    // 비활성 버튼(0에서 -, 최대에서 +)을 누른 탭이 뒤의 카드 InkWell 로
+    // 새어 나가 수량이 토글되지 않도록 스테퍼 영역의 탭을 여기서 삼킨다.
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () {},
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IconButton(
+            tooltip: '빼기',
+            style: style,
+            onPressed: value > 0 ? () => onChanged(value - 1) : null,
+            icon: const Icon(Icons.remove, size: 18),
+          ),
+          SizedBox(
+            width: 36,
+            child: Text(
+              '$value',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 17,
+                fontWeight: FontWeight.w700,
+                color: value > 0 ? c.textPrimary : c.textTertiary,
+              ),
             ),
           ),
-        ),
-        IconButton(
-          tooltip: '더하기',
-          style: style,
-          onPressed: canIncrement && value < max
-              ? () => onChanged(value + 1)
-              : null,
-          icon: const Icon(Icons.add, size: 18),
-        ),
-      ],
+          IconButton(
+            tooltip: '더하기',
+            style: style,
+            onPressed: canIncrement && value < max
+                ? () => onChanged(value + 1)
+                : null,
+            icon: const Icon(Icons.add, size: 18),
+          ),
+        ],
+      ),
     );
   }
 }
