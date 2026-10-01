@@ -36,6 +36,16 @@ final myCampusIdProvider = FutureProvider<String?>((ref) async {
   return profile?.campusId;
 });
 
+/// 본인 캠퍼스 (없으면 null). 내 정보 메뉴 표시용.
+final myCampusProvider = FutureProvider.autoDispose<Campus?>((ref) async {
+  final id = await ref.watch(myCampusIdProvider.future);
+  final list = await ref.watch(campusesProvider.future);
+  for (final c in list) {
+    if (c.id == id) return c;
+  }
+  return null;
+});
+
 /// 관리자 화면에서 다루는 캠퍼스 id. 로그아웃 상태면 null.
 ///
 /// 캠퍼스 관리자는 본인 캠퍼스(서버 RLS 도 그것만 허용한다).

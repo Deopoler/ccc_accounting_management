@@ -5,15 +5,18 @@ import 'package:material_ui/material_ui.dart';
 import '../../../core/router/routes.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/theme_mode_provider.dart';
+import '../../campus/presentation/campus_providers.dart';
 import 'auth_providers.dart';
 
-/// 앱바의 "내 정보" 메뉴: 학번/이름 표시, 화면 테마, 비밀번호 변경, 로그아웃.
+/// 앱바의 "내 정보" 메뉴: 이름/캠퍼스/학번 표시, 화면 테마, 비밀번호 변경, 로그아웃.
 class AccountMenuButton extends ConsumerWidget {
   const AccountMenuButton({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final profile = ref.watch(currentProfileProvider).value;
+    // 총괄 관리자가 관리 중인 캠퍼스가 아니라 본인 소속 캠퍼스
+    final campus = ref.watch(myCampusProvider).value;
     final themeMode = ref.watch(themeModeProvider);
 
     return PopupMenuButton<String>(
@@ -43,7 +46,10 @@ class AccountMenuButton extends ConsumerWidget {
                 ),
               ),
               subtitle: Text(
-                '${profile.studentId} · ${profile.role.label}',
+                [
+                  if (campus != null) campus.name,
+                  '${profile.studentId} · ${profile.role.label}',
+                ].join('\n'),
                 style: TextStyle(
                   fontSize: 13,
                   color: context.colors.textSecondary,
