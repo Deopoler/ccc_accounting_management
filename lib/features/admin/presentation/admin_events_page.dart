@@ -245,7 +245,7 @@ class _EventFormDialogState extends State<_EventFormDialog> {
                   controller: _depositName,
                   decoration: InputDecoration(
                     labelText: '입금자명',
-                    hintText: '예) {이름}MT',
+                    hintText: '예) {이름}순여행',
                     helperText:
                         '${depositNamePlaceholders.join(', ')} 사용 가능 · 비우면 회원 이름\n'
                         '미리보기: 홍길동 → ${renderDepositName(_depositName.text, name: '홍길동', studentId: '20240001')}',
