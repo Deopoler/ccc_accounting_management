@@ -20,7 +20,9 @@ import '../../campus/presentation/campus_providers.dart';
 
 /// 회차 선택: 0 = 이번 회차, n = n회차 전, [_allRounds] = 전체.
 const _allRounds = -1;
-const _pastRoundOptions = 11;
+
+/// 이 너비보다 좁으면 (모바일) 필터 / 집계 카드를 고정 너비 대신 폭에 맞춘다.
+const _compactWidth = 600.0;
 
 class AdminOrdersPage extends ConsumerStatefulWidget {
   const AdminOrdersPage({super.key});
@@ -334,61 +336,60 @@ class _Filters extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Wrap(
-          spacing: 12,
-          runSpacing: 12,
-          children: [
-            DropdownMenu<int>(
-              width: 260,
-              label: const Text('회차'),
-              initialSelection: roundOffset,
-              onSelected: (v) => onRoundChanged(v ?? 0),
-              dropdownMenuEntries: [
-                DropdownMenuEntry(value: 0, label: '이번 회차 (${current.label})'),
-                for (var i = 1; i <= _pastRoundOptions; i++)
-                  DropdownMenuEntry(
-                    value: i,
-                    label: roundLabel(current.previousStart(i)),
-                  ),
-                const DropdownMenuEntry(value: _allRounds, label: '전체 회차'),
-              ],
-            ),
-            DropdownMenu<String?>(
-              width: 240,
-              label: const Text('교재'),
-              // 교재가 많으므로 입력해서 찾을 수 있게 한다.
-              enableFilter: true,
-              requestFocusOnTap: true,
-              initialSelection: textbookId,
-              onSelected: onTextbookChanged,
-              dropdownMenuEntries: [
-                const DropdownMenuEntry(value: null, label: '전체 교재'),
-                for (final t in textbooks)
-                  DropdownMenuEntry(value: t.id, label: t.title),
-              ],
-            ),
-            SizedBox(
-              width: 240,
-              child: TextField(
-                controller: search,
-                onChanged: (_) => onSearchChanged(),
-                decoration: InputDecoration(
-                  labelText: '학번 / 이름 검색',
-                  prefixIcon: const Icon(Icons.search),
-                  suffixIcon: search.text.isEmpty
-                      ? null
-                      : IconButton(
-                          tooltip: '지우기',
-                          icon: const Icon(Icons.clear),
-                          onPressed: () {
-                            search.clear();
-                            onSearchChanged();
-                          },
-                        ),
+        _RoundNavigator(
+          current: current,
+          offset: roundOffset,
+          onChanged: onRoundChanged,
+        ),
+        const SizedBox(height: 12),
+        // 모바일에서는 고정 너비면 글자가 잘리므로 한 줄씩 꽉 채운다.
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final compact = constraints.maxWidth < _compactWidth;
+            double w(double desktop) =>
+                compact ? constraints.maxWidth : desktop;
+            return Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                DropdownMenu<String?>(
+                  width: w(240),
+                  label: const Text('교재'),
+                  // 교재가 많으므로 입력해서 찾을 수 있게 한다.
+                  enableFilter: true,
+                  requestFocusOnTap: true,
+                  initialSelection: textbookId,
+                  onSelected: onTextbookChanged,
+                  dropdownMenuEntries: [
+                    const DropdownMenuEntry(value: null, label: '전체 교재'),
+                    for (final t in textbooks)
+                      DropdownMenuEntry(value: t.id, label: t.title),
+                  ],
                 ),
-              ),
-            ),
-          ],
+                SizedBox(
+                  width: w(240),
+                  child: TextField(
+                    controller: search,
+                    onChanged: (_) => onSearchChanged(),
+                    decoration: InputDecoration(
+                      labelText: '학번 / 이름 검색',
+                      prefixIcon: const Icon(Icons.search),
+                      suffixIcon: search.text.isEmpty
+                          ? null
+                          : IconButton(
+                              tooltip: '지우기',
+                              icon: const Icon(Icons.clear),
+                              onPressed: () {
+                                search.clear();
+                                onSearchChanged();
+                              },
+                            ),
+                    ),
+                  ),
+                ),
+              ],
+            );
+          },
         ),
         const SizedBox(height: 12),
         Wrap(
@@ -435,6 +436,138 @@ class _Filters extends StatelessWidget {
   }
 }
 
+/// 회차 이동: `< 회차 >`. 가운데를 누르면 달력에서 날짜를 골라 그 날짜의 회차로 간다.
+class _RoundNavigator extends StatelessWidget {
+  const _RoundNavigator({
+    required this.current,
+    required this.offset,
+    required this.onChanged,
+  });
+
+  final OrderRound current;
+
+  /// 0 = 이번 회차, n = n회차 전, [_allRounds] = 전체.
+  final int offset;
+  final ValueChanged<int> onChanged;
+
+  bool get _all => offset == _allRounds;
+
+  Future<void> _pickDate(BuildContext context) async {
+    final today = DateUtils.dateOnly(DateTime.now());
+    final initial = _all ? today : current.previousStart(offset);
+    final picked = await showDatePicker(
+      context: context,
+      helpText: '날짜를 고르면 그 날짜의 회차로 이동합니다',
+      initialDate: initial.isAfter(today) ? today : initial,
+      firstDate: DateTime(today.year - 5),
+      // 앞으로의 날짜는 모두 이번 회차라 고를 필요가 없다.
+      lastDate: today,
+    );
+    if (picked != null) onChanged(current.offsetOf(picked));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final theme = Theme.of(context);
+    final title = _all ? '전체 회차' : roundLabel(current.previousStart(offset));
+    final sub = _all
+        ? '모든 회차의 신청'
+        : offset == 0
+        ? '이번 회차'
+        : '$offset회차 전';
+
+    return Column(
+      // stretch 면 아래 최대 너비가 무시된다.
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 480),
+          child: Row(
+            children: [
+              IconButton(
+                tooltip: '이전 회차',
+                icon: const Icon(Icons.chevron_left),
+                onPressed: _all ? null : () => onChanged(offset + 1),
+              ),
+              Expanded(
+                child: Tooltip(
+                  message: '달력에서 회차 찾기',
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(12),
+                    onTap: () => _pickDate(context),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 6),
+                      child: Column(
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Flexible(
+                                child: FittedBox(
+                                  fit: BoxFit.scaleDown,
+                                  child: Text(
+                                    title,
+                                    style: theme.textTheme.titleMedium
+                                        ?.copyWith(fontWeight: FontWeight.w700),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              Icon(
+                                Icons.calendar_month_outlined,
+                                size: 18,
+                                color: c.textSecondary,
+                              ),
+                            ],
+                          ),
+                          Text(
+                            sub,
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: c.textSecondary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              IconButton(
+                tooltip: '다음 회차',
+                icon: const Icon(Icons.chevron_right),
+                // 이번 회차보다 뒤는 없다.
+                onPressed: _all || offset == 0
+                    ? null
+                    : () => onChanged(offset - 1),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 4),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            if (offset != 0)
+              ActionChip(
+                avatar: const Icon(Icons.today, size: 18),
+                label: const Text('이번 회차로'),
+                onPressed: () => onChanged(0),
+              ),
+            FilterChip(
+              label: const Text('전체 회차'),
+              selected: _all,
+              onSelected: (v) => onChanged(v ? _allRounds : 0),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
 // ----------------------------------------------------------------------------
 // 집계
 // ----------------------------------------------------------------------------
@@ -461,17 +594,36 @@ class _Summary extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Wrap(
-          spacing: 12,
-          runSpacing: 12,
-          children: [
-            for (final s in OrderStatus.values)
-              _StatCard(
-                label: s.label,
-                value: '${byStatus[s]!.count}건',
-                sub: formatWon(byStatus[s]!.amount),
-              ),
-          ],
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final cards = [
+              for (final s in OrderStatus.values)
+                _StatCard(
+                  label: s.label,
+                  value: '${byStatus[s]!.count}건',
+                  sub: formatWon(byStatus[s]!.amount),
+                  compact: constraints.maxWidth < _compactWidth,
+                ),
+            ];
+            // 모바일에서는 고정 너비 카드가 한 줄에 하나씩 떨어지므로 한 줄에 나눠 담는다.
+            if (constraints.maxWidth < _compactWidth) {
+              return Row(
+                children: [
+                  for (var i = 0; i < cards.length; i++) ...[
+                    if (i > 0) const SizedBox(width: 8),
+                    Expanded(child: cards[i]),
+                  ],
+                ],
+              );
+            }
+            return Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                for (final card in cards) SizedBox(width: 180, child: card),
+              ],
+            );
+          },
         ),
         const SizedBox(height: 12),
         Card(
@@ -555,33 +707,38 @@ class _StatCard extends StatelessWidget {
     required this.label,
     required this.value,
     required this.sub,
+    this.compact = false,
   });
 
   final String label;
   final String value;
   final String sub;
 
+  /// 좁은 카드: 여백을 줄이고, 큰 금액은 넘치지 않게 글자를 줄인다.
+  final bool compact;
+
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
-    return SizedBox(
-      width: 180,
-      child: Card(
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                label,
-                style: TextStyle(fontSize: 13, color: c.textSecondary),
-              ),
-              const SizedBox(height: 6),
-              FigureText(value),
-              const SizedBox(height: 2),
+    Widget fit(Widget child) => FittedBox(
+      fit: BoxFit.scaleDown,
+      alignment: Alignment.centerLeft,
+      child: child,
+    );
+    return Card(
+      child: Padding(
+        padding: EdgeInsets.all(compact ? 14 : 20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(label, style: TextStyle(fontSize: 13, color: c.textSecondary)),
+            const SizedBox(height: 6),
+            fit(FigureText(value)),
+            const SizedBox(height: 2),
+            fit(
               Text(sub, style: TextStyle(fontSize: 14, color: c.textSecondary)),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );

@@ -168,4 +168,18 @@ void main() {
     expect(round.deadlineLabel, '10/7(수) 오전 9시');
     expect(round.previousStart(1), DateTime(2026, 9, 23));
   });
+
+  test('날짜로 회차 찾기: 수요일은 그날 시작하는 회차', () {
+    final round = OrderRound(
+      start: DateTime(2026, 9, 30),
+      deadline: DateTime(2026, 10, 7),
+    );
+    expect(round.offsetOf(DateTime(2026, 10, 3)), 0); // 이번 회차 중
+    expect(round.offsetOf(DateTime(2026, 9, 30)), 0); // 이번 회차 시작일
+    expect(round.offsetOf(DateTime(2026, 9, 29)), 1); // 전 회차 마지막 날
+    expect(round.offsetOf(DateTime(2026, 9, 23)), 1); // 전 회차 시작일
+    expect(round.offsetOf(DateTime(2026, 9, 22)), 2);
+    expect(round.offsetOf(DateTime(2025, 10, 1)), 52);
+    expect(round.offsetOf(DateTime(2026, 12, 25)), 0); // 앞으로의 날짜
+  });
 }
