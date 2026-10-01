@@ -3,6 +3,9 @@
 동아리(CCC) 회계 업무용 웹앱. 여러 캠퍼스가 함께 쓴다. 회원은 교재를 신청하고 이벤트 송금 여부를 확인하며,
 캠퍼스 관리자는 자기 캠퍼스의 가입 승인·입금 확인·송금 현황을, 총괄 관리자는 모든 캠퍼스를 관리한다.
 
+- 접속: <https://deopoler.github.io/ccc_accounting_management/>
+- [기능 소개](docs/기능소개.md) · [사용법](docs/사용법.md) (화면 사진 포함)
+
 - Flutter Web (Material 3, 반응형) + Riverpod + go_router
 - Supabase (Auth + Postgres + RLS + Edge Functions)
 - 로그인은 **캠퍼스 / 학번 / 비밀번호**. 내부적으로 가상 이메일로 Supabase Auth 를 사용한다.
