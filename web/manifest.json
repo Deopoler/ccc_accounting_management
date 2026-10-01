@@ -7,7 +7,6 @@
     "theme_color": "#0064FF",
     "description": "CCC 교재 신청 및 이벤트 송금 관리",
     "lang": "ko",
-    "orientation": "any",
     "prefer_related_applications": false,
     "icons": [
         {
