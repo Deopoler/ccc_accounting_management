@@ -399,3 +399,71 @@ describe('지난 회차 채우기', () => {
     assert.equal(rows[0].round_id, oldest.id);
   });
 });
+
+describe('1년 지난 데이터 삭제', () => {
+  test('새 회차가 만들어질 때 1년 지난 회차 / 신청 / 이벤트를 지운다', async () => {
+    const campus = await createCampus(db, { code: 'purge', name: '삭제' });
+    const member = await createUser(db, { studentId: '20245555', campus: 'purge' });
+    const book = (await db.query(
+      `insert into public.textbooks (campus_id, title, price) values ($1, '교재', 1000) returning id`, [campus],
+    )).rows[0].id;
+
+    // 1년 지난 회차 (빈틈이 있어도 된다) + 지난주에 마감된 회차
+    const round = async (start, end) => (await db.query(`
+      insert into public.order_rounds (campus_id, starts_at, deadline)
+      values ($1, now() - $2::interval, now() - $3::interval) returning id`, [campus, start, end])).rows[0].id;
+    const oldRound = await round('407 days', '400 days');
+    const recentRound = await round('10 days', '3 days');
+    const order = async (roundId) => {
+      const id = (await db.query(`
+        insert into public.textbook_orders (user_id, campus_id, round_id) values ($1, $2, $3) returning id`,
+      [member, campus, roundId])).rows[0].id;
+      await db.query(
+        'insert into public.textbook_order_items (order_id, textbook_id, quantity, unit_price) values ($1, $2, 1, 1000)',
+        [id, book],
+      );
+      return id;
+    };
+    const oldOrder = await order(oldRound);
+    const recentOrder = await order(recentRound);
+
+    const event = async (due, created) => (await db.query(`
+      insert into public.events (campus_id, title, amount, due_date, created_at)
+      values ($1, '이벤트', 1000, (now() - $2::interval)::date, now() - $3::interval) returning id`,
+    [campus, due, created])).rows[0].id;
+    const oldEvent = await event('400 days', '500 days');
+    const noDueOld = (await db.query(`
+      insert into public.events (campus_id, title, amount, created_at)
+      values ($1, '마감일 없음', 1000, now() - interval '400 days') returning id`, [campus])).rows[0].id;
+    const recentEvent = await event('300 days', '500 days'); // 오래전에 만들었어도 마감일이 1년 안
+    await db.query('insert into public.event_payments (event_id, user_id) values ($1, $2)', [oldEvent, member]);
+
+    // 다른 캠퍼스의 1년 지난 이벤트는 건드리지 않는다.
+    const otherEvent = (await db.query(`
+      insert into public.events (campus_id, title, amount, due_date) values ($1, '다른 캠퍼스', 1000, current_date - 400) returning id`,
+    [kaist])).rows[0].id;
+
+    await asUser(db, member, 'select id from public.get_order_round()');
+
+    const ids = async (sql, params) => (await db.query(sql, params)).rows.map((r) => r.id);
+    assert.deepEqual(await ids('select id from public.textbook_orders where campus_id = $1', [campus]), [recentOrder]);
+    assert.deepEqual(await ids('select id from public.textbook_order_items where order_id = $1', [oldOrder]), []);
+    assert.ok(!(await ids('select id from public.order_rounds where campus_id = $1', [campus])).includes(oldRound));
+    assert.ok((await ids('select id from public.order_rounds where campus_id = $1', [campus])).includes(recentRound));
+    assert.deepEqual(await ids('select id from public.events where campus_id = $1', [campus]), [recentEvent]);
+    assert.deepEqual(await ids('select id from public.event_payments where event_id = $1', [oldEvent]), []);
+    assert.deepEqual(await ids('select id from public.events where id = $1', [otherEvent]), [otherEvent]);
+    assert.ok(noDueOld);
+  });
+
+  test('새로 만든 캠퍼스의 지난 1년 회차는 지우지 않는다', async () => {
+    await createCampus(db, { code: 'fresh', name: '새 캠퍼스' });
+    const member = await createUser(db, { studentId: '20246666', campus: 'fresh' });
+    await asUser(db, member, 'select id from public.get_order_round()');
+    assert.equal((await rounds(db, await campusId(db, 'fresh'))).length, 53);
+  });
+
+  test('삭제 함수는 회원이 직접 호출할 수 없다', async () => {
+    await assertDenied(asUser(db, kAdmin, 'select private.purge_old_campus_data($1)', [kaist]));
+  });
+});
