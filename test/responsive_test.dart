@@ -267,18 +267,8 @@ class _FakeTextbooks implements TextbookRepository {
     required bool shipped,
   }) async => _calls.add('shipped $shipped ${ids.join(',')}');
   @override
-  Future<OrderRound> createNextRound(String campusId) async {
-    _calls.add('next');
-    return OrderRound(
-      id: 'next',
-      start: _round.deadline,
-      deadline: _round.deadline.add(const Duration(days: 7)),
-    );
-  }
-
-  @override
-  Future<void> moveOrder(String orderId, String roundId) async =>
-      _calls.add('move $orderId $roundId');
+  Future<void> shiftOrders(List<String> ids, int offset) async =>
+      _calls.add('shift $offset ${ids.join(',')}');
   @override
   Future<void> setRoundDeadline(String roundId, DateTime deadline) async =>
       _calls.add('deadline $roundId ${deadline.toIso8601String()}');
@@ -495,19 +485,34 @@ void main() {
     });
   }
 
-  group('신청 현황 전체 체크', () {
+  group('신청 현황 선택 처리', () {
     setUp(_calls.clear);
 
     // 데이터: o1 신청, o2 입금확인, o3 취소, o4 배송됨, o5 수령 완료
+    // 데스크톱은 표 머리행, 모바일은 선택 막대의 첫 체크박스가 전체 선택이다.
+    Future<void> pickAll(WidgetTester tester) async {
+      final all = find.byType(Checkbox).first;
+      await tester.ensureVisible(all);
+      await tester.pumpAndSettle();
+      await tester.tap(all);
+      await tester.pumpAndSettle();
+    }
+
     Future<void> tapAndConfirm(
       WidgetTester tester,
-      String tooltip,
+      String button,
+      String menuItem,
       String confirmTitle,
     ) async {
-      await tester.ensureVisible(find.byTooltip(tooltip));
+      final b = find.widgetWithText(OutlinedButton, button);
+      await tester.ensureVisible(b);
       await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip(tooltip));
+      await tester.tap(b);
       await tester.pumpAndSettle();
+      if (menuItem.isNotEmpty) {
+        await tester.tap(find.text(menuItem).last);
+        await tester.pumpAndSettle();
+      }
       expect(find.text(confirmTitle), findsOneWidget);
       await tester.tap(
         find.widgetWithText(FilledButton, confirmTitle.split(' (').first),
@@ -516,7 +521,7 @@ void main() {
     }
 
     for (final sizeName in ['데스크톱', '모바일']) {
-      testWidgets('$sizeName: 취소 건을 빼고 바뀌어야 할 신청만 처리한다', (tester) async {
+      testWidgets('$sizeName: 선택한 신청 중 바뀌어야 할 신청만 체크한다', (tester) async {
         await _pump(
           tester,
           _sizes[sizeName]!,
@@ -524,19 +529,53 @@ void main() {
           const AdminOrdersPage(),
           true,
         );
+        // 선택 전에는 처리 버튼을 쓸 수 없다.
+        expect(
+          tester
+              .widget<OutlinedButton>(
+                find.widgetWithText(OutlinedButton, '이전 회차로'),
+              )
+              .onPressed,
+          isNull,
+        );
 
-        // 배송: 4건 중 2건 배송 → 일부 체크 상태, 누르면 나머지(o1, o2)를 배송
-        await tapAndConfirm(tester, '배송 전체 체크', '배송 체크 (2건)');
-        // 입금확인: o2, o4, o5 입금확인 → o1 만
-        await tapAndConfirm(tester, '입금확인 전체 체크', '입금확인 체크 (1건)');
+        await pickAll(tester);
+        expect(find.text('5건 선택'), findsOneWidget);
+        // 배송: 취소 건 빼고 아직 배송 안 된 o1, o2
+        await tapAndConfirm(tester, '배송', '배송 체크', '배송 체크 (2건)');
+        // 입금확인: o1 만
+        await tapAndConfirm(tester, '입금확인', '입금확인 체크', '입금확인 체크 (1건)');
         // 수령: 배송된 o4, o5 중 o4 만
-        await tapAndConfirm(tester, '수령 전체 체크', '수령 체크 (1건)');
+        await tapAndConfirm(tester, '수령', '수령 체크', '수령 체크 (1건)');
 
         expect(_calls, [
           'shipped true o1,o2',
           'status paid o1',
           'received true o4',
         ]);
+        expect(tester.takeException(), isNull);
+      });
+
+      testWidgets('$sizeName: 선택한 신청을 이전 / 다음 회차로 옮긴다', (tester) async {
+        await _pump(
+          tester,
+          _sizes[sizeName]!,
+          '/admin/orders',
+          const AdminOrdersPage(),
+          true,
+        );
+        await pickAll(tester);
+        await tapAndConfirm(tester, '이전 회차로', '', '이전 회차로 이동 (5건)');
+        expect(_calls, ['shift -1 o1,o2,o3,o4,o5']);
+
+        // 하나만 골라 다음 회차로 (전체 선택 다음 체크박스가 첫 신청)
+        final first = find.byType(Checkbox).at(1);
+        await tester.ensureVisible(first);
+        await tester.pumpAndSettle();
+        await tester.tap(first);
+        await tester.pumpAndSettle();
+        await tapAndConfirm(tester, '다음 회차로', '', '다음 회차로 이동 (1건)');
+        expect(_calls.last, 'shift 1 o1');
         expect(tester.takeException(), isNull);
       });
     }
@@ -549,9 +588,10 @@ void main() {
         const AdminOrdersPage(),
         true,
       );
-      await tester.ensureVisible(find.byTooltip('배송 전체 체크'));
+      await pickAll(tester);
+      await tester.tap(find.widgetWithText(OutlinedButton, '배송'));
       await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip('배송 전체 체크'));
+      await tester.tap(find.text('배송 체크').last);
       await tester.pumpAndSettle();
       expect(find.text('배송 체크 (2건)'), findsOneWidget);
       await tester.tap(find.widgetWithText(TextButton, '취소'));
@@ -562,53 +602,6 @@ void main() {
 
   group('회차', () {
     setUp(_calls.clear);
-
-    for (final sizeName in ['데스크톱', '모바일']) {
-      testWidgets('$sizeName: 상태 메뉴에서 신청을 지난 회차로 옮긴다', (tester) async {
-        await _pump(
-          tester,
-          _sizes[sizeName]!,
-          '/admin/orders',
-          const AdminOrdersPage(),
-          true,
-        );
-        final menu = find.byTooltip('상태 변경 · 회차 이동').first;
-        await tester.ensureVisible(menu);
-        await tester.pumpAndSettle();
-        await tester.tap(menu);
-        await tester.pumpAndSettle();
-        await tester.tap(find.text('다른 회차로 이동'));
-        await tester.pumpAndSettle();
-
-        // 지금 회차는 고를 수 없고, 지난 회차를 고르면 바로 옮긴다.
-        expect(find.text('이번 회차 · 이 신청의 회차'), findsOneWidget);
-        await tester.tap(find.text('1회차 전'));
-        await tester.pumpAndSettle();
-        expect(_calls, ['move o1 previous']);
-        expect(tester.takeException(), isNull);
-      });
-    }
-
-    testWidgets('아직 없는 다음 회차를 고르면 만든 뒤 옮긴다', (tester) async {
-      await _pump(
-        tester,
-        _sizes['데스크톱']!,
-        '/admin/orders',
-        const AdminOrdersPage(),
-        true,
-      );
-      final menu = find.byTooltip('상태 변경 · 회차 이동').first;
-      await tester.ensureVisible(menu);
-      await tester.pumpAndSettle();
-      await tester.tap(menu);
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('다른 회차로 이동'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('다음 회차'));
-      await tester.pumpAndSettle();
-      expect(_calls, ['next', 'move o1 next']);
-      expect(tester.takeException(), isNull);
-    });
 
     testWidgets('설정: 이번 회차 마감 일시를 저장한다', (tester) async {
       await _pump(

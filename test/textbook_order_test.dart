@@ -94,17 +94,9 @@ void main() {
       current: r('b'),
       all: [r('c'), r('b'), r('a')],
     );
-    expect(withNext.next?.id, 'c');
     expect(withNext.describe(r('c')), '다음 회차');
     expect(withNext.describe(r('b')), '이번 회차');
     expect(withNext.describe(r('a')), '1회차 전');
-
-    final noNext = RoundList(
-      campusId: 'k',
-      current: r('b'),
-      all: [r('b'), r('a')],
-    );
-    expect(noNext.next, isNull);
   });
 
   test('교재별 집계는 취소를 제외한다', () {

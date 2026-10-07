@@ -74,6 +74,7 @@ describe('스키마 회귀 검사', () => {
       'public.admin_move_textbook_order',
       'public.admin_set_order_round_deadline',
       'public.admin_set_textbook_received',
+      'public.admin_shift_textbook_orders',
       'public.cancel_textbook_order',
       'public.confirm_textbook_received',
       'public.get_order_round',

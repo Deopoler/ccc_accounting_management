@@ -140,15 +140,6 @@ class TextbookRepository {
     return rows.map(OrderRound.fromJson).toList();
   }
 
-  /// 이번 회차 다음 회차를 만든다. (이미 있으면 그 회차) 신청을 다음 회차로 옮길 때 쓴다.
-  Future<OrderRound> createNextRound(String campusId) async {
-    final row = await _client.rpc<Map<String, dynamic>>(
-      'admin_create_next_order_round',
-      params: {'p_campus_id': campusId},
-    );
-    return OrderRound.fromJson(row);
-  }
-
   /// 이번 회차의 마감 일시를 바꾼다. 다음 회차부터는 이 마감에서 1주일씩 이어진다.
   Future<void> setRoundDeadline(String roundId, DateTime deadline) =>
       _client.rpc<void>(
@@ -262,11 +253,13 @@ class TextbookRepository {
     );
   }
 
-  /// 신청을 같은 캠퍼스의 다른 회차로 옮긴다. 신청 날짜와 상관없다.
-  Future<void> moveOrder(String orderId, String roundId) => _client.rpc<void>(
-    'admin_move_textbook_order',
-    params: {'p_order_id': orderId, 'p_round_id': roundId},
-  );
+  /// 신청들을 각자 자기 회차의 이전([offset] = -1) / 다음(1) 회차로 옮긴다.
+  /// 이번 회차의 다음 회차가 없으면 서버가 만든다. 하나라도 못 옮기면 아무것도 옮기지 않는다.
+  Future<void> shiftOrders(List<String> orderIds, int offset) =>
+      _client.rpc<void>(
+        'admin_shift_textbook_orders',
+        params: {'p_order_ids': orderIds, 'p_offset': offset},
+      );
 
   // ---------------------------------------------------------------- 관리자 일괄 처리
 

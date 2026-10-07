@@ -38,6 +38,9 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
   final _search = TextEditingController();
   final Set<String> _busy = {};
 
+  /// 선택한 신청 id. 선택 막대에서 한 번에 처리한다.
+  final Set<String> _picked = {};
+
   @override
   void dispose() {
     _search.dispose();
@@ -131,17 +134,21 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
     }
   }
 
-  /// 현재 목록(필터 적용)의 대상 전체를 체크/해제한다. 건수를 보여 주고 확인받는다.
+  /// 선택한 신청을 체크/해제한다. 바뀌어야 할 건수를 보여 주고 확인받는다.
   Future<void> _bulk(
     String? round,
-    List<TextbookOrder> orders,
+    List<TextbookOrder> picked,
     _BulkField field,
     bool value,
   ) async {
-    final targets = orders
+    final targets = picked
         .where((o) => field.isTarget(o) && field.isChecked(o) != value)
         .toList();
-    if (targets.isEmpty) return;
+    final action = '${field.label} ${value ? '체크' : '해제'}';
+    if (targets.isEmpty) {
+      showSnack(context, '선택한 신청 중 $action할 신청이 없습니다.');
+      return;
+    }
 
     // 해제하면 함께 지워지는 기록을 알린다.
     final lost = switch ((field, value)) {
@@ -156,12 +163,11 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
         : field == _BulkField.shipped
         ? '\n수령 기록 $lost건도 함께 초기화됩니다.'
         : '\n회원이 직접 확인한 기록 $lost건도 지워집니다.';
-    final action = '${field.label} ${value ? '체크' : '해제'}';
 
     final ok = await showConfirmDialog(
       context,
       title: '$action (${targets.length}건)',
-      message: '현재 목록에서 ${targets.length}건을 $action합니다.$lostNote',
+      message: '선택한 신청 중 ${targets.length}건을 $action합니다.$lostNote',
       confirmLabel: action,
       destructive: !value,
     );
@@ -184,42 +190,35 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
     }
   }
 
-  Future<void> _move(
-    String? round,
-    RoundList rounds,
-    TextbookOrder order,
-  ) async {
-    final picked = await showDialog<OrderRound>(
-      context: context,
-      builder: (_) => _MoveRoundDialog(order: order, rounds: rounds),
+  /// 선택한 신청을 각자 자기 회차의 이전([offset] = -1) / 다음(1) 회차로 옮긴다.
+  Future<void> _shift(List<TextbookOrder> picked, int offset) async {
+    if (picked.isEmpty) return;
+    final dir = offset < 0 ? '이전' : '다음';
+    final ok = await showConfirmDialog(
+      context,
+      title: '$dir 회차로 이동 (${picked.length}건)',
+      message:
+          '선택한 ${picked.length}건을 각 신청의 $dir 회차로 옮깁니다.'
+          '${offset > 0 ? '\n이번 회차의 다음 회차가 없으면 새로 만듭니다.' : ''}',
+      confirmLabel: '$dir 회차로 이동',
     );
-    if (picked == null || picked.id == order.roundId || !mounted) return;
-    setState(() => _busy.add(order.id));
+    if (!ok || !mounted) return;
+
+    final ids = [for (final o in picked) o.id];
+    setState(() => _busy.addAll(ids));
     try {
-      // 아직 없는 다음 회차를 고르면 서버에서 만든다.
-      var target = picked;
-      if (target.id.isEmpty) {
-        target = await ref
-            .read(textbookRepositoryProvider)
-            .createNextRound(rounds.campusId);
-        ref.invalidate(adminRoundsProvider);
-      }
-      await ref
-          .read(adminOrdersProvider(round).notifier)
-          .moveOrder(order.id, target);
-      // 옮긴 회차 / 전체 회차 목록도 다시 불러오게 한다.
-      ref.invalidate(adminOrdersProvider(target.id));
-      if (round != null) ref.invalidate(adminOrdersProvider(null));
+      await ref.read(textbookRepositoryProvider).shiftOrders(ids, offset);
+      // 옮긴 신청은 다른 회차 목록에 들어가고, 다음 회차가 새로 생겼을 수 있다.
+      ref.invalidate(adminOrdersProvider);
+      ref.invalidate(adminRoundsProvider);
       if (mounted) {
-        showSnack(
-          context,
-          '${order.member?.name ?? '신청'}님의 신청을 ${target.label} 회차로 옮겼습니다.',
-        );
+        setState(() => _picked.removeAll(ids));
+        showSnack(context, '${ids.length}건을 $dir 회차로 옮겼습니다.');
       }
     } catch (e) {
       if (mounted) showErrorSnack(context, e);
     } finally {
-      if (mounted) setState(() => _busy.remove(order.id));
+      if (mounted) setState(() => _busy.removeAll(ids));
     }
   }
 
@@ -286,6 +285,7 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
                 onRoundChanged: (r) => setState(() {
                   _allRounds = r == null;
                   if (r != null) _roundId = r.id;
+                  _picked.clear();
                 }),
                 textbooks: books,
                 textbookId: _textbookId,
@@ -304,6 +304,10 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
                 onRetry: () => ref.invalidate(adminOrdersProvider(roundId)),
                 data: (all) {
                   final filtered = filter.apply(all);
+                  // 필터에 가려진 신청은 처리하지 않는다.
+                  final picked = filtered
+                      .where((o) => _picked.contains(o.id))
+                      .toList();
                   return Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
@@ -323,11 +327,19 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
                         _OrdersList(
                           orders: filtered,
                           busy: _busy,
+                          picked: _picked,
+                          onPick: (o, v) => setState(
+                            () => v ? _picked.add(o.id) : _picked.remove(o.id),
+                          ),
+                          onPickAll: (v) => setState(() {
+                            final ids = filtered.map((o) => o.id);
+                            v ? _picked.addAll(ids) : _picked.removeAll(ids);
+                          }),
                           onStatus: (o, s) => _setStatus(roundId, o, s),
                           onShipped: (o, v) => _setShipped(roundId, o, v),
                           onReceived: (o, v) => _setReceived(roundId, o, v),
-                          onMove: (o) => _move(roundId, rounds, o),
-                          onBulk: (f, v) => _bulk(roundId, filtered, f, v),
+                          onBulk: (f, v) => _bulk(roundId, picked, f, v),
+                          onShift: (offset) => _shift(picked, offset),
                         ),
                     ],
                   );
@@ -820,10 +832,9 @@ class _StatCard extends StatelessWidget {
 
 typedef _OnStatus = void Function(TextbookOrder order, OrderStatus status);
 typedef _OnToggle = void Function(TextbookOrder order, bool value);
-typedef _OnMove = void Function(TextbookOrder order);
 typedef _OnBulk = void Function(_BulkField field, bool value);
 
-/// 전체 체크할 수 있는 항목. 취소된 신청은 모두 대상이 아니다.
+/// 선택한 신청에 한 번에 체크할 수 있는 항목. 취소된 신청은 모두 대상이 아니다.
 enum _BulkField {
   paid('입금확인'),
   shipped('배송'),
@@ -842,83 +853,105 @@ enum _BulkField {
     _BulkField.shipped => o.isShipped,
     _BulkField.received => o.receivedAt != null,
   };
-
-  /// 대상이 모두 체크됐으면 true, 하나도 없으면 false, 일부면 null. 대상이 없으면 false.
-  bool? stateOf(Iterable<TextbookOrder> orders) {
-    final targets = orders.where(isTarget);
-    if (targets.isEmpty) return false;
-    final checked = targets.where(isChecked).length;
-    if (checked == 0) return false;
-    return checked == targets.length ? true : null;
-  }
 }
 
-/// 전체 체크박스. 모두 체크된 상태에서 누르면 전체 해제, 그 외에는 전체 체크.
-class _BulkCheckbox extends StatelessWidget {
-  const _BulkCheckbox({
-    required this.field,
+/// 선택 막대: 선택한 신청을 한 번에 입금확인 / 배송 / 수령 체크 · 해제하거나 이전 / 다음 회차로 옮긴다.
+class _SelectionBar extends StatelessWidget {
+  const _SelectionBar({
     required this.orders,
+    required this.picked,
     required this.enabled,
+    required this.showPickAll,
+    required this.onPickAll,
     required this.onBulk,
-  });
-
-  final _BulkField field;
-  final List<TextbookOrder> orders;
-  final bool enabled;
-  final _OnBulk onBulk;
-
-  @override
-  Widget build(BuildContext context) {
-    final state = field.stateOf(orders);
-    final hasTargets = orders.any(field.isTarget);
-    return Tooltip(
-      message: '${field.label} 전체 ${state == true ? '해제' : '체크'}',
-      child: Checkbox(
-        tristate: true,
-        value: state,
-        onChanged: !enabled || !hasTargets
-            ? null
-            : (_) => onBulk(field, state != true),
-      ),
-    );
-  }
-}
-
-/// 모바일용 전체 체크 줄 (표 머리행 대신).
-class _BulkBar extends StatelessWidget {
-  const _BulkBar({
-    required this.orders,
-    required this.enabled,
-    required this.onBulk,
+    required this.onShift,
   });
 
   final List<TextbookOrder> orders;
+  final Set<String> picked;
   final bool enabled;
+
+  /// 표에는 머리행에 전체 선택이 있으므로 카드 목록에서만 보인다.
+  final bool showPickAll;
+  final ValueChanged<bool> onPickAll;
   final _OnBulk onBulk;
+  final ValueChanged<int> onShift;
 
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
+    final count = orders.where((o) => picked.contains(o.id)).length;
+    final all = count == orders.length;
+    final active = enabled && count > 0;
     return Padding(
-      padding: const EdgeInsets.only(left: 4, bottom: 8),
+      padding: const EdgeInsets.only(bottom: 8),
       child: Wrap(
         crossAxisAlignment: WrapCrossAlignment.center,
-        spacing: 4,
+        spacing: 8,
+        runSpacing: 8,
         children: [
-          Text('전체', style: TextStyle(fontSize: 13, color: c.textSecondary)),
-          for (final f in _BulkField.values)
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _BulkCheckbox(
-                  field: f,
-                  orders: orders,
-                  enabled: enabled,
-                  onBulk: onBulk,
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (showPickAll)
+                Checkbox(
+                  tristate: true,
+                  value: count == 0 ? false : (all ? true : null),
+                  onChanged: enabled ? (_) => onPickAll(!all) : null,
                 ),
-                Text(f.label),
-                const SizedBox(width: 8),
+              Text(
+                count == 0 ? '신청을 선택해 한 번에 처리하세요' : '$count건 선택',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: count == 0 ? c.textSecondary : c.textPrimary,
+                  fontWeight: count == 0 ? null : FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+          for (final f in _BulkField.values)
+            MenuAnchor(
+              builder: (context, controller, _) => OutlinedButton(
+                onPressed: !active
+                    ? null
+                    : () => controller.isOpen
+                          ? controller.close()
+                          : controller.open(),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(f.label),
+                    const Icon(Icons.arrow_drop_down, size: 20),
+                  ],
+                ),
+              ),
+              menuChildren: [
+                MenuItemButton(
+                  leadingIcon: const Icon(Icons.check_box_outlined),
+                  onPressed: () => onBulk(f, true),
+                  child: Text('${f.label} 체크'),
+                ),
+                MenuItemButton(
+                  leadingIcon: const Icon(Icons.check_box_outline_blank),
+                  onPressed: () => onBulk(f, false),
+                  child: Text('${f.label} 해제'),
+                ),
               ],
+            ),
+          OutlinedButton.icon(
+            onPressed: active ? () => onShift(-1) : null,
+            icon: const Icon(Icons.chevron_left, size: 18),
+            label: const Text('이전 회차로'),
+          ),
+          OutlinedButton.icon(
+            onPressed: active ? () => onShift(1) : null,
+            icon: const Icon(Icons.chevron_right, size: 18),
+            label: const Text('다음 회차로'),
+          ),
+          if (count > 0)
+            TextButton(
+              onPressed: enabled ? () => onPickAll(false) : null,
+              child: const Text('선택 해제'),
             ),
         ],
       ),
@@ -933,132 +966,150 @@ class _OrdersList extends StatelessWidget {
   const _OrdersList({
     required this.orders,
     required this.busy,
+    required this.picked,
+    required this.onPick,
+    required this.onPickAll,
     required this.onStatus,
     required this.onShipped,
     required this.onReceived,
-    required this.onMove,
     required this.onBulk,
+    required this.onShift,
   });
 
   final List<TextbookOrder> orders;
   final Set<String> busy;
+  final Set<String> picked;
+  final _OnToggle onPick;
+  final ValueChanged<bool> onPickAll;
   final _OnStatus onStatus;
   final _OnToggle onShipped;
   final _OnToggle onReceived;
-  final _OnMove onMove;
   final _OnBulk onBulk;
+  final ValueChanged<int> onShift;
 
   @override
   Widget build(BuildContext context) {
-    // 처리 중인 행이 있으면 전체 체크를 막는다.
-    final bulkEnabled = busy.isEmpty;
-    DataColumn bulkColumn(_BulkField f) => DataColumn(
-      label: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(f.label),
-          _BulkCheckbox(
-            field: f,
-            orders: orders,
-            enabled: bulkEnabled,
-            onBulk: onBulk,
-          ),
-        ],
-      ),
-    );
+    // 처리 중인 행이 있으면 선택 / 일괄 처리를 막는다.
+    final enabled = busy.isEmpty;
     return LayoutBuilder(
       builder: (context, constraints) {
-        if (constraints.maxWidth >= 760) {
-          return Card(
-            clipBehavior: Clip.antiAlias,
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: ConstrainedBox(
-                constraints: BoxConstraints(minWidth: constraints.maxWidth),
-                child: DataTable(
-                  // 체크 열까지 가로 스크롤 없이 보이도록 열을 좁게 둔다.
-                  columnSpacing: 12,
-                  horizontalMargin: 16,
-                  columns: [
-                    const DataColumn(label: Text('회원')),
-                    const DataColumn(label: Text('교재')),
-                    const DataColumn(label: Text('금액'), numeric: true),
-                    const DataColumn(label: Text('상태')),
-                    const DataColumn(label: Text('신청일')),
-                    for (final f in _BulkField.values) bulkColumn(f),
-                  ],
-                  rows: [
-                    for (final o in orders)
-                      DataRow(
-                        cells: [
-                          DataCell(_MemberCell(o.member)),
-                          DataCell(
-                            ConstrainedBox(
-                              constraints: const BoxConstraints(maxWidth: 180),
-                              child: Text(
-                                _itemsText(o),
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
+        final table = constraints.maxWidth >= 760;
+        final bar = _SelectionBar(
+          orders: orders,
+          picked: picked,
+          enabled: enabled,
+          showPickAll: !table,
+          onPickAll: onPickAll,
+          onBulk: onBulk,
+          onShift: onShift,
+        );
+        if (table) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              bar,
+              Card(
+                clipBehavior: Clip.antiAlias,
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(minWidth: constraints.maxWidth),
+                    child: DataTable(
+                      // 체크 열까지 가로 스크롤 없이 보이도록 열을 좁게 둔다.
+                      columnSpacing: 12,
+                      horizontalMargin: 16,
+                      onSelectAll: enabled
+                          ? (v) => onPickAll(v ?? false)
+                          : null,
+                      columns: [
+                        const DataColumn(label: Text('회원')),
+                        const DataColumn(label: Text('교재')),
+                        const DataColumn(label: Text('금액'), numeric: true),
+                        const DataColumn(label: Text('상태')),
+                        const DataColumn(label: Text('신청일')),
+                        for (final f in _BulkField.values)
+                          DataColumn(label: Text(f.label)),
+                      ],
+                      rows: [
+                        for (final o in orders)
+                          DataRow(
+                            selected: picked.contains(o.id),
+                            onSelectChanged: enabled
+                                ? (v) => onPick(o, v ?? false)
+                                : null,
+                            cells: [
+                              DataCell(_MemberCell(o.member)),
+                              DataCell(
+                                ConstrainedBox(
+                                  constraints: const BoxConstraints(
+                                    maxWidth: 180,
+                                  ),
+                                  child: Text(
+                                    _itemsText(o),
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
                               ),
-                            ),
-                          ),
-                          DataCell(Text(formatWon(o.totalPrice))),
-                          DataCell(
-                            _StatusMenu(
-                              order: o,
-                              enabled: !busy.contains(o.id),
-                              onStatus: onStatus,
-                              onMove: onMove,
-                            ),
-                          ),
-                          DataCell(Text(formatShortDateTime(o.createdAt))),
-                          DataCell(
-                            _PaidCheckbox(
-                              order: o,
-                              enabled: !busy.contains(o.id),
-                              onStatus: onStatus,
-                            ),
-                          ),
-                          DataCell(
-                            _ShippedCheckbox(
-                              order: o,
-                              enabled: !busy.contains(o.id),
-                              onShipped: onShipped,
-                            ),
-                          ),
-                          DataCell(
-                            Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                _ReceivedCheckbox(
+                              DataCell(Text(formatWon(o.totalPrice))),
+                              DataCell(
+                                _StatusMenu(
                                   order: o,
                                   enabled: !busy.contains(o.id),
-                                  onReceived: onReceived,
+                                  onStatus: onStatus,
                                 ),
-                                _ReceiptText(o),
-                              ],
-                            ),
+                              ),
+                              DataCell(Text(formatShortDateTime(o.createdAt))),
+                              DataCell(
+                                _PaidCheckbox(
+                                  order: o,
+                                  enabled: !busy.contains(o.id),
+                                  onStatus: onStatus,
+                                ),
+                              ),
+                              DataCell(
+                                _ShippedCheckbox(
+                                  order: o,
+                                  enabled: !busy.contains(o.id),
+                                  onShipped: onShipped,
+                                ),
+                              ),
+                              DataCell(
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    _ReceivedCheckbox(
+                                      order: o,
+                                      enabled: !busy.contains(o.id),
+                                      onReceived: onReceived,
+                                    ),
+                                    _ReceiptText(o),
+                                  ],
+                                ),
+                              ),
+                            ],
                           ),
-                        ],
-                      ),
-                  ],
+                      ],
+                    ),
+                  ),
                 ),
               ),
-            ),
+            ],
           );
         }
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _BulkBar(orders: orders, enabled: bulkEnabled, onBulk: onBulk),
+            bar,
             for (final o in orders) ...[
               _OrderCard(
                 order: o,
                 enabled: !busy.contains(o.id),
+                picked: picked.contains(o.id),
+                onPick: enabled ? onPick : null,
                 onStatus: onStatus,
                 onShipped: onShipped,
                 onReceived: onReceived,
-                onMove: onMove,
               ),
               const SizedBox(height: 8),
             ],
@@ -1102,94 +1153,100 @@ class _OrderCard extends StatelessWidget {
   const _OrderCard({
     required this.order,
     required this.enabled,
+    required this.picked,
+    required this.onPick,
     required this.onStatus,
     required this.onShipped,
     required this.onReceived,
-    required this.onMove,
   });
 
   final TextbookOrder order;
   final bool enabled;
+  final bool picked;
+  final _OnToggle? onPick;
   final _OnStatus onStatus;
   final _OnToggle onShipped;
   final _OnToggle onReceived;
-  final _OnMove onMove;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Card(
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
+        padding: const EdgeInsets.fromLTRB(4, 12, 8, 12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Row(
               children: [
+                Checkbox(
+                  value: picked,
+                  onChanged: onPick == null
+                      ? null
+                      : (v) => onPick!(order, v ?? false),
+                ),
                 Expanded(
                   child: Text(
                     '${order.member?.name ?? '-'}  ${order.member?.studentId ?? ''}',
                     style: theme.textTheme.titleMedium,
                   ),
                 ),
-                _StatusMenu(
-                  order: order,
-                  enabled: enabled,
-                  onStatus: onStatus,
-                  onMove: onMove,
-                ),
+                _StatusMenu(order: order, enabled: enabled, onStatus: onStatus),
               ],
             ),
-            const SizedBox(height: 4),
-            Text(_itemsText(order)),
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
+            // 체크박스 아래부터는 이름과 같은 줄에 맞춘다.
+            Padding(
+              padding: const EdgeInsets.only(left: 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const SizedBox(height: 4),
+                  Text(_itemsText(order)),
+                  const SizedBox(height: 4),
+                  Text(
                     '${order.round?.label ?? '-'} 회차',
                     style: theme.textTheme.bodySmall,
                   ),
-                ),
-                _MoveButton(order: order, enabled: enabled, onMove: onMove),
-              ],
-            ),
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    '${formatWon(order.totalPrice)} · ${formatDateTime(order.createdAt)}',
-                    style: theme.textTheme.bodySmall,
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          '${formatWon(order.totalPrice)} · ${formatDateTime(order.createdAt)}',
+                          style: theme.textTheme.bodySmall,
+                        ),
+                      ),
+                      const Text('입금확인'),
+                      _PaidCheckbox(
+                        order: order,
+                        enabled: enabled,
+                        onStatus: onStatus,
+                      ),
+                    ],
                   ),
-                ),
-                const Text('입금확인'),
-                _PaidCheckbox(
-                  order: order,
-                  enabled: enabled,
-                  onStatus: onStatus,
-                ),
-              ],
-            ),
-            Row(
-              children: [
-                Expanded(child: _ShippedText(order)),
-                const Text('배송'),
-                _ShippedCheckbox(
-                  order: order,
-                  enabled: enabled,
-                  onShipped: onShipped,
-                ),
-              ],
-            ),
-            Row(
-              children: [
-                Expanded(child: _ReceiptText(order)),
-                const Text('수령'),
-                _ReceivedCheckbox(
-                  order: order,
-                  enabled: enabled,
-                  onReceived: onReceived,
-                ),
-              ],
+                  Row(
+                    children: [
+                      Expanded(child: _ShippedText(order)),
+                      const Text('배송'),
+                      _ShippedCheckbox(
+                        order: order,
+                        enabled: enabled,
+                        onShipped: onShipped,
+                      ),
+                    ],
+                  ),
+                  Row(
+                    children: [
+                      Expanded(child: _ReceiptText(order)),
+                      const Text('수령'),
+                      _ReceivedCheckbox(
+                        order: order,
+                        enabled: enabled,
+                        onReceived: onReceived,
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ],
         ),
@@ -1320,44 +1377,27 @@ class _ShippedText extends StatelessWidget {
   }
 }
 
-/// 상태 메뉴의 "다른 회차로 이동" 항목.
-const _moveAction = #move;
-
-/// 상태 변경 + 다른 회차로 이동 메뉴. (표에 열을 늘리지 않도록 한 메뉴에 둔다)
 class _StatusMenu extends StatelessWidget {
   const _StatusMenu({
     required this.order,
     required this.enabled,
     required this.onStatus,
-    required this.onMove,
   });
 
   final TextbookOrder order;
   final bool enabled;
   final _OnStatus onStatus;
-  final _OnMove onMove;
 
   @override
   Widget build(BuildContext context) {
-    return PopupMenuButton<Object>(
+    return PopupMenuButton<OrderStatus>(
       enabled: enabled,
-      tooltip: '상태 변경 · 회차 이동',
+      tooltip: '상태 변경',
       initialValue: order.status,
-      onSelected: (v) => v is OrderStatus ? onStatus(order, v) : onMove(order),
+      onSelected: (s) => onStatus(order, s),
       itemBuilder: (_) => [
         for (final s in OrderStatus.values)
           PopupMenuItem(value: s, child: Text(s.label)),
-        const PopupMenuDivider(),
-        const PopupMenuItem(
-          value: _moveAction,
-          child: Row(
-            children: [
-              Icon(Icons.drive_file_move_outline, size: 20),
-              SizedBox(width: 8),
-              Text('다른 회차로 이동'),
-            ],
-          ),
-        ),
       ],
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -1366,108 +1406,6 @@ class _StatusMenu extends StatelessWidget {
           const Icon(Icons.arrow_drop_down, size: 20),
         ],
       ),
-    );
-  }
-}
-
-/// 신청의 회차와 다른 회차로 옮기기 버튼.
-class _MoveButton extends StatelessWidget {
-  const _MoveButton({
-    required this.order,
-    required this.enabled,
-    required this.onMove,
-  });
-
-  final TextbookOrder order;
-  final bool enabled;
-  final _OnMove onMove;
-
-  @override
-  Widget build(BuildContext context) {
-    final start = order.round?.start;
-    return TextButton.icon(
-      onPressed: enabled ? () => onMove(order) : null,
-      icon: const Icon(Icons.drive_file_move_outline, size: 18),
-      label: Text(start == null ? '이동' : '${start.month}/${start.day}'),
-      style: TextButton.styleFrom(
-        visualDensity: VisualDensity.compact,
-        padding: const EdgeInsets.symmetric(horizontal: 8),
-      ),
-    );
-  }
-}
-
-/// 옮길 회차를 고른다. 신청 날짜와 상관없이 어느 회차로든 옮길 수 있다.
-/// 다음 회차가 아직 없으면 맨 위에 "다음 회차"를 보여 주고, 고르면 id 가 빈 회차를 돌려준다. (서버에서 만든다)
-class _MoveRoundDialog extends StatelessWidget {
-  const _MoveRoundDialog({required this.order, required this.rounds});
-
-  final TextbookOrder order;
-  final RoundList rounds;
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.colors;
-    final current = rounds.current;
-    final choices = [
-      if (rounds.next == null)
-        OrderRound(
-          id: '',
-          start: current.deadline,
-          deadline: current.deadline.add(const Duration(days: 7)),
-        ),
-      ...rounds.all,
-    ];
-    return AlertDialog(
-      title: const Text('다른 회차로 이동'),
-      contentPadding: const EdgeInsets.fromLTRB(0, 16, 0, 0),
-      content: SizedBox(
-        width: 400,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24),
-              child: Text(
-                '${order.member?.name ?? '회원'}님의 신청 '
-                '(${formatShortDateTime(order.createdAt)})을 옮길 회차를 고르세요.',
-                style: TextStyle(fontSize: 14, color: c.textSecondary),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Flexible(
-              child: ListView.builder(
-                shrinkWrap: true,
-                itemCount: choices.length,
-                itemBuilder: (context, i) {
-                  final r = choices[i];
-                  final mine = r.id == order.roundId;
-                  return ListTile(
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 24),
-                    title: Text(r.label),
-                    subtitle: Text(
-                      [
-                        r.id.isEmpty ? '다음 회차' : rounds.describe(r),
-                        if (mine) '이 신청의 회차',
-                      ].join(' · '),
-                    ),
-                    trailing: mine ? const Icon(Icons.check) : null,
-                    enabled: !mine,
-                    onTap: () => Navigator.of(context).pop(r),
-                  );
-                },
-              ),
-            ),
-          ],
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('취소'),
-        ),
-      ],
     );
   }
 }

@@ -2,7 +2,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../auth/presentation/auth_providers.dart';
 import '../../campus/presentation/campus_providers.dart';
-import '../../textbooks/domain/order_round.dart';
 import '../../textbooks/domain/textbook_order.dart';
 import '../../textbooks/presentation/textbook_providers.dart';
 
@@ -35,20 +34,6 @@ class AdminOrdersNotifier extends AsyncNotifier<List<TextbookOrder>> {
     if (!ref.mounted || current == null) return;
     state = AsyncData([
       for (final o in current) o.id == orderId ? o.copyWith(status: status) : o,
-    ]);
-  }
-
-  /// 다른 회차로 옮긴다. 이 회차 목록이면 행을 빼고, 전체 회차 목록이면 회차만 바꾼다.
-  Future<void> moveOrder(String orderId, OrderRound round) async {
-    await ref.read(textbookRepositoryProvider).moveOrder(orderId, round.id);
-    final current = state.value;
-    if (!ref.mounted || current == null) return;
-    state = AsyncData([
-      for (final o in current)
-        if (o.id != orderId)
-          o
-        else if (roundId == null || roundId == round.id)
-          o.copyWith(round: round),
     ]);
   }
 

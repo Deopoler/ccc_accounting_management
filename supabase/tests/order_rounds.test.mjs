@@ -467,3 +467,75 @@ describe('1년 지난 데이터 삭제', () => {
     await assertDenied(asUser(db, kAdmin, 'select private.purge_old_campus_data($1)', [kaist]));
   });
 });
+
+describe('선택한 신청을 이전 / 다음 회차로', () => {
+  let campus;
+  let admin;
+  let member;
+  let book;
+
+  const place = async () =>
+    (await asUser(db, member, 'select public.place_textbook_order($1::jsonb) as id', [items([book, 1])])).rows[0].id;
+  const roundOf = async (id) =>
+    (await db.query('select round_id from public.textbook_orders where id = $1', [id])).rows[0].round_id;
+
+  before(async () => {
+    campus = await createCampus(db, { code: 'shift', name: '이동' });
+    admin = await createUser(db, { studentId: '20207777', role: 'campus_admin', campus: 'shift' });
+    member = await createUser(db, { studentId: '20247777', campus: 'shift' });
+    book = (await db.query(
+      `insert into public.textbooks (campus_id, title, price) values ($1, '교재', 1000) returning id`, [campus],
+    )).rows[0].id;
+  });
+
+  test('이전 회차로: 신청마다 자기 회차의 바로 앞 회차로 옮긴다', async () => {
+    const a = await place();
+    const b = await place();
+    const cur = await roundOf(a);
+    const all = await rounds(db, campus);
+    const prev = all[all.findIndex((r) => r.id === cur) - 1].id;
+    const prev2 = all[all.findIndex((r) => r.id === cur) - 2].id;
+
+    await asUser(db, admin, 'select public.admin_shift_textbook_orders($1, -1)', [[a]]);
+    // a 는 이전 회차, b 는 이번 회차 → 각자 한 회차씩 앞으로
+    const { rows } = await asUser(db, admin, 'select public.admin_shift_textbook_orders($1, -1) as n', [[a, b]]);
+    assert.equal(rows[0].n, 2);
+    assert.equal(await roundOf(a), prev2);
+    assert.equal(await roundOf(b), prev);
+  });
+
+  test('다음 회차로: 이번 회차 신청은 다음 회차를 만들어 옮기고, 그보다 뒤로는 못 간다', async () => {
+    const a = await place();
+    const cur = await roundOf(a);
+    await asUser(db, admin, 'select public.admin_shift_textbook_orders($1, 1)', [[a]]);
+    const next = await roundOf(a);
+    const all = await rounds(db, campus);
+    assert.equal(all.at(-1).id, next);
+    assert.equal(all.at(-2).id, cur);
+
+    await assertRaises(asUser(db, admin, 'select public.admin_shift_textbook_orders($1, 1)', [[a]]), /뒤로는/);
+    assert.equal(await roundOf(a), next, '실패하면 그대로');
+  });
+
+  test('하나라도 옮길 수 없으면 아무것도 옮기지 않는다', async () => {
+    const a = await place();
+    const [oldest] = await rounds(db, campus);
+    await db.query('update public.textbook_orders set round_id = $2 where id = $1', [a, oldest.id]);
+    const b = await place();
+    const bRound = await roundOf(b);
+    await assertRaises(asUser(db, admin, 'select public.admin_shift_textbook_orders($1, -1)', [[b, a]]), /이전 회차가 없습니다/);
+    assert.equal(await roundOf(b), bRound);
+  });
+
+  test('회원 / 다른 캠퍼스 관리자는 옮길 수 없다, 잘못된 방향 / 빈 목록은 거부', async () => {
+    const a = await place();
+    await assertRaises(asUser(db, member, 'select public.admin_shift_textbook_orders($1, -1)', [[a]]), /찾을 수 없습니다/);
+    await assertRaises(asUser(db, kAdmin, 'select public.admin_shift_textbook_orders($1, -1)', [[a]]), /찾을 수 없습니다/);
+    await assertRaises(asUser(db, admin, 'select public.admin_shift_textbook_orders($1, 2)', [[a]]), /이전 또는 다음/);
+    await assertRaises(asUser(db, admin, `select public.admin_shift_textbook_orders('{}', -1)`), /선택해 주세요/);
+    await assertRaises(
+      asUser(db, admin, 'select public.admin_shift_textbook_orders($1, -1)', [[a, '00000000-0000-0000-0000-000000000000']]),
+      /찾을 수 없습니다/,
+    );
+  });
+});

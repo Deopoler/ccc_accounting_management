@@ -55,12 +55,6 @@ class RoundList {
 
   int get _currentIndex => all.indexWhere((r) => r.id == current.id);
 
-  /// 미리 만든 다음 회차. 없으면 null.
-  OrderRound? get next {
-    final i = _currentIndex;
-    return i > 0 ? all[i - 1] : null;
-  }
-
   /// 이번 회차 기준 위치: 0 = 이번 회차, n = n회차 전, 음수 = 다음 회차.
   int offsetOf(OrderRound round) =>
       all.indexWhere((r) => r.id == round.id) - _currentIndex;
