@@ -94,6 +94,8 @@ SQL Editor 로 적용했다면 CI 를 쓰기 전에 [적용 이력 맞추기](#�
 10. `20261008000000_admin_order_received.sql` — 관리자 수령 처리 / 확인자 기록
 11. `20261009000000_campuses.sql` — 캠퍼스 / 역할(회원·캠퍼스 관리자·총괄 관리자) / 캠퍼스별 RLS.
     회원이 있는 DB 에서는 학번 20250133(KAIST) 계정이 있어야 적용된다.
+12. `20261010000000_revoke_rls_auto_enable.sql` — Supabase 가 만든 함수의 실행 권한 회수
+13. `20261011000000_order_rounds.sql` — 캠퍼스별 신청 회차, 관리자 마감 일시 변경 / 신청 회차 이동
 
 **또는 CLI** (접속 문자열은 [CLI 로 적용할 때](#cli-로-적용할-때) 참고):
 
@@ -219,6 +221,7 @@ cd supabase/tests && npm install && npm test   # DB (RLS / 권한 / RPC / 트리
 | `test/csv_exports_test.dart` | CSV 행 구성, BOM, 수식 주입 방지 |
 | `test/responsive_test.dart` | 모든 화면을 320 / 360 / 840 / 1280px (다크 테마 포함)로 렌더링해 overflow 등 레이아웃 오류 검사, 실제 라우터로 카테고리 이동 시 선택 수량 유지 검사 |
 | `supabase/tests/rls.test.mjs` | 역할별 조회 / 수정 권한, 교재 신청 RPC, 송금 기록 트리거 |
+| `supabase/tests/order_rounds.test.mjs` | 캠퍼스별 회차 자동 생성, 마감 일시 변경, 신청 회차 이동, 기존 데이터 이전 |
 | `supabase/tests/signup.test.mjs` | 가입 트리거, 승인 전 차단, 승인 / 관리자 권한 |
 | `supabase/tests/security.test.mjs` | 우회 시도 + **스키마 회귀 검사** (RLS 누락, anon 권한, 함수 실행 권한 허용 목록, SECURITY DEFINER search_path, 뷰 security_invoker) |
 
@@ -399,8 +402,11 @@ cd tool/fonts && npm install && npm run build   # 원본 자동 다운로드, �
 
 ### 교재 신청 회차
 
-- 매주 **수요일 오전 9시 (KST)** 에 신청이 마감되고 새 회차가 시작된다. (수요일 09:00 ~ 다음 수요일 09:00)
-- 주문은 신청 시점의 회차(`round_start` = 회차 시작 수요일)에 속한다.
+- 회차는 캠퍼스마다 `order_rounds` 에 저장된다. 회차는 빈틈없이 이어진다. (다음 회차 시작 = 이전 회차 마감)
+- 기본은 매주 **수요일 오전 9시 (KST)** 마감. 관리자가 **설정**에서 이번 회차의 마감 일시를 바꿀 수 있고,
+  다음 회차부터는 그 마감에서 1주일씩 이어진다. 이번 회차가 마감되면 서버가 다음 회차를 만든다.
+- 주문은 신청 시점의 회차(`round_id`)에 속한다. 관리자는 신청 날짜와 상관없이 같은 캠퍼스의 다른 회차로 옮길 수 있다.
+  (`round_start` 는 이전 앱 호환용으로 남아 있고 트리거가 회차 시작 날짜로 채운다)
 - 회원은 **이번 회차**이고 상태가 **신청**인 본인 주문만 수정·취소할 수 있다.
   마감된 회차나 입금확인된 주문은 변경할 수 없다. (서버 RPC 에서 강제)
 - 신청 시점의 교재 가격이 `unit_price` 로 저장된다.

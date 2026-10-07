@@ -58,8 +58,14 @@ const _longName = '남궁 아리따운 하늘별님프리티';
 
 final _now = DateTime.now();
 final _round = OrderRound(
-  start: DateTime(_now.year, _now.month, _now.day),
-  deadline: DateTime(_now.year, _now.month, _now.day + 7),
+  id: 'round',
+  start: DateTime(_now.year, _now.month, _now.day, 9),
+  deadline: DateTime(_now.year, _now.month, _now.day + 7, 9),
+);
+final _previousRound = OrderRound(
+  id: 'previous',
+  start: DateTime(_now.year, _now.month, _now.day - 7, 9),
+  deadline: _round.start,
 );
 
 Profile _profile(
@@ -137,7 +143,8 @@ TextbookOrder _order(
   receivedBy: received ? 'admin' : null,
   id: id,
   userId: userId,
-  roundStart: _round.start,
+  roundId: _round.id,
+  round: _round,
   status: status,
   totalPrice: 2475000,
   createdAt: DateTime(2026, 9, 29, 13, 5),
@@ -236,7 +243,12 @@ class _FakeTextbooks implements TextbookRepository {
   Future<List<TextbookCategory>> fetchCategories(String campusId) async =>
       _categories;
   @override
-  Future<OrderRound> fetchCurrentRound() async => _round;
+  Future<OrderRound> fetchCurrentRound({String? campusId}) async => _round;
+  @override
+  Future<List<OrderRound>> fetchRounds(String campusId) async => [
+    _round,
+    _previousRound,
+  ];
   @override
   Future<List<TextbookOrder>> fetchMyOrders(String userId) async => _orders;
   @override
@@ -244,7 +256,7 @@ class _FakeTextbooks implements TextbookRepository {
   @override
   Future<List<TextbookOrder>> fetchAllOrders(
     String campusId, {
-    DateTime? roundStart,
+    String? roundId,
   }) async => _orders;
   @override
   Future<void> updateOrdersStatus(List<String> ids, OrderStatus status) async =>
@@ -254,6 +266,12 @@ class _FakeTextbooks implements TextbookRepository {
     List<String> ids, {
     required bool shipped,
   }) async => _calls.add('shipped $shipped ${ids.join(',')}');
+  @override
+  Future<void> moveOrder(String orderId, String roundId) async =>
+      _calls.add('move $orderId $roundId');
+  @override
+  Future<void> setRoundDeadline(String roundId, DateTime deadline) async =>
+      _calls.add('deadline $roundId ${deadline.toIso8601String()}');
   @override
   Future<DateTime?> setReceived(String id, {required bool received}) async {
     _calls.add('received $received $id');
@@ -529,6 +547,67 @@ void main() {
       await tester.tap(find.widgetWithText(TextButton, '취소'));
       await tester.pumpAndSettle();
       expect(_calls, isEmpty);
+    });
+  });
+
+  group('회차', () {
+    setUp(_calls.clear);
+
+    for (final sizeName in ['데스크톱', '모바일']) {
+      testWidgets('$sizeName: 상태 메뉴에서 신청을 지난 회차로 옮긴다', (tester) async {
+        await _pump(
+          tester,
+          _sizes[sizeName]!,
+          '/admin/orders',
+          const AdminOrdersPage(),
+          true,
+        );
+        final menu = find.byTooltip('상태 변경 · 회차 이동').first;
+        await tester.ensureVisible(menu);
+        await tester.pumpAndSettle();
+        await tester.tap(menu);
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('다른 회차로 이동'));
+        await tester.pumpAndSettle();
+
+        // 지금 회차는 고를 수 없고, 지난 회차를 고르면 바로 옮긴다.
+        expect(find.text('이번 회차 · 현재 회차'), findsOneWidget);
+        await tester.tap(find.text('1회차 전'));
+        await tester.pumpAndSettle();
+        expect(_calls, ['move o1 previous']);
+        expect(tester.takeException(), isNull);
+      });
+    }
+
+    testWidgets('설정: 이번 회차 마감 일시를 저장한다', (tester) async {
+      await _pump(
+        tester,
+        _sizes['데스크톱']!,
+        '/admin/settings',
+        const AdminSettingsPage(),
+        true,
+      );
+      final save = find.widgetWithText(FilledButton, '마감 저장');
+      await tester.ensureVisible(save);
+      await tester.pumpAndSettle();
+      expect(tester.widget<FilledButton>(save).onPressed, isNull);
+
+      // 달력에서 날짜를 확인하면 바뀐 것으로 보고 저장할 수 있다.
+      await tester.tap(find.byIcon(Icons.event));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find
+            .descendant(
+              of: find.byType(DatePickerDialog),
+              matching: find.byType(TextButton),
+            )
+            .last,
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(save);
+      await tester.pumpAndSettle();
+      expect(_calls, ['deadline round ${_round.deadline.toIso8601String()}']);
+      expect(tester.takeException(), isNull);
     });
   });
 

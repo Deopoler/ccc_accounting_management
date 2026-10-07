@@ -8,14 +8,19 @@ import 'package:intl/intl.dart';
 Map<String, dynamic> _orderJson({
   String id = 'o1',
   String status = 'requested',
-  String round = '2026-09-30',
+  String round = 'r1',
   String studentId = '20240001',
   String name = '홍길동',
   List<(String, String, int, int)> items = const [('b1', '교재 A', 2, 10000)],
 }) => {
   'id': id,
   'user_id': 'u1',
-  'round_start': round,
+  'round_id': round,
+  'order_rounds': {
+    'id': round,
+    'starts_at': '2026-09-30T00:00:00+00:00',
+    'deadline': '2026-10-07T00:00:00+00:00',
+  },
   'status': status,
   'total_price': items.fold(0, (s, i) => s + i.$3 * i.$4),
   'created_at': '2026-09-30T01:00:00+00:00',
@@ -46,18 +51,19 @@ void main() {
     expect(o.totalPrice, 27000);
     expect(o.totalQuantity, 3);
     expect(o.member?.studentId, '20240001');
-    expect(o.roundStart, DateTime(2026, 9, 30));
+    expect(o.roundId, 'r1');
+    expect(o.round?.start.toUtc(), DateTime.utc(2026, 9, 30));
   });
 
   test('회원 수정 가능 여부: 이번 회차 + 신청 상태만', () {
-    final current = DateTime(2026, 9, 30);
+    const current = 'r1';
     final o = TextbookOrder.fromJson(_orderJson());
     expect(o.canMemberEdit(current), isTrue);
     expect(
       o.copyWith(status: OrderStatus.paid).canMemberEdit(current),
       isFalse,
     );
-    expect(o.canMemberEdit(DateTime(2026, 10, 7)), isFalse);
+    expect(o.canMemberEdit('r2'), isFalse);
   });
 
   test('교재별 집계는 취소를 제외한다', () {
@@ -113,7 +119,7 @@ void main() {
     expect(shipped.shippedAt, DateTime.utc(2026, 10, 7, 3));
     expect(shipped.canConfirmReceipt, isTrue);
     // 배송된 신청은 이번 회차여도 회원이 수정/취소할 수 없다.
-    expect(shipped.canMemberEdit(DateTime(2026, 9, 30)), isFalse);
+    expect(shipped.canMemberEdit('r1'), isFalse);
 
     final received = shipped.copyWith(
       receivedAt: () => DateTime.utc(2026, 10, 8),
@@ -161,25 +167,46 @@ void main() {
 
   test('회차 라벨과 마감 표시', () {
     final round = OrderRound(
-      start: DateTime(2026, 9, 30),
-      deadline: DateTime(2026, 10, 7),
+      id: 'r',
+      start: DateTime(2026, 9, 30, 9),
+      deadline: DateTime(2026, 10, 7, 9),
     );
     expect(round.label, '9/30(수) ~ 10/7(수)');
     expect(round.deadlineLabel, '10/7(수) 오전 9시');
-    expect(round.previousStart(1), DateTime(2026, 9, 23));
+
+    // 관리자가 바꾼 마감
+    final custom = OrderRound(
+      id: 'r',
+      start: DateTime(2026, 9, 30, 9),
+      deadline: DateTime(2026, 10, 9, 15, 30),
+    );
+    expect(custom.label, '9/30(수) ~ 10/9(금)');
+    expect(custom.deadlineLabel, '10/9(금) 오후 3시 30분');
   });
 
-  test('날짜로 회차 찾기: 수요일은 그날 시작하는 회차', () {
-    final round = OrderRound(
-      start: DateTime(2026, 9, 30),
-      deadline: DateTime(2026, 10, 7),
-    );
-    expect(round.offsetOf(DateTime(2026, 10, 3)), 0); // 이번 회차 중
-    expect(round.offsetOf(DateTime(2026, 9, 30)), 0); // 이번 회차 시작일
-    expect(round.offsetOf(DateTime(2026, 9, 29)), 1); // 전 회차 마지막 날
-    expect(round.offsetOf(DateTime(2026, 9, 23)), 1); // 전 회차 시작일
-    expect(round.offsetOf(DateTime(2026, 9, 22)), 2);
-    expect(round.offsetOf(DateTime(2025, 10, 1)), 52);
-    expect(round.offsetOf(DateTime(2026, 12, 25)), 0); // 앞으로의 날짜
+  test('시각 표시: 오전 / 오후, 0시 / 12시', () {
+    expect(timeLabel(DateTime(2026, 1, 1, 0)), '오전 0시');
+    expect(timeLabel(DateTime(2026, 1, 1, 9, 5)), '오전 9시 5분');
+    expect(timeLabel(DateTime(2026, 1, 1, 12)), '오후 12시');
+    expect(timeLabel(DateTime(2026, 1, 1, 23, 59)), '오후 11시 59분');
+  });
+
+  test('날짜로 회차 찾기: 시작일은 그날 시작하는 회차', () {
+    OrderRound r(String id, DateTime start, DateTime deadline) =>
+        OrderRound(id: id, start: start, deadline: deadline);
+    // 최신순. 두 번째 회차는 관리자가 금요일 15시로 마감을 바꿨다.
+    final rounds = [
+      r('c', DateTime(2026, 10, 9, 15), DateTime(2026, 10, 16, 15)),
+      r('b', DateTime(2026, 9, 30, 9), DateTime(2026, 10, 9, 15)),
+      r('a', DateTime(2026, 9, 23, 9), DateTime(2026, 9, 30, 9)),
+    ];
+    String? on(DateTime d) => roundOnDate(rounds, d)?.id;
+    expect(on(DateTime(2026, 10, 12)), 'c');
+    expect(on(DateTime(2026, 10, 9)), 'c'); // 이번 회차 시작일
+    expect(on(DateTime(2026, 10, 8)), 'b');
+    expect(on(DateTime(2026, 9, 30)), 'b');
+    expect(on(DateTime(2026, 9, 29)), 'a');
+    expect(on(DateTime(2025, 1, 1)), 'a'); // 첫 회차보다 앞
+    expect(roundOnDate(const [], DateTime(2026, 1, 1)), isNull);
   });
 }

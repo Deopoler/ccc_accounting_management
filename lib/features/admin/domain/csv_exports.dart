@@ -43,7 +43,7 @@ List<List<Object?>> textbookOrdersCsvRows(Iterable<TextbookOrder> orders) => [
     [
       o.member?.studentId,
       o.member?.name,
-      toDateOnly(o.roundStart),
+      o.round == null ? '' : toDateOnly(o.round!.start),
       o.items.map((i) => '${i.title} x${i.quantity}').join('; '),
       o.totalQuantity,
       o.totalPrice,

@@ -2,19 +2,20 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../auth/presentation/auth_providers.dart';
 import '../../campus/presentation/campus_providers.dart';
+import '../../textbooks/domain/order_round.dart';
 import '../../textbooks/domain/textbook_order.dart';
 import '../../textbooks/presentation/textbook_providers.dart';
 
-/// 회차별 전체 신청 현황. 인자가 null 이면 모든 회차.
+/// 회차별 전체 신청 현황. 인자(회차 id)가 null 이면 모든 회차.
 final adminOrdersProvider = AsyncNotifierProvider.autoDispose
-    .family<AdminOrdersNotifier, List<TextbookOrder>, DateTime?>(
+    .family<AdminOrdersNotifier, List<TextbookOrder>, String?>(
       AdminOrdersNotifier.new,
     );
 
 class AdminOrdersNotifier extends AsyncNotifier<List<TextbookOrder>> {
-  AdminOrdersNotifier(this.roundStart);
+  AdminOrdersNotifier(this.roundId);
 
-  final DateTime? roundStart;
+  final String? roundId;
 
   @override
   Future<List<TextbookOrder>> build() async {
@@ -22,7 +23,7 @@ class AdminOrdersNotifier extends AsyncNotifier<List<TextbookOrder>> {
     if (campusId == null) return const [];
     return ref
         .watch(textbookRepositoryProvider)
-        .fetchAllOrders(campusId, roundStart: roundStart);
+        .fetchAllOrders(campusId, roundId: roundId);
   }
 
   /// 서버에 상태를 저장하고, 성공하면 목록을 다시 불러오지 않고 해당 행만 바꾼다.
@@ -34,6 +35,20 @@ class AdminOrdersNotifier extends AsyncNotifier<List<TextbookOrder>> {
     if (!ref.mounted || current == null) return;
     state = AsyncData([
       for (final o in current) o.id == orderId ? o.copyWith(status: status) : o,
+    ]);
+  }
+
+  /// 다른 회차로 옮긴다. 이 회차 목록이면 행을 빼고, 전체 회차 목록이면 회차만 바꾼다.
+  Future<void> moveOrder(String orderId, OrderRound round) async {
+    await ref.read(textbookRepositoryProvider).moveOrder(orderId, round.id);
+    final current = state.value;
+    if (!ref.mounted || current == null) return;
+    state = AsyncData([
+      for (final o in current)
+        if (o.id != orderId)
+          o
+        else if (roundId == null || roundId == round.id)
+          o.copyWith(round: round),
     ]);
   }
 
@@ -93,7 +108,7 @@ class AdminOrdersNotifier extends AsyncNotifier<List<TextbookOrder>> {
         final repo = ref.read(textbookRepositoryProvider);
         final fresh = campusId == null
             ? const <TextbookOrder>[]
-            : await repo.fetchAllOrders(campusId, roundStart: roundStart);
+            : await repo.fetchAllOrders(campusId, roundId: roundId);
         if (ref.mounted) state = AsyncData(fresh);
       } catch (_) {
         if (ref.mounted) ref.invalidateSelf();

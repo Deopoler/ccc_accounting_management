@@ -10,7 +10,6 @@ import '../../../core/widgets/state_views.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../../events/domain/event.dart';
 import '../../events/presentation/event_providers.dart';
-import '../../textbooks/domain/order_round.dart';
 import '../../textbooks/domain/textbook_order.dart';
 import '../../textbooks/presentation/textbook_providers.dart';
 import '../../textbooks/presentation/widgets/order_widgets.dart';
@@ -172,9 +171,7 @@ class _TextbookSummaryCard extends ConsumerWidget {
       final list = orders.requireValue;
       final thisRound = list
           .where(
-            (o) =>
-                isSameDate(o.roundStart, current.start) &&
-                o.status != OrderStatus.cancelled,
+            (o) => o.roundId == current.id && o.status != OrderStatus.cancelled,
           )
           .toList();
       final unpaid = list
@@ -311,7 +308,9 @@ class _ReceiptNotice extends StatelessWidget {
                 ),
                 const SizedBox(width: 8),
                 Text(
-                  '${o.roundStart.month}/${o.roundStart.day} 회차',
+                  o.round == null
+                      ? ''
+                      : '${o.round!.start.month}/${o.round!.start.day} 회차',
                   style: TextStyle(fontSize: 13, color: c.textSecondary),
                 ),
               ],

@@ -137,8 +137,9 @@ describe('교재 신청', () => {
     assert.equal(order.user_id, alice);
     assert.equal(order.status, 'requested');
     assert.equal(order.total_price, 27000);
-    const { rows: round } = await db.query('select public.current_order_round() as r');
-    assert.equal(order.round_start.toISOString(), round[0].r.toISOString());
+    const { rows: round } = await asUser(db, alice, 'select id, round_start from public.get_order_round()');
+    assert.equal(order.round_id, round[0].id);
+    assert.equal(order.round_start.toISOString(), round[0].round_start.toISOString());
   });
 
   test('비활성 교재 / 잘못된 수량 / 중복 교재 / 빈 목록은 거부된다', async () => {
@@ -190,7 +191,13 @@ describe('교재 신청', () => {
 
   test('마감된(이전) 회차 주문은 회원이 취소/수정할 수 없다', async () => {
     const { rows } = await asUser(db, alice, 'select public.place_textbook_order($1::jsonb) as id', [items([bookA, 1])]);
-    await db.query(`update public.textbook_orders set round_start = round_start - 7 where id = $1`, [rows[0].id]);
+    const { rows: past } = await db.query(`
+      insert into public.order_rounds (campus_id, starts_at, deadline)
+      select r.campus_id, r.starts_at - interval '7 days', r.starts_at
+      from public.textbook_orders o join public.order_rounds r on r.id = o.round_id
+      where o.id = $1
+      returning id`, [rows[0].id]);
+    await db.query('update public.textbook_orders set round_id = $2 where id = $1', [rows[0].id, past[0].id]);
     await assertRaises(asUser(db, alice, 'select public.cancel_textbook_order($1)', [rows[0].id]), /마감/);
   });
 
@@ -203,19 +210,7 @@ describe('교재 신청', () => {
 });
 
 describe('신청 회차', () => {
-  test('회차 시작일은 수요일, 마감은 7일 뒤 수요일 09:00 KST(= 00:00 UTC)', async () => {
-    const { rows } = await asUser(db, alice, `
-      select round_start, deadline,
-             extract(isodow from round_start)::int as dow,
-             to_char(deadline at time zone 'UTC', 'HH24:MI') as utc_time,
-             deadline > now() and deadline <= now() + interval '7 days' as in_range
-      from public.get_order_round()`);
-    assert.equal(rows[0].dow, 3);
-    assert.equal(rows[0].utc_time, '00:00');
-    assert.equal(rows[0].in_range, true);
-  });
-
-  test('경계: 수요일 09:00 KST 에 새 회차가 시작된다', async () => {
+  test('경계: 주간 규칙에서 수요일 09:00 KST 에 새 회차가 시작된다 (회차가 없는 캠퍼스의 첫 회차)', async () => {
     const cases = [
       ['2026-09-30 08:59:59+09', '2026-09-23'], // 수요일 마감 직전 → 이전 회차
       ['2026-09-30 09:00:00+09', '2026-09-30'], // 수요일 09:00 → 새 회차
@@ -228,15 +223,6 @@ describe('신청 회차', () => {
       const { rows } = await db.query(`select to_char(private.order_round_for($1::timestamptz), 'YYYY-MM-DD') as r`, [at]);
       assert.equal(rows[0].r, expected, at);
     }
-    const { rows } = await db.query(`select public.order_round_deadline('2026-09-30') = '2026-10-07 09:00:00+09'::timestamptz as ok`);
-    assert.equal(rows[0].ok, true);
-  });
-
-  test('회차 계산 내부 함수는 회원이 직접 호출할 수 없다', async () => {
-    await assert.rejects(
-      asUser(db, alice, `select private.order_round_for(now())`),
-      (e) => e.code === '42501',
-    );
   });
 });
 

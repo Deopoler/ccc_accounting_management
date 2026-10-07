@@ -70,13 +70,13 @@ describe('스키마 회귀 검사', () => {
       'private.is_approved_user',
       'private.is_central_admin',
       'private.my_campus_id',
+      'public.admin_move_textbook_order',
+      'public.admin_set_order_round_deadline',
       'public.admin_set_textbook_received',
       'public.cancel_textbook_order',
       'public.confirm_textbook_received',
-      'public.current_order_round',
       'public.get_order_round',
       'public.list_campuses',
-      'public.order_round_deadline',
       'public.place_textbook_order',
       'public.update_textbook_order',
     ]);
@@ -202,6 +202,7 @@ describe('관리자 제한', () => {
   test('주문 금액 / 회차 / 소유자는 관리자도 바꿀 수 없다', async () => {
     await assertDenied(asUser(db, admin, 'update public.textbook_orders set total_price = 0'));
     await assertDenied(asUser(db, admin, 'update public.textbook_orders set round_start = current_date'));
+    await assertDenied(asUser(db, admin, 'update public.textbook_orders set round_id = gen_random_uuid()'));
     await assertDenied(asUser(db, admin, 'update public.textbook_orders set user_id = $1', [admin]));
   });
 

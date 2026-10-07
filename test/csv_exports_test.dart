@@ -8,7 +8,12 @@ TextbookOrder _order({String status = 'requested', String name = '홍길동'}) =
     TextbookOrder.fromJson({
       'id': 'o',
       'user_id': 'u',
-      'round_start': '2026-09-30',
+      'round_id': 'r1',
+      'order_rounds': {
+        'id': 'r1',
+        'starts_at': '2026-09-30T00:00:00+00:00',
+        'deadline': '2026-10-07T00:00:00+00:00',
+      },
       'status': status,
       'total_price': 27000,
       'created_at': '2026-09-30T01:00:00Z',

@@ -18,9 +18,6 @@ import '../domain/csv_exports.dart';
 import 'admin_order_providers.dart';
 import '../../campus/presentation/campus_providers.dart';
 
-/// 회차 선택: 0 = 이번 회차, n = n회차 전, [_allRounds] = 전체.
-const _allRounds = -1;
-
 /// 이 너비보다 좁으면 (모바일) 필터 / 집계 카드를 고정 너비 대신 폭에 맞춘다.
 const _compactWidth = 600.0;
 
@@ -32,7 +29,9 @@ class AdminOrdersPage extends ConsumerStatefulWidget {
 }
 
 class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
-  int _roundOffset = 0;
+  /// 고른 회차 id. null 이면 이번 회차.
+  String? _roundId;
+  bool _allRounds = false;
   String? _textbookId;
   OrderStatus? _status;
   DeliveryStatus? _delivery;
@@ -45,11 +44,14 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
     super.dispose();
   }
 
-  DateTime? _roundStart(OrderRound current) =>
-      _roundOffset == _allRounds ? null : current.previousStart(_roundOffset);
+  /// 고른 회차. 전체 회차면 null. 고른 회차가 목록에 없으면(캠퍼스를 바꾼 경우) 이번 회차.
+  OrderRound? _selected(List<OrderRound> rounds) {
+    if (_allRounds) return null;
+    return rounds.where((r) => r.id == _roundId).firstOrNull ?? rounds.first;
+  }
 
   Future<void> _setStatus(
-    DateTime? round,
+    String? round,
     TextbookOrder order,
     OrderStatus status,
   ) async {
@@ -67,7 +69,7 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
   }
 
   Future<void> _setShipped(
-    DateTime? round,
+    String? round,
     TextbookOrder order,
     bool shipped,
   ) async {
@@ -98,7 +100,7 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
   }
 
   Future<void> _setReceived(
-    DateTime? round,
+    String? round,
     TextbookOrder order,
     bool received,
   ) async {
@@ -130,7 +132,7 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
 
   /// 현재 목록(필터 적용)의 대상 전체를 체크/해제한다. 건수를 보여 주고 확인받는다.
   Future<void> _bulk(
-    DateTime? round,
+    String? round,
     List<TextbookOrder> orders,
     _BulkField field,
     bool value,
@@ -181,12 +183,43 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
     }
   }
 
+  Future<void> _move(
+    String? round,
+    List<OrderRound> rounds,
+    TextbookOrder order,
+  ) async {
+    final target = await showDialog<OrderRound>(
+      context: context,
+      builder: (_) => _MoveRoundDialog(order: order, rounds: rounds),
+    );
+    if (target == null || target.id == order.roundId || !mounted) return;
+    setState(() => _busy.add(order.id));
+    try {
+      await ref
+          .read(adminOrdersProvider(round).notifier)
+          .moveOrder(order.id, target);
+      // 옮긴 회차 / 전체 회차 목록도 다시 불러오게 한다.
+      ref.invalidate(adminOrdersProvider(target.id));
+      if (round != null) ref.invalidate(adminOrdersProvider(null));
+      if (mounted) {
+        showSnack(
+          context,
+          '${order.member?.name ?? '신청'}님의 신청을 ${target.label} 회차로 옮겼습니다.',
+        );
+      }
+    } catch (e) {
+      if (mounted) showErrorSnack(context, e);
+    } finally {
+      if (mounted) setState(() => _busy.remove(order.id));
+    }
+  }
+
   void _export(
     List<TextbookOrder> orders,
-    DateTime? roundStart, {
+    OrderRound? selected, {
     required bool tally,
   }) {
-    final round = roundStart == null ? '전체회차' : toDateOnly(roundStart);
+    final round = selected == null ? '전체회차' : toDateOnly(selected.start);
     final name = tally ? '교재별집계' : '교재신청현황';
     try {
       downloadTextFile(
@@ -202,20 +235,22 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
 
   @override
   Widget build(BuildContext context) {
-    final round = ref.watch(currentRoundProvider);
+    final roundList = ref.watch(adminRoundsProvider);
     final textbooks = ref.watch(textbooksProvider(CampusScope.admin));
 
-    if (round.hasError) {
+    if (roundList.hasError) {
       return ErrorView(
-        error: round.error!,
-        onRetry: () => ref.invalidate(currentRoundProvider),
+        error: roundList.error!,
+        onRetry: () => ref.invalidate(adminRoundsProvider),
       );
     }
-    if (!round.hasValue) return const LoadingView();
+    if (!roundList.hasValue) return const LoadingView();
 
-    final current = round.requireValue;
-    final roundStart = _roundStart(current);
-    final orders = ref.watch(adminOrdersProvider(roundStart));
+    final rounds = roundList.requireValue;
+    if (rounds.isEmpty) return const EmptyView(message: '신청 회차가 없습니다.');
+    final selected = _selected(rounds);
+    final roundId = selected?.id;
+    final orders = ref.watch(adminOrdersProvider(roundId));
     final books = textbooks.value ?? const <Textbook>[];
     final filter = OrderFilter(
       textbookId: _textbookId,
@@ -237,9 +272,12 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               _Filters(
-                current: current,
-                roundOffset: _roundOffset,
-                onRoundChanged: (v) => setState(() => _roundOffset = v),
+                rounds: rounds,
+                selected: selected,
+                onRoundChanged: (r) => setState(() {
+                  _allRounds = r == null;
+                  if (r != null) _roundId = r.id;
+                }),
                 textbooks: books,
                 textbookId: _textbookId,
                 onTextbookChanged: (v) => setState(() => _textbookId = v),
@@ -254,7 +292,7 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
               const SizedBox(height: 16),
               AsyncValueView(
                 value: orders,
-                onRetry: () => ref.invalidate(adminOrdersProvider(roundStart)),
+                onRetry: () => ref.invalidate(adminOrdersProvider(roundId)),
                 data: (all) {
                   final filtered = filter.apply(all);
                   return Column(
@@ -267,7 +305,7 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
                         trailing: _ExportMenu(
                           enabled: filtered.isNotEmpty,
                           onExport: (tally) =>
-                              _export(filtered, roundStart, tally: tally),
+                              _export(filtered, selected, tally: tally),
                         ),
                       ),
                       if (filtered.isEmpty)
@@ -276,10 +314,11 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
                         _OrdersList(
                           orders: filtered,
                           busy: _busy,
-                          onStatus: (o, s) => _setStatus(roundStart, o, s),
-                          onShipped: (o, v) => _setShipped(roundStart, o, v),
-                          onReceived: (o, v) => _setReceived(roundStart, o, v),
-                          onBulk: (f, v) => _bulk(roundStart, filtered, f, v),
+                          onStatus: (o, s) => _setStatus(roundId, o, s),
+                          onShipped: (o, v) => _setShipped(roundId, o, v),
+                          onReceived: (o, v) => _setReceived(roundId, o, v),
+                          onMove: (o) => _move(roundId, rounds, o),
+                          onBulk: (f, v) => _bulk(roundId, filtered, f, v),
                         ),
                     ],
                   );
@@ -299,8 +338,8 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
 
 class _Filters extends StatelessWidget {
   const _Filters({
-    required this.current,
-    required this.roundOffset,
+    required this.rounds,
+    required this.selected,
     required this.onRoundChanged,
     required this.textbooks,
     required this.textbookId,
@@ -314,9 +353,9 @@ class _Filters extends StatelessWidget {
     required this.onSearchChanged,
   });
 
-  final OrderRound current;
-  final int roundOffset;
-  final ValueChanged<int> onRoundChanged;
+  final List<OrderRound> rounds;
+  final OrderRound? selected;
+  final ValueChanged<OrderRound?> onRoundChanged;
   final List<Textbook> textbooks;
   final String? textbookId;
   final ValueChanged<String?> onTextbookChanged;
@@ -337,8 +376,8 @@ class _Filters extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _RoundNavigator(
-          current: current,
-          offset: roundOffset,
+          rounds: rounds,
+          selected: selected,
           onChanged: onRoundChanged,
         ),
         const SizedBox(height: 12),
@@ -439,43 +478,55 @@ class _Filters extends StatelessWidget {
 /// 회차 이동: `< 회차 >`. 가운데를 누르면 달력에서 날짜를 골라 그 날짜의 회차로 간다.
 class _RoundNavigator extends StatelessWidget {
   const _RoundNavigator({
-    required this.current,
-    required this.offset,
+    required this.rounds,
+    required this.selected,
     required this.onChanged,
   });
 
-  final OrderRound current;
+  /// 최신순. 첫 번째가 이번 회차.
+  final List<OrderRound> rounds;
 
-  /// 0 = 이번 회차, n = n회차 전, [_allRounds] = 전체.
-  final int offset;
-  final ValueChanged<int> onChanged;
+  /// null 이면 전체 회차.
+  final OrderRound? selected;
 
-  bool get _all => offset == _allRounds;
+  /// null 이면 전체 회차.
+  final ValueChanged<OrderRound?> onChanged;
+
+  bool get _all => selected == null;
+
+  /// 0 = 이번 회차, n = n회차 전
+  int get _index => _all ? 0 : rounds.indexWhere((r) => r.id == selected!.id);
 
   Future<void> _pickDate(BuildContext context) async {
     final today = DateUtils.dateOnly(DateTime.now());
-    final initial = _all ? today : current.previousStart(offset);
+    final first = DateUtils.dateOnly(rounds.last.start);
+    final initial = _all ? today : DateUtils.dateOnly(selected!.start);
     final picked = await showDatePicker(
       context: context,
       helpText: '날짜를 고르면 그 날짜의 회차로 이동합니다',
-      initialDate: initial.isAfter(today) ? today : initial,
-      firstDate: DateTime(today.year - 5),
+      initialDate: initial.isAfter(today)
+          ? today
+          : initial.isBefore(first)
+          ? first
+          : initial,
+      firstDate: first.isAfter(today) ? today : first,
       // 앞으로의 날짜는 모두 이번 회차라 고를 필요가 없다.
       lastDate: today,
     );
-    if (picked != null) onChanged(current.offsetOf(picked));
+    if (picked != null) onChanged(roundOnDate(rounds, picked));
   }
 
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
     final theme = Theme.of(context);
-    final title = _all ? '전체 회차' : roundLabel(current.previousStart(offset));
+    final index = _index;
+    final title = _all ? '전체 회차' : selected!.label;
     final sub = _all
         ? '모든 회차의 신청'
-        : offset == 0
-        ? '이번 회차'
-        : '$offset회차 전';
+        : index == 0
+        ? '이번 회차 · ${selected!.deadlineLabel} 마감'
+        : '$index회차 전';
 
     return Column(
       // stretch 면 아래 최대 너비가 무시된다.
@@ -488,7 +539,9 @@ class _RoundNavigator extends StatelessWidget {
               IconButton(
                 tooltip: '이전 회차',
                 icon: const Icon(Icons.chevron_left),
-                onPressed: _all ? null : () => onChanged(offset + 1),
+                onPressed: _all || index >= rounds.length - 1
+                    ? null
+                    : () => onChanged(rounds[index + 1]),
               ),
               Expanded(
                 child: Tooltip(
@@ -538,9 +591,9 @@ class _RoundNavigator extends StatelessWidget {
                 tooltip: '다음 회차',
                 icon: const Icon(Icons.chevron_right),
                 // 이번 회차보다 뒤는 없다.
-                onPressed: _all || offset == 0
+                onPressed: _all || index == 0
                     ? null
-                    : () => onChanged(offset - 1),
+                    : () => onChanged(rounds[index - 1]),
               ),
             ],
           ),
@@ -550,16 +603,16 @@ class _RoundNavigator extends StatelessWidget {
           spacing: 8,
           runSpacing: 8,
           children: [
-            if (offset != 0)
+            if (index != 0)
               ActionChip(
                 avatar: const Icon(Icons.today, size: 18),
                 label: const Text('이번 회차로'),
-                onPressed: () => onChanged(0),
+                onPressed: () => onChanged(rounds.first),
               ),
             FilterChip(
               label: const Text('전체 회차'),
               selected: _all,
-              onSelected: (v) => onChanged(v ? _allRounds : 0),
+              onSelected: (v) => onChanged(v ? null : rounds.first),
             ),
           ],
         ),
@@ -751,6 +804,7 @@ class _StatCard extends StatelessWidget {
 
 typedef _OnStatus = void Function(TextbookOrder order, OrderStatus status);
 typedef _OnToggle = void Function(TextbookOrder order, bool value);
+typedef _OnMove = void Function(TextbookOrder order);
 typedef _OnBulk = void Function(_BulkField field, bool value);
 
 /// 전체 체크할 수 있는 항목. 취소된 신청은 모두 대상이 아니다.
@@ -866,6 +920,7 @@ class _OrdersList extends StatelessWidget {
     required this.onStatus,
     required this.onShipped,
     required this.onReceived,
+    required this.onMove,
     required this.onBulk,
   });
 
@@ -874,6 +929,7 @@ class _OrdersList extends StatelessWidget {
   final _OnStatus onStatus;
   final _OnToggle onShipped;
   final _OnToggle onReceived;
+  final _OnMove onMove;
   final _OnBulk onBulk;
 
   @override
@@ -936,6 +992,7 @@ class _OrdersList extends StatelessWidget {
                               order: o,
                               enabled: !busy.contains(o.id),
                               onStatus: onStatus,
+                              onMove: onMove,
                             ),
                           ),
                           DataCell(Text(formatShortDateTime(o.createdAt))),
@@ -985,6 +1042,7 @@ class _OrdersList extends StatelessWidget {
                 onStatus: onStatus,
                 onShipped: onShipped,
                 onReceived: onReceived,
+                onMove: onMove,
               ),
               const SizedBox(height: 8),
             ],
@@ -1031,6 +1089,7 @@ class _OrderCard extends StatelessWidget {
     required this.onStatus,
     required this.onShipped,
     required this.onReceived,
+    required this.onMove,
   });
 
   final TextbookOrder order;
@@ -1038,6 +1097,7 @@ class _OrderCard extends StatelessWidget {
   final _OnStatus onStatus;
   final _OnToggle onShipped;
   final _OnToggle onReceived;
+  final _OnMove onMove;
 
   @override
   Widget build(BuildContext context) {
@@ -1056,12 +1116,27 @@ class _OrderCard extends StatelessWidget {
                     style: theme.textTheme.titleMedium,
                   ),
                 ),
-                _StatusMenu(order: order, enabled: enabled, onStatus: onStatus),
+                _StatusMenu(
+                  order: order,
+                  enabled: enabled,
+                  onStatus: onStatus,
+                  onMove: onMove,
+                ),
               ],
             ),
             const SizedBox(height: 4),
             Text(_itemsText(order)),
-            const SizedBox(height: 4),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '${order.round?.label ?? '-'} 회차',
+                    style: theme.textTheme.bodySmall,
+                  ),
+                ),
+                _MoveButton(order: order, enabled: enabled, onMove: onMove),
+              ],
+            ),
             Row(
               children: [
                 Expanded(
@@ -1229,27 +1304,44 @@ class _ShippedText extends StatelessWidget {
   }
 }
 
+/// 상태 메뉴의 "다른 회차로 이동" 항목.
+const _moveAction = #move;
+
+/// 상태 변경 + 다른 회차로 이동 메뉴. (표에 열을 늘리지 않도록 한 메뉴에 둔다)
 class _StatusMenu extends StatelessWidget {
   const _StatusMenu({
     required this.order,
     required this.enabled,
     required this.onStatus,
+    required this.onMove,
   });
 
   final TextbookOrder order;
   final bool enabled;
   final _OnStatus onStatus;
+  final _OnMove onMove;
 
   @override
   Widget build(BuildContext context) {
-    return PopupMenuButton<OrderStatus>(
+    return PopupMenuButton<Object>(
       enabled: enabled,
-      tooltip: '상태 변경',
+      tooltip: '상태 변경 · 회차 이동',
       initialValue: order.status,
-      onSelected: (s) => onStatus(order, s),
+      onSelected: (v) => v is OrderStatus ? onStatus(order, v) : onMove(order),
       itemBuilder: (_) => [
         for (final s in OrderStatus.values)
           PopupMenuItem(value: s, child: Text(s.label)),
+        const PopupMenuDivider(),
+        const PopupMenuItem(
+          value: _moveAction,
+          child: Row(
+            children: [
+              Icon(Icons.drive_file_move_outline, size: 20),
+              SizedBox(width: 8),
+              Text('다른 회차로 이동'),
+            ],
+          ),
+        ),
       ],
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -1258,6 +1350,99 @@ class _StatusMenu extends StatelessWidget {
           const Icon(Icons.arrow_drop_down, size: 20),
         ],
       ),
+    );
+  }
+}
+
+/// 신청의 회차와 다른 회차로 옮기기 버튼.
+class _MoveButton extends StatelessWidget {
+  const _MoveButton({
+    required this.order,
+    required this.enabled,
+    required this.onMove,
+  });
+
+  final TextbookOrder order;
+  final bool enabled;
+  final _OnMove onMove;
+
+  @override
+  Widget build(BuildContext context) {
+    final start = order.round?.start;
+    return TextButton.icon(
+      onPressed: enabled ? () => onMove(order) : null,
+      icon: const Icon(Icons.drive_file_move_outline, size: 18),
+      label: Text(start == null ? '이동' : '${start.month}/${start.day}'),
+      style: TextButton.styleFrom(
+        visualDensity: VisualDensity.compact,
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+      ),
+    );
+  }
+}
+
+/// 옮길 회차를 고른다. 신청 날짜와 상관없이 어느 회차로든 옮길 수 있다.
+class _MoveRoundDialog extends StatelessWidget {
+  const _MoveRoundDialog({required this.order, required this.rounds});
+
+  final TextbookOrder order;
+
+  /// 최신순. 첫 번째가 이번 회차.
+  final List<OrderRound> rounds;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return AlertDialog(
+      title: const Text('다른 회차로 이동'),
+      contentPadding: const EdgeInsets.fromLTRB(0, 16, 0, 0),
+      content: SizedBox(
+        width: 400,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: Text(
+                '${order.member?.name ?? '회원'}님의 신청 '
+                '(${formatShortDateTime(order.createdAt)})을 옮길 회차를 고르세요.',
+                style: TextStyle(fontSize: 14, color: c.textSecondary),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Flexible(
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: rounds.length,
+                itemBuilder: (context, i) {
+                  final r = rounds[i];
+                  final mine = r.id == order.roundId;
+                  return ListTile(
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 24),
+                    title: Text(r.label),
+                    subtitle: Text(
+                      [
+                        i == 0 ? '이번 회차' : '$i회차 전',
+                        if (mine) '현재 회차',
+                      ].join(' · '),
+                    ),
+                    trailing: mine ? const Icon(Icons.check) : null,
+                    enabled: !mine,
+                    onTap: () => Navigator.of(context).pop(r),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('취소'),
+        ),
+      ],
     );
   }
 }

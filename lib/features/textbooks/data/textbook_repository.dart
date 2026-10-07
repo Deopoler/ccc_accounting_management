@@ -16,8 +16,9 @@ typedef ShipmentState = ({
 });
 
 const _orderColumns =
-    'id, user_id, round_start, status, total_price, created_at, '
+    'id, user_id, round_id, status, total_price, created_at, '
     'is_shipped, shipped_at, received_at, received_by, '
+    'order_rounds(id, starts_at, deadline), '
     'textbook_order_items(textbook_id, quantity, unit_price, textbooks(title))';
 
 class TextbookRepository {
@@ -116,10 +117,38 @@ class TextbookRepository {
 
   // ---------------------------------------------------------------- 회차
 
-  Future<OrderRound> fetchCurrentRound() async {
-    final rows = await _client.rpc<List<dynamic>>('get_order_round');
+  /// 캠퍼스의 이번 회차. [campusId] 가 없으면 본인 캠퍼스.
+  /// 지난 회차가 마감됐으면 서버가 다음 회차를 만든다.
+  Future<OrderRound> fetchCurrentRound({String? campusId}) async {
+    final rows = await _client.rpc<List<dynamic>>(
+      'get_order_round',
+      params: {'p_campus_id': ?campusId},
+    );
+    if (rows.isEmpty) {
+      throw const AppException('신청 회차를 불러오지 못했습니다. 다시 로그인해 주세요.');
+    }
     return OrderRound.fromJson(rows.first as Map<String, dynamic>);
   }
+
+  /// 캠퍼스의 모든 회차 (최신순). 이번 회차보다 뒤 회차는 없다.
+  Future<List<OrderRound>> fetchRounds(String campusId) async {
+    final rows = await _client
+        .from('order_rounds')
+        .select('id, starts_at, deadline')
+        .eq('campus_id', campusId)
+        .order('starts_at', ascending: false);
+    return rows.map(OrderRound.fromJson).toList();
+  }
+
+  /// 이번 회차의 마감 일시를 바꾼다. 다음 회차부터는 이 마감에서 1주일씩 이어진다.
+  Future<void> setRoundDeadline(String roundId, DateTime deadline) =>
+      _client.rpc<void>(
+        'admin_set_order_round_deadline',
+        params: {
+          'p_round_id': roundId,
+          'p_deadline': deadline.toUtc().toIso8601String(),
+        },
+      );
 
   // ---------------------------------------------------------------- 회원 신청
 
@@ -173,10 +202,10 @@ class TextbookRepository {
 
   // ---------------------------------------------------------------- 관리자
 
-  /// 캠퍼스의 신청 현황. [roundStart] 가 null 이면 모든 회차.
+  /// 캠퍼스의 신청 현황. [roundId] 가 null 이면 모든 회차.
   Future<List<TextbookOrder>> fetchAllOrders(
     String campusId, {
-    DateTime? roundStart,
+    String? roundId,
   }) async {
     var query = _client
         .from('textbook_orders')
@@ -186,8 +215,8 @@ class TextbookRepository {
           'profiles:profiles!textbook_orders_user_id_fkey(student_id, name)',
         )
         .eq('campus_id', campusId);
-    if (roundStart != null) {
-      query = query.eq('round_start', toDateOnly(roundStart));
+    if (roundId != null) {
+      query = query.eq('round_id', roundId);
     }
     final rows = await query.order('created_at', ascending: false);
     return rows.map(TextbookOrder.fromJson).toList();
@@ -223,6 +252,12 @@ class TextbookRepository {
       receivedBy: row['received_by'] as String?,
     );
   }
+
+  /// 신청을 같은 캠퍼스의 다른 회차로 옮긴다. 신청 날짜와 상관없다.
+  Future<void> moveOrder(String orderId, String roundId) => _client.rpc<void>(
+    'admin_move_textbook_order',
+    params: {'p_order_id': orderId, 'p_round_id': roundId},
+  );
 
   // ---------------------------------------------------------------- 관리자 일괄 처리
 

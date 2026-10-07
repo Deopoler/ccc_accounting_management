@@ -125,10 +125,10 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
   Widget build(BuildContext context) {
     final order = widget.order;
     final theme = Theme.of(context);
-    final editable = order.canMemberEdit(widget.currentRound.start);
+    final editable = order.canMemberEdit(widget.currentRound.id);
     final closed =
         order.status == OrderStatus.requested &&
-        !isSameDate(order.roundStart, widget.currentRound.start);
+        order.roundId != widget.currentRound.id;
 
     return Card(
       child: Padding(
@@ -143,7 +143,7 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        '${roundLabel(order.roundStart)} 회차',
+                        '${order.round?.label ?? ''} 회차',
                         style: theme.textTheme.titleSmall?.copyWith(
                           fontWeight: FontWeight.w600,
                         ),

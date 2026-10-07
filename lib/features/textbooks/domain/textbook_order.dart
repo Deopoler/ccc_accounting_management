@@ -64,7 +64,8 @@ class TextbookOrder {
   const TextbookOrder({
     required this.id,
     required this.userId,
-    required this.roundStart,
+    required this.roundId,
+    this.round,
     required this.status,
     required this.totalPrice,
     required this.createdAt,
@@ -87,7 +88,10 @@ class TextbookOrder {
     return TextbookOrder(
       id: json['id'] as String,
       userId: json['user_id'] as String,
-      roundStart: parseDateOnly(json['round_start'] as String),
+      roundId: json['round_id'] as String,
+      round: json['order_rounds'] == null
+          ? null
+          : OrderRound.fromJson(json['order_rounds'] as Map<String, dynamic>),
       status: OrderStatus.parse(json['status'] as String),
       totalPrice: json['total_price'] as int,
       createdAt: DateTime.parse(json['created_at'] as String),
@@ -107,7 +111,10 @@ class TextbookOrder {
 
   final String id;
   final String userId;
-  final DateTime roundStart;
+  final String roundId;
+
+  /// 신청이 속한 회차. 관리자가 다른 회차로 옮길 수 있다. (조회할 때 함께 불러온다)
+  final OrderRound? round;
   final OrderStatus status;
   final int totalPrice;
   final DateTime createdAt;
@@ -137,16 +144,17 @@ class TextbookOrder {
   int get totalQuantity => items.fold(0, (sum, i) => sum + i.quantity);
 
   /// 회원이 수정/취소할 수 있는지. 실제 제한은 서버 RPC 가 강제한다.
-  bool canMemberEdit(DateTime currentRoundStart) =>
+  bool canMemberEdit(String currentRoundId) =>
       status == OrderStatus.requested &&
       !isShipped &&
-      isSameDate(roundStart, currentRoundStart);
+      roundId == currentRoundId;
 
   /// 회원이 수령 확인할 수 있는지 (배송됨 + 아직 미수령). 서버 RPC 가 강제한다.
   bool get canConfirmReceipt =>
       status != OrderStatus.cancelled && delivery == DeliveryStatus.shipped;
 
   TextbookOrder copyWith({
+    OrderRound? round,
     OrderStatus? status,
     bool? isShipped,
     DateTime? Function()? shippedAt,
@@ -155,7 +163,8 @@ class TextbookOrder {
   }) => TextbookOrder(
     id: id,
     userId: userId,
-    roundStart: roundStart,
+    roundId: round?.id ?? roundId,
+    round: round ?? this.round,
     status: status ?? this.status,
     totalPrice: totalPrice,
     createdAt: createdAt,
