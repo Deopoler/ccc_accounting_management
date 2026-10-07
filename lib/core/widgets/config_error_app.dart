@@ -19,7 +19,7 @@ class ConfigErrorApp extends StatelessWidget {
           message:
               'Supabase 접속 정보가 설정되지 않았습니다.\n'
               'flutter run -d chrome --dart-define-from-file=env.json\n'
-              '형태로 실행해 주세요. (README 참고)',
+              '형태로 실행해 주세요. (docs/개발/설치.md 참고)',
         ),
       ),
     );

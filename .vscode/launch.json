@@ -1,5 +1,5 @@
 {
-  // F5 로 실행. 접속 정보 파일(env.json / env.staging.json)은 README 2-5, 3-1 참고.
+  // F5 로 실행. 접속 정보 파일(env.json / env.staging.json)은 docs/개발/설치.md 참고.
   "version": "0.2.0",
   "configurations": [
     {

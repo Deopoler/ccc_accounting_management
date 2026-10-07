@@ -1,5 +1,5 @@
 # 작업 브랜치(feature/**)에 push 하면 테스트 → 테스트 서버에 마이그레이션 / Edge Function 적용.
-# 앱은 로컬에서 env.staging.json 으로 띄워 확인한다. (README 3-1)
+# 앱은 로컬에서 env.staging.json 으로 띄워 확인한다. (docs/개발/테스트서버와배포.md)
 #
 # 필요한 저장소 Secrets
 #   STAGING_DB_URL         테스트 서버 Session pooler 접속 문자열 (DB 비밀번호 포함)

@@ -414,6 +414,6 @@ enabled = true
 # and column/key alignment. Set to "null" to emit raw, unformatted SQL.
 # format_options = "{\"keywordCase\":\"upper\",\"indent\":2,\"maxWidth\":180,\"commaStyle\":\"trailing\"}"
 
-# 호출자 토큰과 관리자 여부는 함수 안에서 직접 검증한다. (README 2-4)
+# 호출자 토큰과 관리자 여부는 함수 안에서 직접 검증한다. (docs/개발/설치.md)
 [functions.admin-members]
 verify_jwt = false
