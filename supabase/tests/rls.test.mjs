@@ -192,11 +192,10 @@ describe('교재 신청', () => {
   test('마감된(이전) 회차 주문은 회원이 취소/수정할 수 없다', async () => {
     const { rows } = await asUser(db, alice, 'select public.place_textbook_order($1::jsonb) as id', [items([bookA, 1])]);
     const { rows: past } = await db.query(`
-      insert into public.order_rounds (campus_id, starts_at, deadline)
-      select r.campus_id, r.starts_at - interval '7 days', r.starts_at
-      from public.textbook_orders o join public.order_rounds r on r.id = o.round_id
-      where o.id = $1
-      returning id`, [rows[0].id]);
+      select p.id from public.textbook_orders o
+      join public.order_rounds r on r.id = o.round_id
+      join public.order_rounds p on p.campus_id = r.campus_id and p.deadline = r.starts_at
+      where o.id = $1`, [rows[0].id]);
     await db.query('update public.textbook_orders set round_id = $2 where id = $1', [rows[0].id, past[0].id]);
     await assertRaises(asUser(db, alice, 'select public.cancel_textbook_order($1)', [rows[0].id]), /마감/);
   });
