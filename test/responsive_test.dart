@@ -267,6 +267,16 @@ class _FakeTextbooks implements TextbookRepository {
     required bool shipped,
   }) async => _calls.add('shipped $shipped ${ids.join(',')}');
   @override
+  Future<OrderRound> createNextRound(String campusId) async {
+    _calls.add('next');
+    return OrderRound(
+      id: 'next',
+      start: _round.deadline,
+      deadline: _round.deadline.add(const Duration(days: 7)),
+    );
+  }
+
+  @override
   Future<void> moveOrder(String orderId, String roundId) async =>
       _calls.add('move $orderId $roundId');
   @override
@@ -571,13 +581,34 @@ void main() {
         await tester.pumpAndSettle();
 
         // 지금 회차는 고를 수 없고, 지난 회차를 고르면 바로 옮긴다.
-        expect(find.text('이번 회차 · 현재 회차'), findsOneWidget);
+        expect(find.text('이번 회차 · 이 신청의 회차'), findsOneWidget);
         await tester.tap(find.text('1회차 전'));
         await tester.pumpAndSettle();
         expect(_calls, ['move o1 previous']);
         expect(tester.takeException(), isNull);
       });
     }
+
+    testWidgets('아직 없는 다음 회차를 고르면 만든 뒤 옮긴다', (tester) async {
+      await _pump(
+        tester,
+        _sizes['데스크톱']!,
+        '/admin/orders',
+        const AdminOrdersPage(),
+        true,
+      );
+      final menu = find.byTooltip('상태 변경 · 회차 이동').first;
+      await tester.ensureVisible(menu);
+      await tester.pumpAndSettle();
+      await tester.tap(menu);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('다른 회차로 이동'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('다음 회차'));
+      await tester.pumpAndSettle();
+      expect(_calls, ['next', 'move o1 next']);
+      expect(tester.takeException(), isNull);
+    });
 
     testWidgets('설정: 이번 회차 마감 일시를 저장한다', (tester) async {
       await _pump(

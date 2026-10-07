@@ -55,15 +55,56 @@ void main() {
     expect(o.round?.start.toUtc(), DateTime.utc(2026, 9, 30));
   });
 
-  test('회원 수정 가능 여부: 이번 회차 + 신청 상태만', () {
-    const current = 'r1';
+  test('회원 수정 가능 여부: 마감 전 회차(이번 / 다음 회차) + 신청 상태만', () {
+    // 주문 회차: 9/30 ~ 10/7 (UTC 00:00)
+    final current = OrderRound(
+      id: 'r1',
+      start: DateTime.utc(2026, 9, 30),
+      deadline: DateTime.utc(2026, 10, 7),
+    );
     final o = TextbookOrder.fromJson(_orderJson());
     expect(o.canMemberEdit(current), isTrue);
     expect(
       o.copyWith(status: OrderStatus.paid).canMemberEdit(current),
       isFalse,
     );
-    expect(o.canMemberEdit('r2'), isFalse);
+
+    // 이번 회차가 다음 주로 넘어갔으면 마감된 회차
+    final later = OrderRound(
+      id: 'r2',
+      start: DateTime.utc(2026, 10, 7),
+      deadline: DateTime.utc(2026, 10, 14),
+    );
+    expect(o.canMemberEdit(later), isFalse);
+
+    // 관리자가 다음 회차로 옮긴 신청은 수정할 수 있다.
+    final earlier = OrderRound(
+      id: 'r0',
+      start: DateTime.utc(2026, 9, 23),
+      deadline: DateTime.utc(2026, 9, 30),
+    );
+    expect(o.canMemberEdit(earlier), isTrue);
+  });
+
+  test('회차 목록: 이번 회차 기준 위치', () {
+    OrderRound r(String id) =>
+        OrderRound(id: id, start: DateTime(2026), deadline: DateTime(2027));
+    final withNext = RoundList(
+      campusId: 'k',
+      current: r('b'),
+      all: [r('c'), r('b'), r('a')],
+    );
+    expect(withNext.next?.id, 'c');
+    expect(withNext.describe(r('c')), '다음 회차');
+    expect(withNext.describe(r('b')), '이번 회차');
+    expect(withNext.describe(r('a')), '1회차 전');
+
+    final noNext = RoundList(
+      campusId: 'k',
+      current: r('b'),
+      all: [r('b'), r('a')],
+    );
+    expect(noNext.next, isNull);
   });
 
   test('교재별 집계는 취소를 제외한다', () {
@@ -119,7 +160,16 @@ void main() {
     expect(shipped.shippedAt, DateTime.utc(2026, 10, 7, 3));
     expect(shipped.canConfirmReceipt, isTrue);
     // 배송된 신청은 이번 회차여도 회원이 수정/취소할 수 없다.
-    expect(shipped.canMemberEdit('r1'), isFalse);
+    expect(
+      shipped.canMemberEdit(
+        OrderRound(
+          id: 'r1',
+          start: DateTime.utc(2026, 9, 30),
+          deadline: DateTime.utc(2026, 10, 7),
+        ),
+      ),
+      isFalse,
+    );
 
     final received = shipped.copyWith(
       receivedAt: () => DateTime.utc(2026, 10, 8),

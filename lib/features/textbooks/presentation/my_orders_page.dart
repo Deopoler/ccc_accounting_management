@@ -125,10 +125,10 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
   Widget build(BuildContext context) {
     final order = widget.order;
     final theme = Theme.of(context);
-    final editable = order.canMemberEdit(widget.currentRound.id);
+    final editable = order.canMemberEdit(widget.currentRound);
     final closed =
         order.status == OrderStatus.requested &&
-        order.roundId != widget.currentRound.id;
+        !order.isRoundOpen(widget.currentRound);
 
     return Card(
       child: Padding(

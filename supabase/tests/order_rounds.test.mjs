@@ -239,6 +239,80 @@ describe('신청 회차 이동', () => {
   });
 });
 
+describe('다음 회차', () => {
+  let campus;
+  let admin;
+  let member;
+  let book;
+
+  before(async () => {
+    campus = await createCampus(db, { code: 'nx', name: '다음 회차' });
+    admin = await createUser(db, { studentId: '20203333', role: 'campus_admin', campus: 'nx' });
+    member = await createUser(db, { studentId: '20243333', campus: 'nx' });
+    book = (await db.query(
+      `insert into public.textbooks (campus_id, title, price) values ($1, '교재', 1000) returning id`, [campus],
+    )).rows[0].id;
+  });
+
+  test('관리자는 다음 회차를 만든다: 이번 회차 마감 ~ 마감 + 7일, 다시 불러도 같은 회차', async () => {
+    const cur = (await asUser(db, member, 'select id, deadline from public.get_order_round()')).rows[0];
+    const next = (await asUser(db, admin, 'select * from public.admin_create_next_order_round($1)', [campus])).rows[0];
+    assert.equal(next.starts_at.getTime(), cur.deadline.getTime());
+    assert.equal(next.deadline - next.starts_at, 7 * 24 * 3600 * 1000);
+    const again = (await asUser(db, admin, 'select id from public.admin_create_next_order_round($1)', [campus])).rows[0];
+    assert.equal(again.id, next.id);
+    assert.equal((await rounds(db, campus)).length, 2);
+
+    // 다음 회차가 있어도 이번 회차는 그대로
+    const still = (await asUser(db, member, 'select id from public.get_order_round()')).rows[0];
+    assert.equal(still.id, cur.id);
+  });
+
+  test('회원 / 다른 캠퍼스 관리자는 다음 회차를 만들 수 없다', async () => {
+    await assertRaises(asUser(db, member, 'select public.admin_create_next_order_round($1)', [campus]), /권한/);
+    await assertRaises(asUser(db, kAdmin, 'select public.admin_create_next_order_round($1)', [campus]), /권한/);
+  });
+
+  test('다음 회차로 옮긴 신청은 회원이 수정 / 취소할 수 있고, 새 신청은 이번 회차에 들어간다', async () => {
+    const order = (await asUser(db, member, 'select public.place_textbook_order($1::jsonb) as id', [items([book, 1])])).rows[0].id;
+    const next = (await asUser(db, admin, 'select id from public.admin_create_next_order_round($1)', [campus])).rows[0].id;
+    await asUser(db, admin, 'select public.admin_move_textbook_order($1, $2)', [order, next]);
+    await asUser(db, member, 'select public.update_textbook_order($1, $2::jsonb)', [order, items([book, 3])]);
+
+    const cur = (await asUser(db, member, 'select id from public.get_order_round()')).rows[0].id;
+    const fresh = (await asUser(db, member, 'select public.place_textbook_order($1::jsonb) as id', [items([book, 1])])).rows[0].id;
+    const { rows } = await db.query('select round_id from public.textbook_orders where id = $1', [fresh]);
+    assert.equal(rows[0].round_id, cur);
+  });
+
+  test('이번 회차 마감을 바꾸면 다음 회차도 새 마감 ~ 새 마감 + 7일로 맞춰진다', async () => {
+    const cur = (await asUser(db, member, 'select id from public.get_order_round()')).rows[0].id;
+    await asUser(db, admin, `select public.admin_set_order_round_deadline($1, date_trunc('minute', now()) + interval '2 days')`, [cur]);
+    const all = await rounds(db, campus);
+    assert.equal(all.length, 2);
+    assert.equal(all[1].starts_at.getTime(), all[0].deadline.getTime());
+    assert.equal(all[1].deadline - all[1].starts_at, 7 * 24 * 3600 * 1000);
+  });
+
+  test('다음 회차의 마감은 아직 바꿀 수 없다', async () => {
+    const next = (await asUser(db, admin, 'select id from public.admin_create_next_order_round($1)', [campus])).rows[0].id;
+    await assertRaises(
+      asUser(db, admin, `select public.admin_set_order_round_deadline($1, now() + interval '20 days')`, [next]),
+      /시작된 뒤/,
+    );
+  });
+
+  test('이번 회차가 마감되면 미리 만든 다음 회차가 이번 회차가 된다', async () => {
+    const [cur, next] = await rounds(db, campus);
+    // 시간이 지난 상황: 두 회차를 1주 앞으로 당긴다. (서비스 롤)
+    await db.query(`update public.order_rounds set starts_at = starts_at - interval '20 days', deadline = deadline - interval '20 days' where id = $1`, [cur.id]);
+    await db.query(`update public.order_rounds set starts_at = starts_at - interval '20 days' where id = $1`, [next.id]);
+    const now = (await asUser(db, member, 'select id from public.get_order_round()')).rows[0].id;
+    assert.equal(now, next.id);
+    assert.equal((await rounds(db, campus)).length, 2, '새 회차를 만들지 않는다');
+  });
+});
+
 describe('기존 데이터 이전', () => {
   test('주간 규칙대로 첫 신청 회차부터 이번 회차까지 만들고 기존 신청을 연결한다', async () => {
     const old = await createDbBefore(ROUNDS);

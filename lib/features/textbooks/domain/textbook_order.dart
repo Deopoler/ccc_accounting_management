@@ -143,11 +143,14 @@ class TextbookOrder {
 
   int get totalQuantity => items.fold(0, (sum, i) => sum + i.quantity);
 
+  /// 마감 전 회차(이번 회차, 또는 관리자가 옮긴 다음 회차)의 신청인지.
+  bool isRoundOpen(OrderRound current) =>
+      roundId == current.id ||
+      (round != null && !round!.start.isBefore(current.deadline));
+
   /// 회원이 수정/취소할 수 있는지. 실제 제한은 서버 RPC 가 강제한다.
-  bool canMemberEdit(String currentRoundId) =>
-      status == OrderStatus.requested &&
-      !isShipped &&
-      roundId == currentRoundId;
+  bool canMemberEdit(OrderRound current) =>
+      status == OrderStatus.requested && !isShipped && isRoundOpen(current);
 
   /// 회원이 수령 확인할 수 있는지 (배송됨 + 아직 미수령). 서버 RPC 가 강제한다.
   bool get canConfirmReceipt =>

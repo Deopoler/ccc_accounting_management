@@ -32,16 +32,18 @@ final currentRoundProvider = FutureProvider.autoDispose<OrderRound>(
   (ref) => ref.watch(textbookRepositoryProvider).fetchCurrentRound(),
 );
 
-/// 관리 중인 캠퍼스의 모든 회차 (최신순, 첫 번째가 이번 회차).
-final adminRoundsProvider = FutureProvider.autoDispose<List<OrderRound>>((
-  ref,
-) async {
+/// 관리 중인 캠퍼스의 이번 회차와 모든 회차. 캠퍼스가 없으면 null.
+final adminRoundsProvider = FutureProvider.autoDispose<RoundList?>((ref) async {
   final campusId = await ref.watch(adminCampusIdProvider.future);
-  if (campusId == null) return const [];
+  if (campusId == null) return null;
   final repo = ref.watch(textbookRepositoryProvider);
   // 이번 회차를 먼저 조회해야 마감된 회차 다음 회차가 만들어진다.
-  await repo.fetchCurrentRound(campusId: campusId);
-  return repo.fetchRounds(campusId);
+  final current = await repo.fetchCurrentRound(campusId: campusId);
+  return RoundList(
+    campusId: campusId,
+    current: current,
+    all: await repo.fetchRounds(campusId),
+  );
 });
 
 final myOrdersProvider = FutureProvider.autoDispose<List<TextbookOrder>>((

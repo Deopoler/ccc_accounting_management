@@ -45,9 +45,10 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
   }
 
   /// 고른 회차. 전체 회차면 null. 고른 회차가 목록에 없으면(캠퍼스를 바꾼 경우) 이번 회차.
-  OrderRound? _selected(List<OrderRound> rounds) {
+  OrderRound? _selected(RoundList rounds) {
     if (_allRounds) return null;
-    return rounds.where((r) => r.id == _roundId).firstOrNull ?? rounds.first;
+    return rounds.all.where((r) => r.id == _roundId).firstOrNull ??
+        rounds.current;
   }
 
   Future<void> _setStatus(
@@ -185,16 +186,24 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
 
   Future<void> _move(
     String? round,
-    List<OrderRound> rounds,
+    RoundList rounds,
     TextbookOrder order,
   ) async {
-    final target = await showDialog<OrderRound>(
+    final picked = await showDialog<OrderRound>(
       context: context,
       builder: (_) => _MoveRoundDialog(order: order, rounds: rounds),
     );
-    if (target == null || target.id == order.roundId || !mounted) return;
+    if (picked == null || picked.id == order.roundId || !mounted) return;
     setState(() => _busy.add(order.id));
     try {
+      // 아직 없는 다음 회차를 고르면 서버에서 만든다.
+      var target = picked;
+      if (target.id.isEmpty) {
+        target = await ref
+            .read(textbookRepositoryProvider)
+            .createNextRound(rounds.campusId);
+        ref.invalidate(adminRoundsProvider);
+      }
       await ref
           .read(adminOrdersProvider(round).notifier)
           .moveOrder(order.id, target);
@@ -247,7 +256,7 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
     if (!roundList.hasValue) return const LoadingView();
 
     final rounds = roundList.requireValue;
-    if (rounds.isEmpty) return const EmptyView(message: '신청 회차가 없습니다.');
+    if (rounds == null) return const EmptyView(message: '신청 회차가 없습니다.');
     final selected = _selected(rounds);
     final roundId = selected?.id;
     final orders = ref.watch(adminOrdersProvider(roundId));
@@ -353,7 +362,7 @@ class _Filters extends StatelessWidget {
     required this.onSearchChanged,
   });
 
-  final List<OrderRound> rounds;
+  final RoundList rounds;
   final OrderRound? selected;
   final ValueChanged<OrderRound?> onRoundChanged;
   final List<Textbook> textbooks;
@@ -483,8 +492,7 @@ class _RoundNavigator extends StatelessWidget {
     required this.onChanged,
   });
 
-  /// 최신순. 첫 번째가 이번 회차.
-  final List<OrderRound> rounds;
+  final RoundList rounds;
 
   /// null 이면 전체 회차.
   final OrderRound? selected;
@@ -494,12 +502,13 @@ class _RoundNavigator extends StatelessWidget {
 
   bool get _all => selected == null;
 
-  /// 0 = 이번 회차, n = n회차 전
-  int get _index => _all ? 0 : rounds.indexWhere((r) => r.id == selected!.id);
+  /// 최신순 목록에서 고른 회차의 위치
+  int get _index =>
+      _all ? 0 : rounds.all.indexWhere((r) => r.id == selected!.id);
 
   Future<void> _pickDate(BuildContext context) async {
     final today = DateUtils.dateOnly(DateTime.now());
-    final first = DateUtils.dateOnly(rounds.last.start);
+    final first = DateUtils.dateOnly(rounds.all.last.start);
     final initial = _all ? today : DateUtils.dateOnly(selected!.start);
     final picked = await showDatePicker(
       context: context,
@@ -513,7 +522,13 @@ class _RoundNavigator extends StatelessWidget {
       // 앞으로의 날짜는 모두 이번 회차라 고를 필요가 없다.
       lastDate: today,
     );
-    if (picked != null) onChanged(roundOnDate(rounds, picked));
+    if (picked == null) return;
+    // 오늘을 고르면 (오늘 시작하는 다음 회차가 있어도) 이번 회차로 간다.
+    onChanged(
+      DateUtils.isSameDay(picked, today)
+          ? rounds.current
+          : roundOnDate(rounds.all, picked),
+    );
   }
 
   @override
@@ -522,11 +537,12 @@ class _RoundNavigator extends StatelessWidget {
     final theme = Theme.of(context);
     final index = _index;
     final title = _all ? '전체 회차' : selected!.label;
+    final isCurrent = !_all && selected!.id == rounds.current.id;
     final sub = _all
         ? '모든 회차의 신청'
-        : index == 0
+        : isCurrent
         ? '이번 회차 · ${selected!.deadlineLabel} 마감'
-        : '$index회차 전';
+        : rounds.describe(selected!);
 
     return Column(
       // stretch 면 아래 최대 너비가 무시된다.
@@ -539,9 +555,9 @@ class _RoundNavigator extends StatelessWidget {
               IconButton(
                 tooltip: '이전 회차',
                 icon: const Icon(Icons.chevron_left),
-                onPressed: _all || index >= rounds.length - 1
+                onPressed: _all || index >= rounds.all.length - 1
                     ? null
-                    : () => onChanged(rounds[index + 1]),
+                    : () => onChanged(rounds.all[index + 1]),
               ),
               Expanded(
                 child: Tooltip(
@@ -590,10 +606,10 @@ class _RoundNavigator extends StatelessWidget {
               IconButton(
                 tooltip: '다음 회차',
                 icon: const Icon(Icons.chevron_right),
-                // 이번 회차보다 뒤는 없다.
+                // 미리 만든 다음 회차까지만 있다.
                 onPressed: _all || index == 0
                     ? null
-                    : () => onChanged(rounds[index - 1]),
+                    : () => onChanged(rounds.all[index - 1]),
               ),
             ],
           ),
@@ -603,16 +619,16 @@ class _RoundNavigator extends StatelessWidget {
           spacing: 8,
           runSpacing: 8,
           children: [
-            if (index != 0)
+            if (!isCurrent)
               ActionChip(
                 avatar: const Icon(Icons.today, size: 18),
                 label: const Text('이번 회차로'),
-                onPressed: () => onChanged(rounds.first),
+                onPressed: () => onChanged(rounds.current),
               ),
             FilterChip(
               label: const Text('전체 회차'),
               selected: _all,
-              onSelected: (v) => onChanged(v ? null : rounds.first),
+              onSelected: (v) => onChanged(v ? null : rounds.current),
             ),
           ],
         ),
@@ -1382,17 +1398,26 @@ class _MoveButton extends StatelessWidget {
 }
 
 /// 옮길 회차를 고른다. 신청 날짜와 상관없이 어느 회차로든 옮길 수 있다.
+/// 다음 회차가 아직 없으면 맨 위에 "다음 회차"를 보여 주고, 고르면 id 가 빈 회차를 돌려준다. (서버에서 만든다)
 class _MoveRoundDialog extends StatelessWidget {
   const _MoveRoundDialog({required this.order, required this.rounds});
 
   final TextbookOrder order;
-
-  /// 최신순. 첫 번째가 이번 회차.
-  final List<OrderRound> rounds;
+  final RoundList rounds;
 
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
+    final current = rounds.current;
+    final choices = [
+      if (rounds.next == null)
+        OrderRound(
+          id: '',
+          start: current.deadline,
+          deadline: current.deadline.add(const Duration(days: 7)),
+        ),
+      ...rounds.all,
+    ];
     return AlertDialog(
       title: const Text('다른 회차로 이동'),
       contentPadding: const EdgeInsets.fromLTRB(0, 16, 0, 0),
@@ -1414,17 +1439,17 @@ class _MoveRoundDialog extends StatelessWidget {
             Flexible(
               child: ListView.builder(
                 shrinkWrap: true,
-                itemCount: rounds.length,
+                itemCount: choices.length,
                 itemBuilder: (context, i) {
-                  final r = rounds[i];
+                  final r = choices[i];
                   final mine = r.id == order.roundId;
                   return ListTile(
                     contentPadding: const EdgeInsets.symmetric(horizontal: 24),
                     title: Text(r.label),
                     subtitle: Text(
                       [
-                        i == 0 ? '이번 회차' : '$i회차 전',
-                        if (mine) '현재 회차',
+                        r.id.isEmpty ? '다음 회차' : rounds.describe(r),
+                        if (mine) '이 신청의 회차',
                       ].join(' · '),
                     ),
                     trailing: mine ? const Icon(Icons.check) : null,

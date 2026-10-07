@@ -37,6 +37,45 @@ class OrderRound {
       '${DateFormat('M/d(E)').format(deadline)} ${timeLabel(deadline)}';
 }
 
+/// 관리 중인 캠퍼스의 회차 목록.
+class RoundList {
+  const RoundList({
+    required this.campusId,
+    required this.current,
+    required this.all,
+  });
+
+  final String campusId;
+
+  /// 이번 회차
+  final OrderRound current;
+
+  /// 최신순. 관리자가 미리 만든 다음 회차가 있으면 맨 앞(이번 회차 앞)에 있다.
+  final List<OrderRound> all;
+
+  int get _currentIndex => all.indexWhere((r) => r.id == current.id);
+
+  /// 미리 만든 다음 회차. 없으면 null.
+  OrderRound? get next {
+    final i = _currentIndex;
+    return i > 0 ? all[i - 1] : null;
+  }
+
+  /// 이번 회차 기준 위치: 0 = 이번 회차, n = n회차 전, 음수 = 다음 회차.
+  int offsetOf(OrderRound round) =>
+      all.indexWhere((r) => r.id == round.id) - _currentIndex;
+
+  /// `이번 회차`, `다음 회차`, `2회차 전`
+  String describe(OrderRound round) {
+    final o = offsetOf(round);
+    return o == 0
+        ? '이번 회차'
+        : o < 0
+        ? '다음 회차'
+        : '$o회차 전';
+  }
+}
+
 /// `오전 9시`, `오후 3시 30분`, `오전 0시`
 String timeLabel(DateTime t) {
   final hour = t.hour % 12;

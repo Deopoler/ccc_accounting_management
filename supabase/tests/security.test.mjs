@@ -70,6 +70,7 @@ describe('스키마 회귀 검사', () => {
       'private.is_approved_user',
       'private.is_central_admin',
       'private.my_campus_id',
+      'public.admin_create_next_order_round',
       'public.admin_move_textbook_order',
       'public.admin_set_order_round_deadline',
       'public.admin_set_textbook_received',

@@ -231,9 +231,9 @@ class _RoundDeadlineFormState extends ConsumerState<_RoundDeadlineForm> {
           AsyncValueView(
             value: rounds,
             onRetry: () => ref.invalidate(adminRoundsProvider),
-            isEmpty: (list) => list.isEmpty,
+            isEmpty: (list) => list == null,
             empty: const EmptyView(message: '신청 회차가 없습니다.'),
-            data: (list) => _body(list.first),
+            data: (list) => _body(list!.current),
           ),
         ],
       ),

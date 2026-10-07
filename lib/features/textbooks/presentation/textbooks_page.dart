@@ -159,7 +159,7 @@ class _TextbooksPageState extends ConsumerState<TextbooksPage> {
       if (order == null) {
         return const EmptyView(message: '신청 내역을 찾을 수 없습니다.');
       }
-      if (!order.canMemberEdit(currentRound.id)) {
+      if (!order.canMemberEdit(currentRound)) {
         return EmptyView(
           icon: Icons.lock_outline,
           message: '입금확인되었거나 마감된 신청은 수정할 수 없습니다.',

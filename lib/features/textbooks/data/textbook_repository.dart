@@ -130,7 +130,7 @@ class TextbookRepository {
     return OrderRound.fromJson(rows.first as Map<String, dynamic>);
   }
 
-  /// 캠퍼스의 모든 회차 (최신순). 이번 회차보다 뒤 회차는 없다.
+  /// 캠퍼스의 모든 회차 (최신순). 미리 만든 다음 회차가 있으면 맨 앞이다.
   Future<List<OrderRound>> fetchRounds(String campusId) async {
     final rows = await _client
         .from('order_rounds')
@@ -138,6 +138,15 @@ class TextbookRepository {
         .eq('campus_id', campusId)
         .order('starts_at', ascending: false);
     return rows.map(OrderRound.fromJson).toList();
+  }
+
+  /// 이번 회차 다음 회차를 만든다. (이미 있으면 그 회차) 신청을 다음 회차로 옮길 때 쓴다.
+  Future<OrderRound> createNextRound(String campusId) async {
+    final row = await _client.rpc<Map<String, dynamic>>(
+      'admin_create_next_order_round',
+      params: {'p_campus_id': campusId},
+    );
+    return OrderRound.fromJson(row);
   }
 
   /// 이번 회차의 마감 일시를 바꾼다. 다음 회차부터는 이 마감에서 1주일씩 이어진다.
