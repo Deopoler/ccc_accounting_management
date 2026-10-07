@@ -883,6 +883,112 @@ class _SelectionBar extends StatelessWidget {
     final count = orders.where((o) => picked.contains(o.id)).length;
     final all = count == orders.length;
     final active = enabled && count > 0;
+    // 모바일에서는 버튼이 한 줄에 나눠 담기도록 좌우 여백을 줄이고, 좁으면 글자를 줄인다.
+    final compactStyle = OutlinedButton.styleFrom(
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+    );
+    Widget label(Widget child) =>
+        showPickAll ? FittedBox(fit: BoxFit.scaleDown, child: child) : child;
+
+    final header = Row(
+      mainAxisSize: showPickAll ? MainAxisSize.max : MainAxisSize.min,
+      children: [
+        if (showPickAll)
+          Checkbox(
+            tristate: true,
+            value: count == 0 ? false : (all ? true : null),
+            onChanged: enabled ? (_) => onPickAll(!all) : null,
+          ),
+        Flexible(
+          child: Text(
+            count == 0 ? '신청을 선택해 한 번에 처리하세요' : '$count건 선택',
+            style: TextStyle(
+              fontSize: 14,
+              color: count == 0 ? c.textSecondary : c.textPrimary,
+              fontWeight: count == 0 ? null : FontWeight.w600,
+            ),
+          ),
+        ),
+      ],
+    );
+    final clear = TextButton(
+      onPressed: enabled ? () => onPickAll(false) : null,
+      child: const Text('선택 해제'),
+    );
+    final fieldButtons = [
+      for (final f in _BulkField.values)
+        MenuAnchor(
+          builder: (context, controller, _) => OutlinedButton(
+            style: showPickAll ? compactStyle : null,
+            onPressed: !active
+                ? null
+                : () => controller.isOpen
+                      ? controller.close()
+                      : controller.open(),
+            child: label(
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(f.label),
+                  const Icon(Icons.arrow_drop_down, size: 20),
+                ],
+              ),
+            ),
+          ),
+          menuChildren: [
+            MenuItemButton(
+              leadingIcon: const Icon(Icons.check_box_outlined),
+              onPressed: () => onBulk(f, true),
+              child: Text('${f.label} 체크'),
+            ),
+            MenuItemButton(
+              leadingIcon: const Icon(Icons.check_box_outline_blank),
+              onPressed: () => onBulk(f, false),
+              child: Text('${f.label} 해제'),
+            ),
+          ],
+        ),
+    ];
+    Widget shiftButton(int offset) => OutlinedButton.icon(
+      style: showPickAll ? compactStyle : null,
+      onPressed: active ? () => onShift(offset) : null,
+      icon: Icon(
+        offset < 0 ? Icons.chevron_left : Icons.chevron_right,
+        size: 18,
+      ),
+      label: label(Text(offset < 0 ? '이전 회차로' : '다음 회차로')),
+    );
+
+    // 모바일: 선택 / 입금확인 · 배송 · 수령 / 이전 · 다음 회차를 한 줄씩
+    if (showPickAll) {
+      Widget evenRow(List<Widget> children) => Row(
+        children: [
+          for (var i = 0; i < children.length; i++) ...[
+            if (i > 0) const SizedBox(width: 8),
+            Expanded(child: children[i]),
+          ],
+        ],
+      );
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Expanded(child: header),
+                if (count > 0) clear,
+              ],
+            ),
+            const SizedBox(height: 4),
+            evenRow(fieldButtons),
+            const SizedBox(height: 8),
+            evenRow([shiftButton(-1), shiftButton(1)]),
+          ],
+        ),
+      );
+    }
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Wrap(
@@ -890,69 +996,11 @@ class _SelectionBar extends StatelessWidget {
         spacing: 8,
         runSpacing: 8,
         children: [
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (showPickAll)
-                Checkbox(
-                  tristate: true,
-                  value: count == 0 ? false : (all ? true : null),
-                  onChanged: enabled ? (_) => onPickAll(!all) : null,
-                ),
-              Text(
-                count == 0 ? '신청을 선택해 한 번에 처리하세요' : '$count건 선택',
-                style: TextStyle(
-                  fontSize: 14,
-                  color: count == 0 ? c.textSecondary : c.textPrimary,
-                  fontWeight: count == 0 ? null : FontWeight.w600,
-                ),
-              ),
-            ],
-          ),
-          for (final f in _BulkField.values)
-            MenuAnchor(
-              builder: (context, controller, _) => OutlinedButton(
-                onPressed: !active
-                    ? null
-                    : () => controller.isOpen
-                          ? controller.close()
-                          : controller.open(),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(f.label),
-                    const Icon(Icons.arrow_drop_down, size: 20),
-                  ],
-                ),
-              ),
-              menuChildren: [
-                MenuItemButton(
-                  leadingIcon: const Icon(Icons.check_box_outlined),
-                  onPressed: () => onBulk(f, true),
-                  child: Text('${f.label} 체크'),
-                ),
-                MenuItemButton(
-                  leadingIcon: const Icon(Icons.check_box_outline_blank),
-                  onPressed: () => onBulk(f, false),
-                  child: Text('${f.label} 해제'),
-                ),
-              ],
-            ),
-          OutlinedButton.icon(
-            onPressed: active ? () => onShift(-1) : null,
-            icon: const Icon(Icons.chevron_left, size: 18),
-            label: const Text('이전 회차로'),
-          ),
-          OutlinedButton.icon(
-            onPressed: active ? () => onShift(1) : null,
-            icon: const Icon(Icons.chevron_right, size: 18),
-            label: const Text('다음 회차로'),
-          ),
-          if (count > 0)
-            TextButton(
-              onPressed: enabled ? () => onPickAll(false) : null,
-              child: const Text('선택 해제'),
-            ),
+          header,
+          ...fieldButtons,
+          shiftButton(-1),
+          shiftButton(1),
+          if (count > 0) clear,
         ],
       ),
     );

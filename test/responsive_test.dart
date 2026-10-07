@@ -580,6 +580,28 @@ void main() {
       });
     }
 
+    for (final sizeName in ['작은 모바일', '모바일']) {
+      testWidgets('$sizeName: 입금확인 · 배송 · 수령 / 이전 · 다음 회차가 각각 한 줄', (
+        tester,
+      ) async {
+        await _pump(
+          tester,
+          _sizes[sizeName]!,
+          '/admin/orders',
+          const AdminOrdersPage(),
+          true,
+        );
+        await pickAll(tester);
+        double top(String text) =>
+            tester.getTopLeft(find.widgetWithText(OutlinedButton, text)).dy;
+        expect(top('배송'), top('입금확인'));
+        expect(top('수령'), top('입금확인'));
+        expect(top('다음 회차로'), top('이전 회차로'));
+        expect(top('이전 회차로'), greaterThan(top('입금확인')));
+        expect(tester.takeException(), isNull);
+      });
+    }
+
     testWidgets('확인창에서 취소하면 아무것도 바꾸지 않는다', (tester) async {
       await _pump(
         tester,
