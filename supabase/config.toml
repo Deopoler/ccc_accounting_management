@@ -417,3 +417,7 @@ enabled = true
 # 호출자 토큰과 관리자 여부는 함수 안에서 직접 검증한다. (docs/개발/설치.md)
 [functions.admin-members]
 verify_jwt = false
+
+# GET(공개 키)은 로그인 전에도, POST 는 DB 트리거가 secret 헤더로 호출한다. (docs/개발/설치.md)
+[functions.push]
+verify_jwt = false

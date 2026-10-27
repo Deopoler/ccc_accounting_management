@@ -29,3 +29,29 @@ alter default privileges in schema public
   grant all on tables to anon, authenticated, service_role;
 alter default privileges in schema public
   grant all on functions to anon, authenticated, service_role;
+
+-- Vault: 이름으로 secret 을 꺼낸다. (실제는 암호화 저장된 뷰)
+create schema vault;
+create table vault.decrypted_secrets (
+  name              text primary key,
+  decrypted_secret  text not null
+);
+
+-- pg_net: 실제로 보내지 않고 요청을 기록만 한다.
+create schema net;
+create table net.requests (
+  id       bigserial primary key,
+  url      text not null,
+  body     jsonb,
+  headers  jsonb
+);
+create function net.http_post(
+  url text,
+  body jsonb default '{}',
+  params jsonb default '{}',
+  headers jsonb default '{"Content-Type": "application/json"}',
+  timeout_milliseconds int default 5000
+) returns bigint
+language sql as $$
+  insert into net.requests (url, body, headers) values (url, body, headers) returning id
+$$;

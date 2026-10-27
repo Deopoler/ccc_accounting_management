@@ -55,7 +55,10 @@ jobs:
       - name: Edge Function 배포 (운영)
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-        run: supabase functions deploy admin-members --project-ref "${{ secrets.PROD_PROJECT_REF }}"
+        run: |
+          for fn in admin-members push; do
+            supabase functions deploy "$fn" --project-ref "${{ secrets.PROD_PROJECT_REF }}"
+          done
 
   build:
     needs: supabase

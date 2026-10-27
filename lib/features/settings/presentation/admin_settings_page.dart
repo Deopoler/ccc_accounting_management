@@ -8,6 +8,7 @@ import '../../../core/widgets/feedback.dart';
 import '../../../core/widgets/responsive.dart';
 import '../../../core/widgets/state_views.dart';
 import '../../campus/presentation/campus_providers.dart';
+import '../../push/presentation/signup_push_card.dart';
 import '../../textbooks/domain/order_round.dart';
 import '../../textbooks/presentation/textbook_providers.dart';
 import '../domain/bank_account.dart';
@@ -28,6 +29,8 @@ class AdminSettingsPage extends ConsumerWidget {
           _BankAccountForm(initial: a),
           const SizedBox(height: 24),
           const _RoundDeadlineForm(),
+          const SizedBox(height: 16),
+          const SignupPushCard(),
           const SizedBox(height: 16),
           const _DefaultPasswordInfo(),
         ],

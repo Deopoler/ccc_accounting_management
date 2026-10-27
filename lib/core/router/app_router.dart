@@ -21,6 +21,7 @@ import '../../features/settings/presentation/admin_settings_page.dart';
 import '../../features/textbooks/presentation/my_orders_page.dart';
 import '../../features/textbooks/presentation/order_complete_page.dart';
 import '../../features/textbooks/presentation/textbooks_page.dart';
+import '../push/web_push.dart';
 import '../widgets/app_shell.dart';
 import '../widgets/not_found_page.dart';
 import 'auth_guard.dart';
@@ -120,7 +121,14 @@ final routerProvider = Provider<GoRouter>((ref) {
     ],
   );
 
+  // 가입 신청 알림을 누르면 열린 앱 창에서 회원 관리로 이동한다. (web/push/sw.js)
+  var disposed = false;
+  listenPushOpenPath((path) {
+    if (!disposed) router.go(path);
+  });
+
   ref.onDispose(() {
+    disposed = true;
     router.dispose();
     refresh.dispose();
   });

@@ -6,6 +6,7 @@ import '../../../core/router/routes.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/theme_mode_provider.dart';
 import '../../campus/presentation/campus_providers.dart';
+import '../../push/presentation/push_providers.dart';
 import 'auth_providers.dart';
 
 /// 앱바의 "내 정보" 메뉴: 이름/캠퍼스/학번 표시, 화면 테마, 비밀번호 변경, 로그아웃.
@@ -29,7 +30,7 @@ class AccountMenuButton extends ConsumerWidget {
           case 'password':
             context.push(AppRoutes.changePassword);
           case 'logout':
-            ref.read(authRepositoryProvider).signOut();
+            _signOut(ref);
         }
       },
       itemBuilder: (context) => [
@@ -93,6 +94,13 @@ class AccountMenuButton extends ConsumerWidget {
       ],
     );
   }
+}
+
+Future<void> _signOut(WidgetRef ref) async {
+  final auth = ref.read(authRepositoryProvider);
+  // 로그아웃한 기기로 가입 신청 알림이 가지 않게 한다.
+  await forgetPushDevice(ref.read(pushRepositoryProvider));
+  await auth.signOut();
 }
 
 /// 화면 테마 선택 (시스템 설정 / 라이트 / 다크)
