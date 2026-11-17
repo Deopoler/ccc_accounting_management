@@ -66,3 +66,6 @@ flutter_*.png
 # 폰트 빌드 도구 (원본 폰트는 build_fonts.mjs 가 내려받는다)
 tool/fonts/node_modules/
 tool/fonts/src/
+
+# 오케스트레이션 로컬 기록
+.orchestra/
