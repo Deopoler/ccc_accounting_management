@@ -1,5 +1,7 @@
 // 모든 화면을 모바일 / 데스크톱 크기로 렌더링해 레이아웃 오류(overflow 등)가 없는지 확인한다.
 // Supabase 대신 가짜 저장소를 주입하고, 넘치기 쉬운 긴 문자열을 일부러 사용한다.
+import 'dart:async';
+
 import 'package:ccc_accounting_management/core/push/web_push.dart';
 import 'package:ccc_accounting_management/core/router/app_router.dart';
 import 'package:ccc_accounting_management/core/theme/app_theme.dart';
@@ -219,6 +221,9 @@ List<EventPayment> _payments(String eventId) => [
 /// 로그인한 사용자. null 이면 첫 번째 회원(캠퍼스 관리자).
 Profile? _signedIn;
 
+/// 로그아웃 상태(currentUserId = null)를 재현할 때 true.
+bool _loggedOut = false;
+
 final _central = Profile(
   id: 'u1',
   campusId: 'k',
@@ -404,7 +409,9 @@ class _FakeCampuses implements CampusRepository {
 }
 
 List<Override> get _overrides => [
-  currentUserIdProvider.overrideWithValue(_signedIn?.id ?? 'u1'),
+  currentUserIdProvider.overrideWith(
+    (ref) => _loggedOut ? null : (_signedIn?.id ?? 'u1'),
+  ),
   authRepositoryProvider.overrideWithValue(_FakeAuth()),
   textbookRepositoryProvider.overrideWithValue(_FakeTextbooks()),
   eventRepositoryProvider.overrideWithValue(_FakeEvents()),
@@ -851,20 +858,24 @@ void main() {
       _calls.clear();
     });
 
-    tearDown(() => _signedIn = null);
+    tearDown(() {
+      _signedIn = null;
+      _loggedOut = false;
+    });
 
     Future<void> pumpPushPage(
       WidgetTester tester,
       String path,
-      Widget page,
-    ) async {
+      Widget page, {
+      Key? scopeKey,
+    }) async {
       tester.view.physicalSize = _sizes['모바일']! * 2;
       tester.view.devicePixelRatio = 2;
       addTearDown(tester.view.reset);
 
       await tester.pumpWidget(
         ProviderScope(
-          key: UniqueKey(),
+          key: scopeKey ?? UniqueKey(),
           retry: (_, _) => null,
           overrides: [
             ..._overrides,
@@ -928,6 +939,96 @@ void main() {
       expect(tester.widget<Switch>(find.byType(Switch)).value, isFalse);
     });
 
+    testWidgets(
+      '같은 컨테이너에서 계정을 전환하거나 로그아웃해도 opt-out 과 prompt-asked 가 계정별로 동작한다',
+      (tester) async {
+        const sameScope = ValueKey('same-scope');
+        _signedIn = _profile('2', role: UserRole.member);
+        browser.granted = false;
+        browser.permissionResult = false;
+
+        await pumpPushPage(
+          tester,
+          '/textbooks/complete/o1',
+          const OrderCompletePage(orderId: 'o1'),
+          scopeKey: sameScope,
+        );
+        final container = ProviderScope.containerOf(
+          tester.element(find.byType(AppShell)),
+        );
+
+        // 1) 회원 2: 기본 ON(pendingPermission). 신청 시점 권한 요청 후에는 다시 묻지 않는다.
+        expect(
+          container.read(signupPushProvider).value,
+          SignupPushStatus.pendingPermission,
+        );
+        container.read(signupPushProvider.notifier).enableOnOrderInGesture();
+        await tester.pumpAndSettle();
+        expect(browser.permissionRequests, 1);
+        container.read(signupPushProvider.notifier).enableOnOrderInGesture();
+        await tester.pumpAndSettle();
+        expect(browser.permissionRequests, 1);
+
+        // 2) 같은 컨테이너에서 회원 3으로 전환: opt-out / prompt-asked 가 초기값(ON, 미요청)으로 읽힌다.
+        _signedIn = _profile('3', role: UserRole.member);
+        container.invalidate(currentUserIdProvider);
+        await tester.pumpAndSettle();
+        expect(
+          container.read(signupPushProvider).value,
+          SignupPushStatus.pendingPermission,
+        );
+        container.read(signupPushProvider.notifier).enableOnOrderInGesture();
+        await tester.pumpAndSettle();
+        expect(browser.permissionRequests, 2);
+
+        // 3) 다시 회원 2로 전환(아직 opt-out 전): 회원 2의 prompt-asked 기록이 복원되어 다시 묻지 않는다.
+        _signedIn = _profile('2', role: UserRole.member);
+        container.invalidate(currentUserIdProvider);
+        await tester.pumpAndSettle();
+        expect(
+          container.read(signupPushProvider).value,
+          SignupPushStatus.pendingPermission,
+        );
+        container.read(signupPushProvider.notifier).enableOnOrderInGesture();
+        await tester.pumpAndSettle();
+        expect(browser.permissionRequests, 2);
+
+        // 4) 회원 2가 알림을 끈다(opt-out).
+        await container.read(signupPushProvider.notifier).disable();
+        await tester.pumpAndSettle();
+        expect(container.read(signupPushProvider).value, SignupPushStatus.off);
+        expect(tester.widget<Switch>(find.byType(Switch)).value, isFalse);
+
+        // 5) 권한 허용 상태에서 같은 컨테이너의 회원 3으로 전환하면 자동 구독된다.
+        browser.granted = true;
+        _signedIn = _profile('3', role: UserRole.member);
+        container.invalidate(currentUserIdProvider);
+        await tester.pumpAndSettle();
+        expect(container.read(signupPushProvider).value, SignupPushStatus.on);
+        expect(pushRepo.savedEndpoints, ['https://push.example.com/dev1']);
+        expect(tester.widget<Switch>(find.byType(Switch)).value, isTrue);
+
+        // 6) 다시 같은 컨테이너에서 회원 2로 전환하면 opt-out 이 복원되어 자동 구독하지 않는다.
+        await forgetPushDevice(pushRepo, browser);
+        await browser.unsubscribe();
+        _signedIn = _profile('2', role: UserRole.member);
+        container.invalidate(currentUserIdProvider);
+        await tester.pumpAndSettle();
+        expect(container.read(signupPushProvider).value, SignupPushStatus.off);
+        expect(pushRepo.savedEndpoints, isEmpty);
+        expect(tester.widget<Switch>(find.byType(Switch)).value, isFalse);
+
+        // 7) 로그아웃(user = null): 플래그가 초기화되고 아무것도 자동 구독하지 않는다.
+        _loggedOut = true;
+        _signedIn = null;
+        container.invalidate(currentUserIdProvider);
+        await tester.pumpAndSettle();
+        expect(container.read(signupPushProvider).value, SignupPushStatus.off);
+        expect(pushRepo.savedEndpoints, isEmpty);
+        expect(tester.widget<Switch>(find.byType(Switch)).value, isFalse);
+      },
+    );
+
     testWidgets('관리자는 자동 구독하지 않으며 내 신청과 설정 카드의 상태가 일치한다', (
       tester,
     ) async {
@@ -947,7 +1048,8 @@ void main() {
     ) async {
       _signedIn = _profile('2', role: UserRole.member);
       browser.granted = false;
-      browser.permissionResult = true;
+      final permissionCompleter = Completer<bool>();
+      browser.pendingPermission = permissionCompleter;
 
       await pumpPushPage(
         tester,
@@ -968,7 +1070,7 @@ void main() {
       expect(browser.permissionRequests, 0);
       expect(_calls, isEmpty);
 
-      // 확인창에서 신청하기를 누를 때 권한을 묻고 신청도 함께 처리된다.
+      // 확인창에서 신청하기를 누른 직후(비동기 pump 전)에 권한 요청이 동기적으로 시작되어야 한다.
       await tester.tap(find.widgetWithText(FilledButton, '신청하기'));
       await tester.pumpAndSettle();
       await tester.tap(
@@ -977,11 +1079,19 @@ void main() {
           matching: find.widgetWithText(FilledButton, '신청하기'),
         ),
       );
-      await tester.pumpAndSettle();
-
       expect(browser.permissionRequests, 1);
-      expect(pushRepo.savedEndpoints, ['https://push.example.com/dev1']);
+      expect(permissionCompleter.isCompleted, isFalse);
+
+      // 권한 응답(Completer)이 아직 대기 중이어도 교재 신청은 기다리지 않고 완료된다.
+      await tester.pumpAndSettle();
+      expect(permissionCompleter.isCompleted, isFalse);
       expect(_calls, ['place b2:1']);
+      expect(pushRepo.savedEndpoints, isEmpty);
+
+      // 이후 사용자가 권한을 허용하면 백그라운드에서 구독 저장이 이어진다.
+      permissionCompleter.complete(true);
+      await tester.pumpAndSettle();
+      expect(pushRepo.savedEndpoints, ['https://push.example.com/dev1']);
     });
   });
 }
@@ -990,6 +1100,7 @@ class _FakePushBrowser extends PushBrowser {
   bool granted = false;
   bool denied = false;
   bool permissionResult = true;
+  Completer<bool>? pendingPermission;
   int permissionRequests = 0;
   DevicePushSubscription? sub;
 
@@ -1003,11 +1114,17 @@ class _FakePushBrowser extends PushBrowser {
   bool isDenied() => denied;
 
   @override
-  Future<bool> requestPermission() async {
+  Future<bool> requestPermission() {
     permissionRequests++;
-    granted = permissionResult;
-    denied = !permissionResult;
-    return permissionResult;
+    final pending = pendingPermission;
+    if (pending != null) {
+      return pending.future.then((ok) {
+        if (ok) granted = true;
+        return ok;
+      });
+    }
+    if (permissionResult) granted = true;
+    return Future<bool>.value(permissionResult);
   }
 
   @override
