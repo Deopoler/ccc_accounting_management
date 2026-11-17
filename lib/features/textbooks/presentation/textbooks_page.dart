@@ -61,11 +61,6 @@ class _TextbooksPageState extends ConsumerState<TextbooksPage> {
   }
 
   Future<void> _submit(List<Textbook> textbooks) async {
-    if (!_editing) {
-      // Safari / iOS 는 사용자 탭 제스처 안에서만 알림 권한을 물을 수 있으므로
-      // 어떤 비동기 작업(await)보다 먼저 시작하고, 신청 처리는 이를 기다리지 않는다.
-      ref.read(signupPushProvider.notifier).enableOnOrderInGesture();
-    }
     final total = _total(textbooks);
     final ok = await showConfirmDialog(
       context,
@@ -74,6 +69,13 @@ class _TextbooksPageState extends ConsumerState<TextbooksPage> {
           '선택한 교재 ${_count()}권, 총 ${formatWon(total)}을 '
           '${_editing ? '수정' : '신청'}하시겠습니까?',
       confirmLabel: _editing ? '수정하기' : '신청하기',
+      onConfirm: _editing
+          ? null
+          : () {
+              // Safari / iOS 는 사용자 탭 제스처 안에서만 알림 권한을 물을 수 있으므로
+              // 확인 버튼을 누른 직후(네트워크 await 전) 동기적으로 시작하고, 신청은 이를 기다리지 않는다.
+              ref.read(signupPushProvider.notifier).enableOnOrderInGesture();
+            },
     );
     if (!ok || !mounted) return;
 

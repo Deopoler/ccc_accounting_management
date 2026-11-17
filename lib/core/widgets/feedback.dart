@@ -29,6 +29,7 @@ Future<bool> showConfirmDialog(
   required String message,
   String confirmLabel = '확인',
   bool destructive = false,
+  VoidCallback? onConfirm,
 }) async {
   final result = await showDialog<bool>(
     context: context,
@@ -49,7 +50,10 @@ Future<bool> showConfirmDialog(
                     foregroundColor: scheme.onError,
                   )
                 : null,
-            onPressed: () => Navigator.pop(context, true),
+            onPressed: () {
+              onConfirm?.call();
+              Navigator.pop(context, true);
+            },
             child: Text(confirmLabel),
           ),
         ],

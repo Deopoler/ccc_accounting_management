@@ -258,6 +258,13 @@ class _FakeTextbooks implements TextbookRepository {
   @override
   Future<TextbookOrder?> fetchOrder(String orderId) async => _orders.first;
   @override
+  Future<String> placeOrder(Map<String, int> quantities) async {
+    _calls.add(
+      'place ${quantities.entries.where((e) => e.value > 0).map((e) => '${e.key}:${e.value}').join(',')}',
+    );
+    return 'o1';
+  }
+  @override
   Future<List<TextbookOrder>> fetchAllOrders(
     String campusId, {
     String? roundId,
@@ -397,7 +404,7 @@ class _FakeCampuses implements CampusRepository {
 }
 
 List<Override> get _overrides => [
-  currentUserIdProvider.overrideWithValue('u1'),
+  currentUserIdProvider.overrideWithValue(_signedIn?.id ?? 'u1'),
   authRepositoryProvider.overrideWithValue(_FakeAuth()),
   textbookRepositoryProvider.overrideWithValue(_FakeTextbooks()),
   eventRepositoryProvider.overrideWithValue(_FakeEvents()),
@@ -876,7 +883,7 @@ void main() {
       await tester.pumpAndSettle();
     }
 
-    testWidgets('일반 회원은 기본 ON 이며 권한이 이미 허용되어 있으면 자동 구독한다', (
+    testWidgets('일반 회원은 기본 ON 이며 opt-out 설정은 계정별로 분리된다', (
       tester,
     ) async {
       _signedIn = _profile('2', role: UserRole.member);
@@ -888,19 +895,35 @@ void main() {
       expect(pushRepo.savedEndpoints, ['https://push.example.com/dev1']);
       expect(tester.widget<Switch>(find.byType(Switch)).value, isTrue);
 
-      // 회원이 스위치를 끄면 구독을 해제하고 opt-out 을 기억해 다시 자동 구독하지 않는다.
+      // 회원 2가 스위치를 끄면 구독을 해제하고 opt-out 을 기억해 다시 자동 구독하지 않는다.
+      await tester.ensureVisible(find.byType(Switch));
+      await tester.pumpAndSettle();
       await tester.tap(find.byType(Switch));
       await tester.pumpAndSettle();
       expect(pushRepo.savedEndpoints, isEmpty);
       expect(tester.widget<Switch>(find.byType(Switch)).value, isFalse);
 
-      // 새로고침 / 재진입해도 OFF 가 유지된다.
+      // 새로고침 / 재진입해도 회원 2의 OFF 가 유지된다.
       await pumpPushPage(
         tester,
         '/textbooks/complete/o1',
         const OrderCompletePage(orderId: 'o1'),
       );
       expect(find.text('교재 도착 알림'), findsOneWidget);
+      expect(pushRepo.savedEndpoints, isEmpty);
+      expect(tester.widget<Switch>(find.byType(Switch)).value, isFalse);
+
+      // 같은 브라우저에서 다른 회원(3)으로 로그인하면 회원 2의 opt-out 이 새지 않고 기본 ON 으로 자동 구독된다.
+      _signedIn = _profile('3', role: UserRole.member);
+      await pumpPushPage(tester, '/my-orders', const MyOrdersPage());
+      expect(pushRepo.savedEndpoints, ['https://push.example.com/dev1']);
+      expect(tester.widget<Switch>(find.byType(Switch)).value, isTrue);
+
+      // 다시 회원 2로 로그인하면 본인의 opt-out 설정이 그대로 유지된다.
+      await forgetPushDevice(pushRepo, browser);
+      await browser.unsubscribe();
+      _signedIn = _profile('2', role: UserRole.member);
+      await pumpPushPage(tester, '/my-orders', const MyOrdersPage());
       expect(pushRepo.savedEndpoints, isEmpty);
       expect(tester.widget<Switch>(find.byType(Switch)).value, isFalse);
     });
@@ -919,7 +942,7 @@ void main() {
       expect(tester.widget<Switch>(find.byType(Switch)).value, isFalse);
     });
 
-    testWidgets('권한 미요청 상태에서 교재 신청 시 탭 핸들러에서 권한을 묻고 신청은 막지 않는다', (
+    testWidgets('권한 미요청 상태에서 교재 신청 확인 시에만 권한을 묻고 취소 시에는 묻지 않는다', (
       tester,
     ) async {
       _signedIn = _profile('2', role: UserRole.member);
@@ -934,11 +957,31 @@ void main() {
       await tester.tap(find.byTooltip('더하기'));
       await tester.pumpAndSettle();
 
+      // 하단 신청하기 버튼을 눌러 확인창만 띄웠을 때나 취소했을 때는 권한을 묻지 않는다.
       await tester.tap(find.widgetWithText(FilledButton, '신청하기'));
+      await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsOneWidget);
+      expect(browser.permissionRequests, 0);
+
+      await tester.tap(find.widgetWithText(TextButton, '취소'));
+      await tester.pumpAndSettle();
+      expect(browser.permissionRequests, 0);
+      expect(_calls, isEmpty);
+
+      // 확인창에서 신청하기를 누를 때 권한을 묻고 신청도 함께 처리된다.
+      await tester.tap(find.widgetWithText(FilledButton, '신청하기'));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.widgetWithText(FilledButton, '신청하기'),
+        ),
+      );
       await tester.pumpAndSettle();
 
       expect(browser.permissionRequests, 1);
       expect(pushRepo.savedEndpoints, ['https://push.example.com/dev1']);
+      expect(_calls, ['place b2:1']);
     });
   });
 }

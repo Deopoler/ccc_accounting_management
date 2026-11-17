@@ -10,8 +10,8 @@ import '../../auth/domain/profile.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../data/push_repository.dart';
 
-const _optedOutKey = 'push_opted_out';
-const _promptAskedKey = 'push_prompt_asked';
+String _optedOutKey(String userId) => 'push_opted_out_$userId';
+String _promptAskedKey(String userId) => 'push_prompt_asked_$userId';
 
 /// 브라우저 웹 푸시 API 추상화. 테스트에서 가짜 구현을 주입할 수 있다.
 class PushBrowser {
@@ -63,13 +63,17 @@ class SignupPushController extends AsyncNotifier<SignupPushStatus> {
   PushRepository get _repo => ref.read(pushRepositoryProvider);
   PushBrowser get _browser => ref.read(pushBrowserProvider);
 
+  String? _userId;
   bool _optedOut = false;
   bool _promptAsked = false;
 
   @override
   Future<SignupPushStatus> build() async {
-    // 다른 계정으로 로그인하면 다시 확인한다.
-    ref.watch(currentUserIdProvider);
+    // 다른 계정으로 로그인하면 그 계정의 설정을 다시 읽는다.
+    final userId = ref.watch(currentUserIdProvider);
+    _userId = userId;
+    _optedOut = false;
+    _promptAsked = false;
 
     final browser = _browser;
     switch (browser.support()) {
@@ -83,13 +87,14 @@ class SignupPushController extends AsyncNotifier<SignupPushStatus> {
     if (browser.isDenied()) return SignupPushStatus.denied;
 
     final profile = await ref.watch(currentProfileProvider.future);
-    final isMember =
-        profile != null &&
-        profile.isApproved &&
-        profile.role == UserRole.member;
+    if (profile == null || !profile.isApproved) {
+      return SignupPushStatus.off;
+    }
+    _userId = profile.id;
+    final isMember = profile.role == UserRole.member;
 
-    _optedOut = await _loadBool(_optedOutKey);
-    _promptAsked = await _loadBool(_promptAskedKey);
+    _optedOut = await _loadBool(_optedOutKey(profile.id));
+    _promptAsked = await _loadBool(_promptAskedKey(profile.id));
 
     final sub = await browser.currentSubscription();
     if (sub != null && await _repo.isSaved(sub.endpoint)) {
@@ -118,10 +123,13 @@ class SignupPushController extends AsyncNotifier<SignupPushStatus> {
 
   /// 알림 받기. 사용자가 누른 직후에 호출해야 한다. (권한 요청)
   Future<void> enable() async {
+    final userId = _userId ?? ref.read(currentUserIdProvider);
     // Safari 는 누른 직후에만 권한을 물을 수 있으므로 다른 작업보다 먼저 묻는다.
     final granted = await _browser.requestPermission();
     _promptAsked = true;
-    await _saveBool(_promptAskedKey, true);
+    if (userId != null) {
+      await _saveBool(_promptAskedKey(userId), true);
+    }
     if (!granted) {
       state = AsyncData(
         _browser.isDenied() ? SignupPushStatus.denied : SignupPushStatus.off,
@@ -129,7 +137,9 @@ class SignupPushController extends AsyncNotifier<SignupPushStatus> {
       throw const AppException('알림 권한을 허용해야 받을 수 있습니다.');
     }
     _optedOut = false;
-    await _saveBool(_optedOutKey, false);
+    if (userId != null) {
+      await _saveBool(_optedOutKey(userId), false);
+    }
     final key = await _repo.fetchPublicKey();
     final sub = await _browser.subscribe(key);
     await _repo.save(sub);
@@ -137,15 +147,18 @@ class SignupPushController extends AsyncNotifier<SignupPushStatus> {
   }
 
   Future<void> disable() async {
+    final userId = _userId ?? ref.read(currentUserIdProvider);
     _optedOut = true;
-    await _saveBool(_optedOutKey, true);
+    if (userId != null) {
+      await _saveBool(_optedOutKey(userId), true);
+    }
     final sub = await _browser.currentSubscription();
     if (sub != null) await _repo.delete(sub.endpoint);
     await _browser.unsubscribe();
     state = const AsyncData(SignupPushStatus.off);
   }
 
-  /// 교재 신청 시점(사용자 탭 핸들러 시작)에 아직 권한을 묻지 않았다면 묻고 구독한다.
+  /// 교재 신청 확인 버튼을 누른 직후(사용자 제스처 안)에 아직 권한을 묻지 않았다면 묻고 구독한다.
   ///
   /// Safari / iOS 는 사용자 제스처 안에서만 Notification.requestPermission 을 허용하므로
   /// 네트워크 await 전에 동기적으로 바로 시작하고, 신청 처리는 이 작업을 기다리지 않는다.
@@ -154,7 +167,8 @@ class SignupPushController extends AsyncNotifier<SignupPushStatus> {
       final profile = ref.read(currentProfileProvider).value;
       if (profile == null ||
           !profile.isApproved ||
-          profile.role != UserRole.member) {
+          profile.role != UserRole.member ||
+          _userId != profile.id) {
         return;
       }
       if (_optedOut || _promptAsked) return;
@@ -163,21 +177,28 @@ class SignupPushController extends AsyncNotifier<SignupPushStatus> {
       if (browser.isDenied()) return;
       if (state.value == SignupPushStatus.on) return;
 
-      _promptAsked = true;
+      // 다른 비동기 작업보다 먼저 동기적으로 권한 요청을 시작하고, 요청 여부를 즉시 기록한다.
       final permissionFuture = browser.isGranted()
           ? Future<bool>.value(true)
           : browser.requestPermission();
+      _promptAsked = true;
+      final saveFuture = _saveBool(_promptAskedKey(profile.id), true);
 
-      unawaited(_finishOrderSubscribe(permissionFuture));
+      unawaited(_finishOrderSubscribe(profile.id, permissionFuture, saveFuture));
     } catch (_) {
       // 알림 처리 오류가 교재 신청을 막으면 안 된다.
     }
   }
 
-  Future<void> _finishOrderSubscribe(Future<bool> permissionFuture) async {
+  Future<void> _finishOrderSubscribe(
+    String userId,
+    Future<bool> permissionFuture,
+    Future<void> saveFuture,
+  ) async {
     try {
-      await _saveBool(_promptAskedKey, true);
+      await saveFuture;
       final granted = await permissionFuture;
+      if (_userId != userId) return;
       if (!granted) {
         state = AsyncData(
           _browser.isDenied()
@@ -189,7 +210,9 @@ class SignupPushController extends AsyncNotifier<SignupPushStatus> {
       if (_optedOut) return;
       final key = await _repo.fetchPublicKey();
       final sub = await _browser.subscribe(key);
+      if (_userId != userId || _optedOut) return;
       await _repo.save(sub);
+      if (_userId != userId || _optedOut) return;
       state = const AsyncData(SignupPushStatus.on);
     } catch (_) {
       // 백그라운드 자동 구독 실패는 신청 흐름을 방해하지 않는다.
@@ -217,10 +240,13 @@ Future<void> _saveBool(String key, bool value) async {
 
 /// 로그아웃 전에 이 기기의 구독을 서버에서 지운다. (로그아웃한 기기로 알림이 가지 않게)
 /// 실패해도 로그아웃은 해야 하므로 오류를 무시하고 오래 기다리지 않는다.
-Future<void> forgetPushDevice(PushRepository repo) async {
+Future<void> forgetPushDevice(
+  PushRepository repo, [
+  PushBrowser browser = const PushBrowser(),
+]) async {
   try {
     await () async {
-      final sub = await currentPushSubscription();
+      final sub = await browser.currentSubscription();
       if (sub != null) await repo.delete(sub.endpoint);
     }().timeout(const Duration(seconds: 3));
   } catch (_) {}
