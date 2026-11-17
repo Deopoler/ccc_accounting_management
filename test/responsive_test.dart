@@ -1,8 +1,12 @@
 // 모든 화면을 모바일 / 데스크톱 크기로 렌더링해 레이아웃 오류(overflow 등)가 없는지 확인한다.
 // Supabase 대신 가짜 저장소를 주입하고, 넘치기 쉬운 긴 문자열을 일부러 사용한다.
+import 'package:ccc_accounting_management/core/push/web_push.dart';
 import 'package:ccc_accounting_management/core/router/app_router.dart';
 import 'package:ccc_accounting_management/core/theme/app_theme.dart';
 import 'package:ccc_accounting_management/core/widgets/app_shell.dart';
+import 'package:ccc_accounting_management/features/push/data/push_repository.dart';
+import 'package:ccc_accounting_management/features/push/presentation/push_providers.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:ccc_accounting_management/features/admin/data/member_repository.dart';
 import 'package:ccc_accounting_management/features/admin/presentation/admin_event_detail_page.dart';
 import 'package:ccc_accounting_management/features/admin/presentation/admin_events_page.dart';
@@ -828,4 +832,177 @@ void main() {
     expect(find.text('7,000원'), findsOneWidget, reason: '교재 B 카드');
     expect(find.text('전도'), findsNothing);
   });
+
+  group('교재 도착 알림 (웹 푸시)', () {
+    late _FakePushBrowser browser;
+    late _FakePushRepo pushRepo;
+
+    setUp(() {
+      SharedPreferences.setMockInitialValues({});
+      browser = _FakePushBrowser();
+      pushRepo = _FakePushRepo();
+      _calls.clear();
+    });
+
+    tearDown(() => _signedIn = null);
+
+    Future<void> pumpPushPage(
+      WidgetTester tester,
+      String path,
+      Widget page,
+    ) async {
+      tester.view.physicalSize = _sizes['모바일']! * 2;
+      tester.view.devicePixelRatio = 2;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(
+        ProviderScope(
+          key: UniqueKey(),
+          retry: (_, _) => null,
+          overrides: [
+            ..._overrides,
+            pushBrowserProvider.overrideWithValue(browser),
+            pushRepositoryProvider.overrideWithValue(pushRepo),
+          ],
+          child: MaterialApp(
+            theme: AppTheme.light(),
+            locale: const Locale('ko', 'KR'),
+            supportedLocales: const [Locale('ko', 'KR')],
+            localizationsDelegates: GlobalMaterialLocalizations.delegates,
+            home: AppShell(location: path, child: page),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('일반 회원은 기본 ON 이며 권한이 이미 허용되어 있으면 자동 구독한다', (
+      tester,
+    ) async {
+      _signedIn = _profile('2', role: UserRole.member);
+      browser.granted = true;
+
+      await pumpPushPage(tester, '/my-orders', const MyOrdersPage());
+
+      expect(find.text('교재 도착 알림'), findsOneWidget);
+      expect(pushRepo.savedEndpoints, ['https://push.example.com/dev1']);
+      expect(tester.widget<Switch>(find.byType(Switch)).value, isTrue);
+
+      // 회원이 스위치를 끄면 구독을 해제하고 opt-out 을 기억해 다시 자동 구독하지 않는다.
+      await tester.tap(find.byType(Switch));
+      await tester.pumpAndSettle();
+      expect(pushRepo.savedEndpoints, isEmpty);
+      expect(tester.widget<Switch>(find.byType(Switch)).value, isFalse);
+
+      // 새로고침 / 재진입해도 OFF 가 유지된다.
+      await pumpPushPage(
+        tester,
+        '/textbooks/complete/o1',
+        const OrderCompletePage(orderId: 'o1'),
+      );
+      expect(find.text('교재 도착 알림'), findsOneWidget);
+      expect(pushRepo.savedEndpoints, isEmpty);
+      expect(tester.widget<Switch>(find.byType(Switch)).value, isFalse);
+    });
+
+    testWidgets('관리자는 자동 구독하지 않으며 내 신청과 설정 카드의 상태가 일치한다', (
+      tester,
+    ) async {
+      _signedIn = _profile('u1', role: UserRole.campusAdmin);
+      browser.granted = true;
+
+      await pumpPushPage(tester, '/my-orders', const MyOrdersPage());
+      expect(pushRepo.savedEndpoints, isEmpty);
+      expect(tester.widget<Switch>(find.byType(Switch)).value, isFalse);
+
+      await pumpPushPage(tester, '/admin/settings', const AdminSettingsPage());
+      expect(tester.widget<Switch>(find.byType(Switch)).value, isFalse);
+    });
+
+    testWidgets('권한 미요청 상태에서 교재 신청 시 탭 핸들러에서 권한을 묻고 신청은 막지 않는다', (
+      tester,
+    ) async {
+      _signedIn = _profile('2', role: UserRole.member);
+      browser.granted = false;
+      browser.permissionResult = true;
+
+      await pumpPushPage(
+        tester,
+        '/textbooks?category=c2',
+        const TextbooksPage(categoryId: 'c2'),
+      );
+      await tester.tap(find.byTooltip('더하기'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.widgetWithText(FilledButton, '신청하기'));
+      await tester.pumpAndSettle();
+
+      expect(browser.permissionRequests, 1);
+      expect(pushRepo.savedEndpoints, ['https://push.example.com/dev1']);
+    });
+  });
+}
+
+class _FakePushBrowser extends PushBrowser {
+  bool granted = false;
+  bool denied = false;
+  bool permissionResult = true;
+  int permissionRequests = 0;
+  DevicePushSubscription? sub;
+
+  @override
+  PushSupport support() => PushSupport.available;
+
+  @override
+  bool isGranted() => granted;
+
+  @override
+  bool isDenied() => denied;
+
+  @override
+  Future<bool> requestPermission() async {
+    permissionRequests++;
+    granted = permissionResult;
+    denied = !permissionResult;
+    return permissionResult;
+  }
+
+  @override
+  Future<DevicePushSubscription?> currentSubscription() async => sub;
+
+  @override
+  Future<DevicePushSubscription> subscribe(String vapidPublicKey) async {
+    sub = const DevicePushSubscription(
+      endpoint: 'https://push.example.com/dev1',
+      p256dh: 'p256dh',
+      auth: 'auth',
+    );
+    return sub!;
+  }
+
+  @override
+  Future<void> unsubscribe() async {
+    sub = null;
+  }
+}
+
+class _FakePushRepo implements PushRepository {
+  final Set<String> savedEndpoints = {};
+
+  @override
+  Future<String> fetchPublicKey() async => 'BEl62iUYgUivxIkv69yViEuiBIa-Ib9-SkvMeAtA3LFg';
+
+  @override
+  Future<void> save(DevicePushSubscription sub) async {
+    savedEndpoints.add(sub.endpoint);
+  }
+
+  @override
+  Future<bool> isSaved(String endpoint) async =>
+      savedEndpoints.contains(endpoint);
+
+  @override
+  Future<void> delete(String endpoint) async {
+    savedEndpoints.remove(endpoint);
+  }
 }

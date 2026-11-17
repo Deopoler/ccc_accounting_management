@@ -8,6 +8,7 @@ import '../../../core/utils/formatters.dart';
 import '../../../core/widgets/feedback.dart';
 import '../../../core/widgets/responsive.dart';
 import '../../../core/widgets/state_views.dart';
+import '../../push/presentation/signup_push_card.dart';
 import '../../settings/presentation/bank_account_card.dart';
 import '../domain/order_round.dart';
 import '../domain/textbook_order.dart';
@@ -56,6 +57,8 @@ class MyOrdersPage extends ConsumerWidget {
           BankAccountCard(amount: unpaid, title: '입금 대기 금액'),
           const SizedBox(height: 16),
         ],
+        const OrderPushCard(),
+        const SizedBox(height: 16),
         for (final order in list) ...[
           _OrderCard(order: order, currentRound: current),
           const SizedBox(height: 12),

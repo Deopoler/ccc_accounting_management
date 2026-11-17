@@ -3,7 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/push/web_push.dart';
 import '../../../core/utils/app_exception.dart';
 
-/// 관리자 기기의 웹 푸시 구독. 보내기는 Edge Function `push` 가 한다.
+/// 기기의 웹 푸시 구독. 보내기는 Edge Function `push` 가 한다.
 class PushRepository {
   PushRepository(this._client);
 
@@ -19,7 +19,7 @@ class PushRepository {
     throw const AppException('알림 서버 설정을 불러오지 못했습니다.');
   }
 
-  /// 관리자만 저장할 수 있다. (RPC) 같은 기기를 다른 관리자가 쓰던 것이면 현재 관리자에게 옮긴다.
+  /// 승인된 회원과 관리자가 저장할 수 있다. (RPC) 같은 기기를 다른 계정이 쓰던 것이면 현재 계정으로 옮긴다.
   Future<void> save(DevicePushSubscription sub) => _client.rpc<void>(
     'save_push_subscription',
     params: {

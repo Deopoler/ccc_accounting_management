@@ -5,6 +5,7 @@ import 'package:material_ui/material_ui.dart';
 import '../../features/auth/presentation/account_menu_button.dart';
 import '../../features/auth/presentation/auth_providers.dart';
 import '../../features/campus/presentation/campus_switcher.dart';
+import '../../features/push/presentation/push_providers.dart';
 import '../router/routes.dart';
 import '../theme/app_theme.dart';
 import 'responsive.dart';
@@ -18,6 +19,8 @@ class AppShell extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // 회원이 로그인했을 때 이미 알림 권한이 허용된 기기면 자동으로 구독을 등록한다.
+    ref.watch(signupPushProvider);
     final isAdmin = ref.watch(isAdminProvider);
     final isCentral = ref.watch(isCentralAdminProvider);
     final desktop = isDesktop(context);

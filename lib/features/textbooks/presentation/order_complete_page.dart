@@ -5,6 +5,7 @@ import 'package:material_ui/material_ui.dart';
 import '../../../core/router/routes.dart';
 import '../../../core/widgets/responsive.dart';
 import '../../../core/widgets/state_views.dart';
+import '../../push/presentation/signup_push_card.dart';
 import '../../settings/presentation/bank_account_card.dart';
 import 'textbook_providers.dart';
 import 'widgets/order_widgets.dart';
@@ -64,6 +65,8 @@ class OrderCompletePage extends ConsumerWidget {
           ),
           const SizedBox(height: 12),
           BankAccountCard(amount: o.totalPrice),
+          const SizedBox(height: 12),
+          const OrderPushCard(),
           const SizedBox(height: 24),
           FilledButton(
             onPressed: () => context.go(AppRoutes.myOrders),

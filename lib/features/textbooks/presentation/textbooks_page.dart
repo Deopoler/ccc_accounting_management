@@ -16,6 +16,7 @@ import '../domain/textbook_order.dart';
 import 'textbook_providers.dart';
 import 'widgets/order_widgets.dart';
 import '../../campus/presentation/campus_providers.dart';
+import '../../push/presentation/push_providers.dart';
 
 /// 교재 신청: 카테고리 선택 → 교재 선택. [editOrderId] 가 있으면 해당 신청을 수정한다.
 ///
@@ -60,6 +61,11 @@ class _TextbooksPageState extends ConsumerState<TextbooksPage> {
   }
 
   Future<void> _submit(List<Textbook> textbooks) async {
+    if (!_editing) {
+      // Safari / iOS 는 사용자 탭 제스처 안에서만 알림 권한을 물을 수 있으므로
+      // 어떤 비동기 작업(await)보다 먼저 시작하고, 신청 처리는 이를 기다리지 않는다.
+      ref.read(signupPushProvider.notifier).enableOnOrderInGesture();
+    }
     final total = _total(textbooks);
     final ok = await showConfirmDialog(
       context,

@@ -6,14 +6,58 @@ import '../../../core/widgets/feedback.dart';
 import 'push_providers.dart';
 
 /// 설정 화면: 이 기기에서 가입 신청 알림(웹 푸시) 받기.
-class SignupPushCard extends ConsumerStatefulWidget {
+class SignupPushCard extends StatelessWidget {
   const SignupPushCard({super.key});
 
   @override
-  ConsumerState<SignupPushCard> createState() => _SignupPushCardState();
+  Widget build(BuildContext context) {
+    return const _PushCard(
+      title: '가입 신청 알림',
+      description:
+          '새 가입 신청이 들어오면 이 기기로 알림을 보냅니다. '
+          '앱을 닫아 두어도 받을 수 있고, 기기(브라우저)마다 따로 켭니다.\n'
+          '캠퍼스 관리자는 자기 캠퍼스, 총괄 관리자는 모든 캠퍼스의 가입 신청을 받습니다.',
+      enabledSnack: '이 기기에서 가입 신청 알림을 받습니다.',
+      disabledSnack: '이 기기의 가입 신청 알림을 껐습니다.',
+    );
+  }
 }
 
-class _SignupPushCardState extends ConsumerState<SignupPushCard> {
+/// 내 신청 화면: 이 기기에서 교재 도착 알림(웹 푸시) 받기.
+class OrderPushCard extends StatelessWidget {
+  const OrderPushCard({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return const _PushCard(
+      title: '교재 도착 알림',
+      description:
+          '신청한 교재가 도착(배송)되면 이 기기로 알림을 보냅니다. '
+          '앱을 닫아 두어도 받을 수 있고, 기기(브라우저)마다 따로 켭니다.',
+      enabledSnack: '이 기기에서 교재 도착 알림을 받습니다.',
+      disabledSnack: '이 기기의 교재 도착 알림을 껐습니다.',
+    );
+  }
+}
+
+class _PushCard extends ConsumerStatefulWidget {
+  const _PushCard({
+    required this.title,
+    required this.description,
+    required this.enabledSnack,
+    required this.disabledSnack,
+  });
+
+  final String title;
+  final String description;
+  final String enabledSnack;
+  final String disabledSnack;
+
+  @override
+  ConsumerState<_PushCard> createState() => _PushCardState();
+}
+
+class _PushCardState extends ConsumerState<_PushCard> {
   bool _busy = false;
 
   Future<void> _toggle(bool on) async {
@@ -24,10 +68,7 @@ class _SignupPushCardState extends ConsumerState<SignupPushCard> {
       // 권한 요청은 누른 직후여야 하므로 다른 비동기 작업 없이 바로 호출한다.
       await (on ? controller.enable() : controller.disable());
       if (mounted) {
-        showSnack(
-          context,
-          on ? '이 기기에서 가입 신청 알림을 받습니다.' : '이 기기의 가입 신청 알림을 껐습니다.',
-        );
+        showSnack(context, on ? widget.enabledSnack : widget.disabledSnack);
       }
     } catch (e) {
       if (mounted) showErrorSnack(context, e);
@@ -42,6 +83,15 @@ class _SignupPushCardState extends ConsumerState<SignupPushCard> {
     final status = ref.watch(signupPushProvider);
     final value = status.value;
 
+    final isOn =
+        value == SignupPushStatus.on ||
+        value == SignupPushStatus.pendingPermission;
+    final canToggle =
+        !_busy &&
+        (value == SignupPushStatus.on ||
+            value == SignupPushStatus.off ||
+            value == SignupPushStatus.pendingPermission);
+
     final hint = switch (value) {
       SignupPushStatus.unsupported =>
         '이 브라우저는 알림을 지원하지 않습니다. Chrome, Edge, Safari 최신 버전에서 열어 주세요.',
@@ -49,6 +99,8 @@ class _SignupPushCardState extends ConsumerState<SignupPushCard> {
         'iPhone / iPad 는 Safari 공유 버튼 > "홈 화면에 추가"로 설치한 앱에서 알림을 켤 수 있습니다.',
       SignupPushStatus.denied =>
         '알림 권한이 거부되어 있습니다. 브라우저(또는 기기) 설정에서 이 사이트의 알림을 허용한 뒤 다시 열어 주세요.',
+      SignupPushStatus.pendingPermission =>
+        '브라우저 알림 권한을 허용하면 바로 알림을 받을 수 있습니다.',
       _ => null,
     };
 
@@ -60,17 +112,12 @@ class _SignupPushCardState extends ConsumerState<SignupPushCard> {
           children: [
             Row(
               children: [
-                const Expanded(child: SectionTitle('가입 신청 알림')),
+                Expanded(child: SectionTitle(widget.title)),
                 Padding(
                   padding: const EdgeInsets.only(bottom: 12),
                   child: Switch(
-                    value: value == SignupPushStatus.on,
-                    onChanged:
-                        _busy ||
-                            (value != SignupPushStatus.on &&
-                                value != SignupPushStatus.off)
-                        ? null
-                        : _toggle,
+                    value: isOn,
+                    onChanged: canToggle ? _toggle : null,
                   ),
                 ),
               ],
@@ -80,12 +127,7 @@ class _SignupPushCardState extends ConsumerState<SignupPushCard> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Text(
-                    '새 가입 신청이 들어오면 이 기기로 알림을 보냅니다. '
-                    '앱을 닫아 두어도 받을 수 있고, 기기(브라우저)마다 따로 켭니다.\n'
-                    '캠퍼스 관리자는 자기 캠퍼스, 총괄 관리자는 모든 캠퍼스의 가입 신청을 받습니다.',
-                    style: theme.textTheme.bodyMedium,
-                  ),
+                  Text(widget.description, style: theme.textTheme.bodyMedium),
                   if (hint != null) ...[
                     const SizedBox(height: 8),
                     Text(
@@ -93,6 +135,16 @@ class _SignupPushCardState extends ConsumerState<SignupPushCard> {
                       style: TextStyle(
                         fontSize: 13,
                         color: context.colors.textSecondary,
+                      ),
+                    ),
+                  ],
+                  if (value == SignupPushStatus.pendingPermission) ...[
+                    const SizedBox(height: 12),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: OutlinedButton(
+                        onPressed: _busy ? null : () => _toggle(true),
+                        child: const Text('알림 권한 허용'),
                       ),
                     ),
                   ],

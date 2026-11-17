@@ -30,6 +30,9 @@ class DevicePushSubscription {
 
 PushSupport pushSupport() => impl.pushSupport();
 
+/// 알림 권한을 이미 허용했는지.
+bool isNotificationGranted() => impl.isNotificationGranted();
+
 /// 알림 권한을 이미 거부했는지. (브라우저 설정에서만 다시 허용할 수 있다)
 bool isNotificationDenied() => impl.isNotificationDenied();
 
@@ -49,6 +52,6 @@ Future<DevicePushSubscription> subscribePush(String vapidPublicKey) =>
 
 Future<void> unsubscribePush() => impl.unsubscribePush();
 
-/// 알림을 눌렀을 때 이미 열린 앱 창에서 [onPath] 로 이동한다. (예: `/admin/members`)
+/// 알림을 눌렀을 때 이미 열린 앱 창에서 [onPath] 로 이동한다. (예: `/admin/members`, `/my-orders`)
 void listenPushOpenPath(void Function(String path) onPath) =>
     impl.listenPushOpenPath(onPath);

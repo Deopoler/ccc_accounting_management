@@ -36,6 +36,10 @@ PushSupport pushSupport() {
       : PushSupport.unsupported;
 }
 
+bool isNotificationGranted() =>
+    globalContext.has('Notification') &&
+    web.Notification.permission == 'granted';
+
 bool isNotificationDenied() =>
     globalContext.has('Notification') &&
     web.Notification.permission == 'denied';

@@ -2,6 +2,8 @@ import 'web_push.dart';
 
 PushSupport pushSupport() => PushSupport.unsupported;
 
+bool isNotificationGranted() => false;
+
 bool isNotificationDenied() => false;
 
 Future<bool> requestNotificationPermission() async => false;

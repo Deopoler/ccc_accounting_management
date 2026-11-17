@@ -1,4 +1,4 @@
-// 관리자 웹 푸시 알림 전용 서비스 워커. (lib/core/push/web_push_web.dart 가 scope "push/" 로 등록한다)
+// 웹 푸시 알림 전용 서비스 워커. (lib/core/push/web_push_web.dart 가 scope "push/" 로 등록한다)
 //
 // Flutter 의 flutter_service_worker.js 는 앱 경로에 등록됐다가 스스로 해제되므로,
 // 같은 scope 를 쓰면 이 워커와 푸시 구독까지 함께 지워진다. 그래서 하위 scope 를 따로 쓴다.
@@ -26,7 +26,7 @@ self.addEventListener('push', (event) => {
       icon: appRoot + 'icons/Icon-192.png',
       badge: appRoot + 'icons/Icon-192.png',
       lang: 'ko',
-      // 앱 루트 기준 경로. 예) "admin/members"
+      // 앱 루트 기준 경로. 예) "admin/members", "my-orders"
       data: { path: data.url || '' },
     }),
   );
