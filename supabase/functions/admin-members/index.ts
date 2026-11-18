@@ -154,10 +154,18 @@ Deno.serve(async (req) => {
         ban_duration: '876000h',
       });
       if (authError) {
-        await admin
+        const { error: rollbackError } = await admin
           .from('profiles')
           .update({ deactivated_at: null, deactivated_by: null })
           .eq('id', userId);
+        if (rollbackError) {
+          // DB 는 비활성 상태로 남아 데이터 접근은 계속 막힌다. 로그인 차단만 빠진 상태.
+          console.error('deactivate rollback failed', userId, rollbackError.message);
+          return fail(
+            500,
+            `회원 로그인 차단에 실패했고 되돌리지도 못했습니다. 데이터 접근은 막혀 있습니다. 비활성 회원 목록에서 복구한 뒤 다시 삭제해 주세요. (${authError.message})`,
+          );
+        }
         return fail(500, `회원 로그인 차단 실패: ${authError.message}`);
       }
 
@@ -184,7 +192,17 @@ Deno.serve(async (req) => {
         .update({ deactivated_at: null, deactivated_by: null })
         .eq('id', userId);
       if (dbError) {
-        await admin.auth.admin.updateUserById(userId, { ban_duration: '876000h' });
+        const { error: rebanError } = await admin.auth.admin.updateUserById(userId, {
+          ban_duration: '876000h',
+        });
+        if (rebanError) {
+          // DB 는 여전히 비활성 상태라 데이터 접근은 막힌다. 로그인 차단만 풀린 상태.
+          console.error('reactivate re-ban failed', userId, rebanError.message);
+          return fail(
+            500,
+            `회원 복구에 실패했고 로그인 차단도 다시 걸지 못했습니다. 데이터 접근은 막혀 있습니다. 다시 복구해 주세요. (${dbError.message})`,
+          );
+        }
         return fail(500, `회원 복구 실패: ${dbError.message}`);
       }
 
