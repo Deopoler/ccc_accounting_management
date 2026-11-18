@@ -103,7 +103,7 @@ interface OrderRow {
   user_id: string;
   is_shipped: boolean;
   status: string;
-  profiles?: { is_approved?: boolean } | null;
+  profiles?: { is_approved?: boolean; deactivated_at?: string | null } | null;
   textbook_order_items?: OrderItemRow[] | null;
 }
 
@@ -189,11 +189,12 @@ Deno.serve(async (req) => {
       tag: `signup-${body.profile_id}`,
     });
 
-    // 받는 사람: 해당 캠퍼스의 승인된 캠퍼스 관리자 + 총괄 관리자만 (member 제외)
+    // 받는 사람: 해당 캠퍼스의 승인된 활성 캠퍼스 관리자 + 총괄 관리자만 (member / 비활성 제외)
     const { data: admins, error: adminsError } = await admin
       .from('profiles')
       .select('id')
       .eq('is_approved', true)
+      .is('deactivated_at', null)
       .or(`role.eq.central_admin,and(role.eq.campus_admin,campus_id.eq.${signup.campus_id})`);
     if (adminsError) return fail(500, `관리자 조회 실패: ${adminsError.message}`);
     if (!admins?.length) return json(200, { sent: 0 });
@@ -229,18 +230,19 @@ Deno.serve(async (req) => {
       .from('textbook_orders')
       .select(
         'id, user_id, is_shipped, status, ' +
-          'profiles:profiles!textbook_orders_user_id_fkey(is_approved), ' +
+          'profiles:profiles!textbook_orders_user_id_fkey(is_approved, deactivated_at), ' +
           'textbook_order_items(quantity, textbooks(title))',
       )
       .in('id', rawIds);
     if (ordersError) return fail(500, `신청 조회 실패: ${ordersError.message}`);
 
-    // DB 기준으로 여전히 배송됨 상태이고 취소되지 않았으며 주문자가 승인된 회원인 건만 추린다.
+    // DB 기준으로 여전히 배송됨 상태이고 취소되지 않았으며 주문자가 승인된 활성 회원인 건만 추린다.
     const valid = ((orders ?? []) as unknown as OrderRow[]).filter(
       (o) =>
         o.is_shipped &&
         o.status !== 'cancelled' &&
         o.profiles?.is_approved === true &&
+        !o.profiles?.deactivated_at &&
         (body.user_id === undefined || o.user_id === body.user_id),
     );
     if (!valid.length) return json(200, { sent: 0 });

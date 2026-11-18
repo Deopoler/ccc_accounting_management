@@ -27,9 +27,13 @@ String? authRedirect(AuthSnapshot auth, Uri uri) {
   }
 
   final profile = auth.profile;
-  if (profile == null) {
-    // 프로필 로딩 중이거나, 로딩 실패 / 프로필 없음 → 스플래시에서 처리
-    return path == AppRoutes.splash ? null : _withFrom(AppRoutes.splash, uri);
+  if (profile == null || profile.isDeactivated) {
+    // 프로필 로딩 중이거나, 로딩 실패 / 프로필 없음 / 비활성화된 계정 → 스플래시에서 처리
+    return path == AppRoutes.splash
+        ? null
+        : profile != null
+        ? AppRoutes.splash
+        : _withFrom(AppRoutes.splash, uri);
   }
 
   if (!profile.isApproved) {

@@ -582,3 +582,267 @@ describe('관리자 수령 처리', () => {
     await assertDenied(asUser(db, admin, 'update public.textbook_orders set received_by = $1', [admin]));
   });
 });
+
+describe('회원 비활성화 (소프트 삭제)', () => {
+  const one = (bookId) => JSON.stringify([{ textbook_id: bookId, quantity: 1 }]);
+  let target;
+  let targetOrderId;
+  let pastEventId;
+
+  before(async () => {
+    target = await createUser(db, { studentId: '20245555', name: '비활성대상' });
+    targetOrderId = (
+      await asUser(db, target, 'select public.place_textbook_order($1::jsonb) as id', [one(bookA)])
+    ).rows[0].id;
+    pastEventId = (
+      await asUser(
+        db,
+        admin,
+        `insert into public.events (campus_id, title, amount)
+         values ((select id from public.campuses where code = 'kaist'), '기존수련회', 20000)
+         returning id`,
+      )
+    ).rows[0].id;
+    await asUser(
+      db,
+      admin,
+      `insert into public.event_payments (event_id, user_id) values ($1, $2)`,
+      [pastEventId, target],
+    );
+    await asUser(
+      db,
+      target,
+      `select public.save_push_subscription('https://push.example.com/target', 'k', 'a')`,
+    );
+  });
+
+  test('클라이언트(회원/관리자)는 deactivated_at / deactivated_by 를 직접 수정할 수 없다', async () => {
+    await assertDenied(asUser(db, target, 'update public.profiles set deactivated_at = now() where id = $1', [target]));
+    await assertDenied(asUser(db, admin, 'update public.profiles set deactivated_at = now() where id = $1', [target]));
+    await assertDenied(asUser(db, admin, 'update public.profiles set deactivated_by = $1 where id = $2', [admin, target]));
+  });
+
+  test('승인 대기 계정은 비활성화할 수 없고, deactivated_by 는 비활성화 시에만 기록된다', async () => {
+    const waiting = await createUser(db, { studentId: '20245556', approved: false });
+    await assert.rejects(
+      db.query('update public.profiles set deactivated_at = now() where id = $1', [waiting]),
+      (e) => e.code === '23514',
+    );
+    await assert.rejects(
+      db.query('update public.profiles set deactivated_by = $1 where id = $2', [admin, target]),
+      (e) => e.code === '23514',
+    );
+  });
+
+  test('비활성화되면 푸시 구독이 삭제되고, 만료 전 JWT 로도 본인 프로필 외 아무 데이터도 읽거나 쓸 수 없다', async () => {
+    await db.query(
+      'update public.profiles set deactivated_at = now(), deactivated_by = $2 where id = $1',
+      [target, admin],
+    );
+
+    // 푸시 구독 즉시 정리
+    const { rows: subs } = await db.query(
+      'select * from public.push_subscriptions where user_id = $1',
+      [target],
+    );
+    assert.equal(subs.length, 0);
+
+    // 본인 프로필만 조회 가능 (클라이언트 비활성 안내/로그아웃용)
+    const { rows: prof } = await asUser(
+      db,
+      target,
+      'select id, deactivated_at is not null as off from public.profiles',
+    );
+    assert.deepEqual(prof, [{ id: target, off: true }]);
+
+    // 기존 본인 주문 / 품목 / 송금을 포함한 모든 테이블 조회 불가 (fail-closed)
+    for (const t of [
+      'textbooks',
+      'textbook_categories',
+      'textbook_orders',
+      'textbook_order_items',
+      'order_rounds',
+      'events',
+      'event_payments',
+      'event_payment_summaries',
+      'campuses',
+      'app_settings',
+      'push_subscriptions',
+    ]) {
+      const { rows } = await asUser(db, target, `select * from public.${t}`);
+      assert.equal(rows.length, 0, t);
+    }
+
+    // 모든 회원용 RPC 거부
+    await assertRaises(
+      asUser(db, target, 'select public.place_textbook_order($1::jsonb)', [one(bookA)]),
+      /승인된 회원/,
+    );
+    await assertRaises(
+      asUser(db, target, 'select public.update_textbook_order($1, $2::jsonb)', [targetOrderId, one(bookB)]),
+      /승인된 회원/,
+    );
+    await assertRaises(
+      asUser(db, target, 'select public.cancel_textbook_order($1)', [targetOrderId]),
+      /승인된 회원/,
+    );
+    await assertRaises(
+      asUser(db, target, 'select public.confirm_textbook_received($1)', [targetOrderId]),
+      /승인된 회원/,
+    );
+    await assertRaises(
+      asUser(db, target, `select public.save_push_subscription('https://push.example.com/t2', 'k', 'a')`),
+      /승인된 회원/,
+    );
+    const { rows: roundRows } = await asUser(db, target, 'select * from public.get_order_round()');
+    assert.equal(roundRows.length, 0);
+  });
+
+  test('비활성화된 회원의 기존 주문/품목/송금 기록은 보존되고 관리자가 조회·처리할 수 있다', async () => {
+    const { rows: orders } = await asUser(
+      db,
+      admin,
+      'select id, user_id, total_price from public.textbook_orders where id = $1',
+      [targetOrderId],
+    );
+    assert.equal(orders.length, 1);
+    assert.equal(orders[0].total_price, 10000);
+
+    const { rows: items } = await asUser(
+      db,
+      admin,
+      'select * from public.textbook_order_items where order_id = $1',
+      [targetOrderId],
+    );
+    assert.equal(items.length, 1);
+
+    // 관리자는 비활성 회원의 기존 주문 입금확인 / 배송 / 수령 처리를 그대로 할 수 있다.
+    const rPaid = await asUser(
+      db,
+      admin,
+      `update public.textbook_orders set status = 'paid', is_shipped = true where id = $1`,
+      [targetOrderId],
+    );
+    assert.equal(rPaid.affectedRows, 1);
+    await asUser(db, admin, 'select public.admin_set_textbook_received($1, true)', [targetOrderId]);
+
+    // 관리자는 비활성 회원의 기존 이벤트 송금 내역을 조회하고 송금 여부/금액을 바꿀 수 있다.
+    const rEv = await asUser(
+      db,
+      admin,
+      'update public.event_payments set is_paid = true, amount_override = 15000 where event_id = $1 and user_id = $2',
+      [pastEventId, target],
+    );
+    assert.equal(rEv.affectedRows, 1);
+    const { rows: sum } = await asUser(
+      db,
+      admin,
+      'select target_count, paid_count, collected_amount from public.event_payment_summaries where event_id = $1',
+      [pastEventId],
+    );
+    assert.equal(sum[0].target_count, 1);
+    assert.equal(sum[0].paid_count, 1);
+    assert.equal(Number(sum[0].collected_amount), 15000);
+  });
+
+  test('비활성 회원이 있는 캠퍼스에서 새 이벤트 대상 일괄 추가 시 활성 회원만 등록되고 비활성 회원 지정은 거부된다', async () => {
+    const newEv = (
+      await asUser(
+        db,
+        admin,
+        `insert into public.events (campus_id, title, amount)
+         values ((select id from public.campuses where code = 'kaist'), '신규수련회', 30000)
+         returning id`,
+      )
+    ).rows[0].id;
+
+    // 활성 승인 회원만 추려 일괄 추가하면 성공하고 비활성 회원은 제외된다.
+    await asUser(
+      db,
+      admin,
+      `insert into public.event_payments (event_id, user_id)
+       select $1, id from public.profiles
+       where campus_id = (select id from public.campuses where code = 'kaist')
+         and is_approved and deactivated_at is null`,
+      [newEv],
+    );
+    const { rows: targets } = await db.query(
+      'select user_id from public.event_payments where event_id = $1',
+      [newEv],
+    );
+    assert.ok(targets.length >= 2);
+    assert.ok(!targets.some((r) => r.user_id === target));
+
+    // 비활성 회원을 송금 대상으로 추가하려고 하면 DB 트리거가 거부한다.
+    await assertRaises(
+      asUser(
+        db,
+        admin,
+        'insert into public.event_payments (event_id, user_id) values ($1, $2)',
+        [newEv, target],
+      ),
+      /비활성화된 회원/,
+    );
+  });
+
+  test('비활성화된 상태에서는 역할 등 회원 정보를 바꿀 수 없고, 복구하면 다시 이용할 수 있다', async () => {
+    await assertRaises(
+      asUser(db, admin, `update public.profiles set role = 'campus_admin' where id = $1`, [target]),
+      /비활성화된 회원의 정보는/,
+    );
+
+    // 복구 (Edge Function service role 동작)
+    await db.query(
+      'update public.profiles set deactivated_at = null, deactivated_by = null where id = $1',
+      [target],
+    );
+    const { rows: books } = await asUser(db, target, 'select id from public.textbooks');
+    assert.ok(books.length > 0);
+    const { rows: myOrders } = await asUser(db, target, 'select id from public.textbook_orders');
+    assert.deepEqual(myOrders.map((r) => r.id), [targetOrderId]);
+  });
+
+  test('비활성화된 관리자는 관리자 권한을 잃고, 마지막 활성 관리자는 비활성화하거나 강등할 수 없다', async () => {
+    const central = await createUser(db, { studentId: '20250133', role: 'central_admin' });
+    const admin2 = await createUser(db, { studentId: '20200099', role: 'campus_admin' });
+
+    // 캠퍼스 관리자가 2명(admin, admin2)일 때 admin2 를 비활성화할 수 있다.
+    await db.query(
+      'update public.profiles set deactivated_at = now(), deactivated_by = $2 where id = $1',
+      [admin2, admin],
+    );
+
+    // 비활성화된 관리자는 다른 회원 프로필이나 주문을 볼 수도 수정할 수도 없다.
+    const { rows: profs } = await asUser(db, admin2, 'select id from public.profiles');
+    assert.deepEqual(profs.map((r) => r.id), [admin2]);
+    const { rows: orders } = await asUser(db, admin2, 'select id from public.textbook_orders');
+    assert.equal(orders.length, 0);
+    await assertRaises(
+      asUser(db, admin2, 'select public.admin_set_textbook_received($1, true)', [targetOrderId]),
+      /관리자만/,
+    );
+
+    // 이제 활성 캠퍼스 관리자는 admin 1명뿐이므로 강등도 비활성화도 거부된다 (호출자 무관).
+    await assertRaises(
+      asUser(db, admin, `update public.profiles set role = 'member' where id = $1`, [admin]),
+      /마지막 관리자/,
+    );
+    await assertRaises(
+      db.query('update public.profiles set deactivated_at = now() where id = $1', [admin]),
+      /마지막 관리자/,
+    );
+    await assertRaises(
+      db.transaction(async (tx) => {
+        await tx.query(`select set_config('request.jwt.claim.sub', $1, true)`, [central]);
+        return tx.query('update public.profiles set deactivated_at = now() where id = $1', [admin]);
+      }),
+      /마지막 관리자/,
+    );
+
+    // 마지막 활성 총괄 관리자도 비활성화할 수 없다.
+    await assertRaises(
+      db.query('update public.profiles set deactivated_at = now() where id = $1', [central]),
+      /마지막 총괄 관리자/,
+    );
+  });
+});

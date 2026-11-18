@@ -32,11 +32,15 @@ class SplashPage extends ConsumerWidget {
               signOut,
             ],
           ),
-          data: (p) => p != null
+          data: (p) => p != null && !p.isDeactivated
               ? const LoadingView()
               : EmptyView(
-                  icon: Icons.person_off_outlined,
-                  message: '회원 정보가 등록되지 않은 계정입니다.\n회계 담당자에게 문의해 주세요.',
+                  icon: p != null && p.isDeactivated
+                      ? Icons.block_outlined
+                      : Icons.person_off_outlined,
+                  message: p != null && p.isDeactivated
+                      ? '비활성화된 계정입니다.\n회계 담당자에게 문의해 주세요.'
+                      : '회원 정보가 등록되지 않은 계정입니다.\n회계 담당자에게 문의해 주세요.',
                   action: signOut,
                 ),
         ),

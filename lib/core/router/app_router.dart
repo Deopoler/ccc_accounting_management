@@ -30,8 +30,21 @@ import 'routes.dart';
 final routerProvider = Provider<GoRouter>((ref) {
   // 로그인 상태나 프로필이 바뀌면 가드를 다시 평가한다.
   final refresh = ValueNotifier<int>(0);
-  ref.listen(currentUserIdProvider, (_, _) => refresh.value++);
-  ref.listen(currentProfileProvider, (_, _) => refresh.value++);
+  String? signingOutUserId;
+  ref.listen(currentUserIdProvider, (_, next) {
+    if (next == null) signingOutUserId = null;
+    refresh.value++;
+  });
+  ref.listen(currentProfileProvider, (_, next) {
+    refresh.value++;
+    final profile = next.value;
+    if (profile != null &&
+        profile.isDeactivated &&
+        signingOutUserId != profile.id) {
+      signingOutUserId = profile.id;
+      ref.read(authRepositoryProvider).signOut();
+    }
+  });
 
   final router = GoRouter(
     initialLocation: AppRoutes.home,

@@ -25,6 +25,9 @@ String _authMessage(String message) {
   if (lower.contains('invalid login credentials')) {
     return '학번 또는 비밀번호가 올바르지 않습니다.';
   }
+  if (lower.contains('banned')) {
+    return '비활성화된 계정입니다. 회계 담당자에게 문의해 주세요.';
+  }
   if (lower.contains('already registered') ||
       lower.contains('already exists')) {
     return '이미 가입된 학번입니다. 로그인해 주세요.';

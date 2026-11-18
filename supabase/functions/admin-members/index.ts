@@ -1,17 +1,19 @@
 // =============================================================================
 // admin-members: service role 이 필요한 회원 관리 작업
 //
-//   POST { action: "reset_password", user_id }  비밀번호를 기본 비밀번호로 초기화
-//                                               + 다음 로그인 시 변경 강제
-//   POST { action: "reject_signup",  user_id }  승인 대기 가입 신청 거절 (계정 삭제)
+//   POST { action: "reset_password",    user_id }  비밀번호를 기본 비밀번호로 초기화
+//                                                  + 다음 로그인 시 변경 강제
+//   POST { action: "reject_signup",     user_id }  승인 대기 가입 신청 거절 (계정 삭제)
+//   POST { action: "deactivate_member", user_id }  승인된 회원 비활성화 (로그인 차단 + 기록 보존)
+//   POST { action: "reactivate_member", user_id }  비활성화된 회원 복구
 //
 // 보안
-//   * 호출자의 access token 을 서버에서 검증하고, profiles 에서 승인된 관리자인지 확인한다.
+//   * 호출자의 access token 을 서버에서 검증하고, profiles 에서 승인된 활성 관리자인지 확인한다.
 //     (클라이언트의 역할 체크는 신뢰하지 않는다)
 //   * 캠퍼스 관리자는 자기 캠퍼스 회원만, 총괄 관리자는 모든 회원을 다룬다.
 //     총괄 관리자 계정은 총괄 관리자만 다룬다.
 //   * 기본 비밀번호는 Edge Function secret(DEFAULT_PASSWORD)에만 있고 DB/클라이언트에 없다.
-//   * 본인 계정에는 사용할 수 없다. 승인된 회원은 삭제할 수 없다(회계 기록 보존).
+//   * 본인 계정에는 사용할 수 없다. 승인된 회원은 물리 삭제할 수 없고 비활성화만 가능하다(회계 기록 보존).
 // =============================================================================
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
@@ -55,11 +57,15 @@ Deno.serve(async (req) => {
 
   const { data: callerProfile } = await admin
     .from('profiles')
-    .select('role, is_approved, campus_id')
+    .select('role, is_approved, campus_id, deactivated_at')
     .eq('id', caller.user.id)
     .maybeSingle();
   const isCentral = callerProfile?.role === 'central_admin';
-  if (!callerProfile?.is_approved || (!isCentral && callerProfile.role !== 'campus_admin')) {
+  if (
+    !callerProfile?.is_approved ||
+    callerProfile.deactivated_at ||
+    (!isCentral && callerProfile.role !== 'campus_admin')
+  ) {
     return fail(403, '관리자만 사용할 수 있습니다.');
   }
 
@@ -80,7 +86,7 @@ Deno.serve(async (req) => {
 
   const { data: target } = await admin
     .from('profiles')
-    .select('id, student_id, name, is_approved, role, campus_id')
+    .select('id, student_id, name, is_approved, role, campus_id, deactivated_at')
     .eq('id', userId)
     .maybeSingle();
   // 캠퍼스 관리자는 자기 캠퍼스 회원만. (다른 캠퍼스 회원은 존재 여부도 알려주지 않는다)
@@ -94,6 +100,9 @@ Deno.serve(async (req) => {
   // ---- 작업 ------------------------------------------------------------------
   switch (action) {
     case 'reset_password': {
+      if (target.deactivated_at) {
+        return fail(400, '비활성화된 회원의 비밀번호는 초기화할 수 없습니다.');
+      }
       const defaultPassword = Deno.env.get('DEFAULT_PASSWORD');
       if (!defaultPassword || defaultPassword.length < 8) {
         return fail(500, '기본 비밀번호(DEFAULT_PASSWORD)가 설정되지 않았습니다.');
@@ -120,6 +129,69 @@ Deno.serve(async (req) => {
       const { error } = await admin.auth.admin.deleteUser(userId);
       if (error) return fail(500, `가입 거절 실패: ${error.message}`);
       return json(200, { ok: true, message: `${target.name}(${target.student_id})의 가입 신청을 거절했습니다.` });
+    }
+
+    case 'deactivate_member': {
+      if (!target.is_approved) {
+        return fail(400, '승인 대기 중인 회원은 가입 거절을 사용해 주세요.');
+      }
+      if (target.deactivated_at) {
+        return fail(400, '이미 비활성화된 회원입니다.');
+      }
+
+      // 1. DB 를 먼저 비활성화해 마지막 관리자 검사 및 RLS 차단을 즉시 적용한다.
+      const { error: dbError } = await admin
+        .from('profiles')
+        .update({
+          deactivated_at: new Date().toISOString(),
+          deactivated_by: caller.user.id,
+        })
+        .eq('id', userId);
+      if (dbError) return fail(400, `회원 비활성화 실패: ${dbError.message}`);
+
+      // 2. Auth 로그인을 차단한다. 실패하면 DB 상태를 되돌린다.
+      const { error: authError } = await admin.auth.admin.updateUserById(userId, {
+        ban_duration: '876000h',
+      });
+      if (authError) {
+        await admin
+          .from('profiles')
+          .update({ deactivated_at: null, deactivated_by: null })
+          .eq('id', userId);
+        return fail(500, `회원 로그인 차단 실패: ${authError.message}`);
+      }
+
+      return json(200, {
+        ok: true,
+        message: `${target.name}(${target.student_id}) 회원을 비활성화했습니다.`,
+      });
+    }
+
+    case 'reactivate_member': {
+      if (!target.deactivated_at) {
+        return fail(400, '비활성화된 회원이 아닙니다.');
+      }
+
+      // 1. Auth 차단을 먼저 해제한다 (DB 가 비활성 상태인 동안 RLS 는 여전히 차단됨).
+      const { error: authError } = await admin.auth.admin.updateUserById(userId, {
+        ban_duration: 'none',
+      });
+      if (authError) return fail(500, `회원 로그인 차단 해제 실패: ${authError.message}`);
+
+      // 2. DB 비활성화 플래그를 해제한다. 실패하면 다시 로그인 차단한다.
+      const { error: dbError } = await admin
+        .from('profiles')
+        .update({ deactivated_at: null, deactivated_by: null })
+        .eq('id', userId);
+      if (dbError) {
+        await admin.auth.admin.updateUserById(userId, { ban_duration: '876000h' });
+        return fail(500, `회원 복구 실패: ${dbError.message}`);
+      }
+
+      return json(200, {
+        ok: true,
+        message: `${target.name}(${target.student_id}) 회원을 복구했습니다.`,
+      });
     }
 
     default:

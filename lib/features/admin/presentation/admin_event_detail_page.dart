@@ -441,7 +441,12 @@ class _AddTargetsDialogState extends ConsumerState<_AddTargetsDialog> {
           data: (list) {
             final q = _query.trim().toLowerCase();
             final candidates = list
-                .where((m) => m.isApproved && !widget.excluded.contains(m.id))
+                .where(
+                  (m) =>
+                      m.isApproved &&
+                      !m.isDeactivated &&
+                      !widget.excluded.contains(m.id),
+                )
                 .where(
                   (m) =>
                       q.isEmpty ||

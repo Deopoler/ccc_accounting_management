@@ -143,6 +143,38 @@ class _AdminMembersPageState extends ConsumerState<AdminMembersPage> {
     );
   }
 
+  Future<void> _deactivate(Profile m) async {
+    final ok = await showConfirmDialog(
+      context,
+      title: '회원 삭제 (비활성화)',
+      message:
+          '${m.name}(${m.studentId}) 계정을 비활성화합니다.\n'
+          '더 이상 로그인할 수 없고 회원 목록에서 숨겨지며, '
+          '기존 교재 신청과 이벤트 송금 기록은 그대로 유지됩니다.',
+      confirmLabel: '비활성화',
+      destructive: true,
+    );
+    if (!ok) return;
+    await _runFunction(
+      () => ref.read(memberRepositoryProvider).deactivateMember(m.id),
+    );
+  }
+
+  Future<void> _reactivate(Profile m) async {
+    final ok = await showConfirmDialog(
+      context,
+      title: '회원 복구',
+      message:
+          '${m.name}(${m.studentId}) 계정을 다시 활성화합니다. '
+          '다시 로그인하고 서비스를 이용할 수 있게 됩니다.',
+      confirmLabel: '복구',
+    );
+    if (!ok) return;
+    await _runFunction(
+      () => ref.read(memberRepositoryProvider).reactivateMember(m.id),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final members = ref.watch(membersProvider);
@@ -154,9 +186,12 @@ class _AdminMembersPageState extends ConsumerState<AdminMembersPage> {
       onRetry: () => ref.invalidate(membersProvider),
       data: (all) {
         final pending = all.where((m) => !m.isApproved).toList();
+        final active = all
+            .where((m) => m.isApproved && !m.isDeactivated)
+            .toList();
+        final deactivated = all.where((m) => m.isDeactivated).toList();
         final q = _search.text.trim().toLowerCase();
-        final approved = all
-            .where((m) => m.isApproved)
+        final approved = active
             .where(
               (m) =>
                   q.isEmpty ||
@@ -186,7 +221,7 @@ class _AdminMembersPageState extends ConsumerState<AdminMembersPage> {
             ),
             const SizedBox(height: 24),
             SectionTitle(
-              '회원 ${all.where((m) => m.isApproved).length}명',
+              '회원 ${active.length}명',
               trailing: SizedBox(
                 width: 220,
                 child: TextField(
@@ -227,6 +262,7 @@ class _AdminMembersPageState extends ConsumerState<AdminMembersPage> {
                           onSelected: (v) => switch (v) {
                             'reset' => _resetPassword(m),
                             'central' => _toggleCentral(m),
+                            'deactivate' => _deactivate(m),
                             _ => _toggleAdmin(m),
                           },
                           itemBuilder: (_) => [
@@ -251,6 +287,18 @@ class _AdminMembersPageState extends ConsumerState<AdminMembersPage> {
                                       : '총괄 관리자로 지정',
                                 ),
                               ),
+                            if (iAmCentral || m.role != UserRole.centralAdmin) ...[
+                              const PopupMenuDivider(),
+                              PopupMenuItem(
+                                value: 'deactivate',
+                                child: Text(
+                                  '회원 삭제 (비활성화)',
+                                  style: TextStyle(
+                                    color: Theme.of(context).colorScheme.error,
+                                  ),
+                                ),
+                              ),
+                            ],
                           ],
                         ),
                       ),
@@ -258,9 +306,61 @@ class _AdminMembersPageState extends ConsumerState<AdminMembersPage> {
                   ],
                 ),
               ),
+            if (deactivated.isNotEmpty) ...[
+              const SizedBox(height: 24),
+              _DeactivatedSection(
+                deactivated: deactivated,
+                busy: _busy,
+                iAmCentral: iAmCentral,
+                onReactivate: _reactivate,
+              ),
+            ],
           ],
         );
       },
+    );
+  }
+}
+
+class _DeactivatedSection extends StatelessWidget {
+  const _DeactivatedSection({
+    required this.deactivated,
+    required this.busy,
+    required this.iAmCentral,
+    required this.onReactivate,
+  });
+
+  final List<Profile> deactivated;
+  final bool busy;
+  final bool iAmCentral;
+  final Future<void> Function(Profile member) onReactivate;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: ExpansionTile(
+        title: Text('비활성 회원 ${deactivated.length}명'),
+        subtitle: const Text('로그인할 수 없고 회원 목록에서 숨겨진 계정입니다.'),
+        children: [
+          for (final m in deactivated) ...[
+            const Divider(height: 1),
+            ListTile(
+              title: Text(m.name),
+              subtitle: Text(
+                '${m.studentId} · 비활성화 ${formatDate(m.deactivatedAt!)}',
+              ),
+              trailing: TextButton(
+                onPressed: busy ||
+                        (m.role == UserRole.centralAdmin && !iAmCentral)
+                    ? null
+                    : () => onReactivate(m),
+                child: const Text('복구'),
+              ),
+            ),
+          ],
+        ],
+      ),
     );
   }
 }

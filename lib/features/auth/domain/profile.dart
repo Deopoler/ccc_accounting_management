@@ -30,6 +30,7 @@ class Profile {
     required this.isApproved,
     required this.createdAt,
     this.campusId = '',
+    this.deactivatedAt,
   });
 
   factory Profile.fromJson(Map<String, dynamic> json) => Profile(
@@ -41,6 +42,10 @@ class Profile {
     mustChangePassword: json['must_change_password'] as bool,
     isApproved: json['is_approved'] as bool? ?? false,
     createdAt: DateTime.parse(json['created_at'] as String),
+    deactivatedAt: switch (json['deactivated_at']) {
+      final String t => DateTime.parse(t),
+      _ => null,
+    },
   );
 
   final String id;
@@ -54,8 +59,15 @@ class Profile {
   final bool isApproved;
   final DateTime createdAt;
 
-  /// 캠퍼스 관리자 또는 총괄 관리자. 관리자 화면에 들어갈 수 있다.
-  bool get isAdmin => isApproved && role != UserRole.member;
+  /// 관리자가 비활성화(삭제)한 시각. null 이면 활성 상태.
+  final DateTime? deactivatedAt;
 
-  bool get isCentralAdmin => isApproved && role == UserRole.centralAdmin;
+  bool get isDeactivated => deactivatedAt != null;
+
+  /// 캠퍼스 관리자 또는 총괄 관리자. 관리자 화면에 들어갈 수 있다.
+  bool get isAdmin =>
+      isApproved && !isDeactivated && role != UserRole.member;
+
+  bool get isCentralAdmin =>
+      isApproved && !isDeactivated && role == UserRole.centralAdmin;
 }

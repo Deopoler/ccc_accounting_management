@@ -50,6 +50,14 @@ class MemberRepository {
   Future<String> rejectSignup(String userId) =>
       _invokeAdmin('reject_signup', userId);
 
+  /// 승인된 회원을 비활성화한다. (로그인 차단 + 회원 목록에서 숨김, 신청/송금 기록 보존)
+  Future<String> deactivateMember(String userId) =>
+      _invokeAdmin('deactivate_member', userId);
+
+  /// 비활성화된 회원을 다시 활성화한다.
+  Future<String> reactivateMember(String userId) =>
+      _invokeAdmin('reactivate_member', userId);
+
   Future<String> _invokeAdmin(String action, String userId) async {
     final res = await _client.functions.invoke(
       'admin-members',

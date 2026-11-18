@@ -10,6 +10,7 @@ Profile _profile({
   UserRole role = UserRole.member,
   bool mustChange = false,
   bool approved = true,
+  DateTime? deactivatedAt,
 }) => Profile(
   id: 'u1',
   studentId: '20240001',
@@ -18,6 +19,7 @@ Profile _profile({
   mustChangePassword: mustChange,
   isApproved: approved,
   createdAt: DateTime(2026),
+  deactivatedAt: deactivatedAt,
 );
 
 String? _go(String location, {bool signedIn = true, Profile? profile}) =>
@@ -80,6 +82,54 @@ void main() {
         _profile(role: UserRole.centralAdmin, approved: false).isCentralAdmin,
         isFalse,
       );
+    });
+  });
+
+  group('비활성화된 계정', () {
+    final deactivated = _profile(deactivatedAt: DateTime(2026, 10, 18));
+
+    test('비활성화된 계정은 어떤 화면이든 스플래시(비활성 안내)로 보낸다', () {
+      expect(_go('/home', profile: deactivated), AppRoutes.splash);
+      expect(_go('/admin', profile: deactivated), AppRoutes.splash);
+      expect(_go('/pending', profile: deactivated), AppRoutes.splash);
+      expect(_go('/change-password', profile: deactivated), AppRoutes.splash);
+      expect(_go('/loading', profile: deactivated), isNull);
+    });
+
+    test('비활성화된 관리자는 관리자 권한이 없다', () {
+      for (final r in [UserRole.campusAdmin, UserRole.centralAdmin]) {
+        final p = _profile(role: r, deactivatedAt: DateTime(2026, 10, 18));
+        expect(p.isDeactivated, isTrue);
+        expect(p.isAdmin, isFalse);
+        expect(p.isCentralAdmin, isFalse);
+      }
+    });
+
+    test('Profile.fromJson 은 deactivated_at 을 읽는다', () {
+      final active = Profile.fromJson({
+        'id': 'u1',
+        'student_id': '20240001',
+        'name': '홍길동',
+        'role': 'member',
+        'must_change_password': false,
+        'is_approved': true,
+        'created_at': '2026-01-01T00:00:00Z',
+        'deactivated_at': null,
+      });
+      expect(active.isDeactivated, isFalse);
+
+      final off = Profile.fromJson({
+        'id': 'u1',
+        'student_id': '20240001',
+        'name': '홍길동',
+        'role': 'campus_admin',
+        'must_change_password': false,
+        'is_approved': true,
+        'created_at': '2026-01-01T00:00:00Z',
+        'deactivated_at': '2026-10-18T12:00:00Z',
+      });
+      expect(off.isDeactivated, isTrue);
+      expect(off.isAdmin, isFalse);
     });
   });
 
