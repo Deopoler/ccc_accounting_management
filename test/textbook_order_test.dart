@@ -135,6 +135,8 @@ void main() {
     expect(ids(const OrderFilter(textbookId: 'b1')), ['a']);
     expect(ids(const OrderFilter(query: '2023')), ['b']);
     expect(ids(const OrderFilter(query: '홍길')), ['a']);
+    expect(ids(const OrderFilter(query: 'ㅎㄱㄷ')), ['a']);
+    expect(ids(const OrderFilter(query: 'ㄱㅊ')), ['b']);
   });
 
   test('배송 상태: 배송 전 → 배송됨 → 수령 완료', () {

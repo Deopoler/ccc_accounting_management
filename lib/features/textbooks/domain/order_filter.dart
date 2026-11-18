@@ -1,3 +1,4 @@
+import '../../../core/utils/korean_search.dart';
 import 'textbook_order.dart';
 
 /// 관리자 신청 현황 필터 (회차는 서버에서 거른다).
@@ -34,7 +35,7 @@ class OrderFilter {
       final hit =
           m != null &&
           (m.studentId.toLowerCase().contains(q) ||
-              m.name.toLowerCase().contains(q));
+              matchesKoreanQuery(m.name, q));
       if (!hit) return false;
     }
     return true;

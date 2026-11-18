@@ -3,6 +3,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
+import '../../../core/utils/korean_search.dart';
 import '../../../core/widgets/app_widgets.dart';
 import '../../../core/widgets/feedback.dart';
 import '../../../core/widgets/responsive.dart';
@@ -159,7 +160,7 @@ class _AdminMembersPageState extends ConsumerState<AdminMembersPage> {
             .where(
               (m) =>
                   q.isEmpty ||
-                  m.name.toLowerCase().contains(q) ||
+                  matchesKoreanQuery(m.name, q) ||
                   m.studentId.toLowerCase().contains(q),
             )
             .toList();
