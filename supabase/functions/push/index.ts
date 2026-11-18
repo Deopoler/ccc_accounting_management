@@ -126,12 +126,6 @@ function formatTextbookArrivalBody(orders: OrderRow[]): string {
   return `신청하신 ${titles[0]} 외 ${titles.length - 1}종 교재가 도착했습니다. 내 신청에서 확인해 주세요.`;
 }
 
-/** 알림 본문에 쓰는 피드백 앞부분. 줄바꿈은 공백으로, 40자를 넘으면 "…" 를 붙인다. */
-function feedbackSnippet(content: string, max = 40): string {
-  const chars = Array.from(content.replace(/\s+/g, ' ').trim());
-  return chars.length > max ? `${chars.slice(0, max).join('')}…` : chars.join('');
-}
-
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
@@ -294,21 +288,19 @@ Deno.serve(async (req) => {
       return fail(400, '요청 형식이 올바르지 않습니다.');
     }
 
-    // 내용은 요청 본문이 아니라 DB 에서 읽는다.
+    // 알림에는 보낸 사람과 내용을 넣지 않는다 (잠금화면 노출 방지). 도착 사실만 알린다.
     const { data: fb, error: fbError } = await admin
       .from('feedback')
-      .select('id, content, resolved_at, profiles:profiles!feedback_user_id_fkey(name)')
+      .select('id, resolved_at')
       .eq('id', body.feedback_id)
       .maybeSingle();
     if (fbError) return fail(500, `피드백 조회 실패: ${fbError.message}`);
     // 없거나 이미 확인 처리된 피드백이면 보내지 않는다.
     if (!fb || fb.resolved_at) return json(200, { sent: 0 });
 
-    const senderName =
-      (fb.profiles as unknown as { name?: string } | null)?.name?.trim() || '회원';
     const payload = JSON.stringify({
       title: '새 피드백',
-      body: `${senderName}: ${feedbackSnippet(fb.content as string)}`,
+      body: '새 피드백이 도착했습니다.',
       url: 'admin/feedback',
       tag: `feedback-${fb.id}`,
     });
