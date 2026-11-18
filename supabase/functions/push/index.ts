@@ -4,11 +4,13 @@
 //   GET                                                 VAPID 공개 키 (앱이 구독할 때 사용)
 //   POST { type: "signup", profile_id }                 가입 신청 알림 (관리자에게)
 //   POST { type: "order_shipped", user_id, order_ids }  교재 도착 알림 (주문자 본인에게)
+//   POST { type: "feedback", feedback_id }              새 피드백 알림 (총괄 관리자에게)
 //        헤더 x-push-secret: PUSH_WEBHOOK_SECRET (DB 트리거 pg_net 만 호출)
 //
 // 받는 사람:
 //   * signup: 가입한 캠퍼스의 캠퍼스 관리자 + 총괄 관리자 중 알림을 켠 기기 (일반 회원 제외)
 //   * order_shipped: 해당 주문을 신청한 승인된 회원 본인의 구독 기기
+//   * feedback: 승인된 활성 총괄 관리자 중 알림을 켠 기기 (캠퍼스 관리자 / 일반 회원 제외)
 // 만료된 구독(404 / 410)은 지운다.
 //
 // 보안
@@ -124,6 +126,12 @@ function formatTextbookArrivalBody(orders: OrderRow[]): string {
   return `신청하신 ${titles[0]} 외 ${titles.length - 1}종 교재가 도착했습니다. 내 신청에서 확인해 주세요.`;
 }
 
+/** 알림 본문에 쓰는 피드백 앞부분. 줄바꿈은 공백으로, 40자를 넘으면 "…" 를 붙인다. */
+function feedbackSnippet(content: string, max = 40): string {
+  const chars = Array.from(content.replace(/\s+/g, ' ').trim());
+  return chars.length > max ? `${chars.slice(0, max).join('')}…` : chars.join('');
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
@@ -147,6 +155,7 @@ Deno.serve(async (req) => {
     user_id?: unknown;
     order_id?: unknown;
     order_ids?: unknown;
+    feedback_id?: unknown;
   };
   try {
     body = await req.json();
@@ -279,5 +288,51 @@ Deno.serve(async (req) => {
     return json(200, { sent: totalSent, expired: totalExpired });
   }
 
+  // ---- 3. 피드백 알림 (총괄 관리자에게만) -------------------------------------
+  if (body.type === 'feedback') {
+    if (typeof body.feedback_id !== 'string' || !UUID.test(body.feedback_id)) {
+      return fail(400, '요청 형식이 올바르지 않습니다.');
+    }
+
+    // 내용은 요청 본문이 아니라 DB 에서 읽는다.
+    const { data: fb, error: fbError } = await admin
+      .from('feedback')
+      .select('id, content, resolved_at, profiles:profiles!feedback_user_id_fkey(name)')
+      .eq('id', body.feedback_id)
+      .maybeSingle();
+    if (fbError) return fail(500, `피드백 조회 실패: ${fbError.message}`);
+    // 없거나 이미 확인 처리된 피드백이면 보내지 않는다.
+    if (!fb || fb.resolved_at) return json(200, { sent: 0 });
+
+    const senderName =
+      (fb.profiles as unknown as { name?: string } | null)?.name?.trim() || '회원';
+    const payload = JSON.stringify({
+      title: '새 피드백',
+      body: `${senderName}: ${feedbackSnippet(fb.content as string)}`,
+      url: 'admin/feedback',
+      tag: `feedback-${fb.id}`,
+    });
+
+    // 받는 사람: 승인된 활성 총괄 관리자만
+    const { data: centrals, error: centralsError } = await admin
+      .from('profiles')
+      .select('id')
+      .eq('is_approved', true)
+      .is('deactivated_at', null)
+      .eq('role', 'central_admin');
+    if (centralsError) return fail(500, `관리자 조회 실패: ${centralsError.message}`);
+    if (!centrals?.length) return json(200, { sent: 0 });
+
+    const { data: subs, error: subsError } = await admin
+      .from('push_subscriptions')
+      .select('id, endpoint, p256dh, auth')
+      .in('user_id', centrals.map((a) => a.id));
+    if (subsError) return fail(500, `구독 조회 실패: ${subsError.message}`);
+
+    const result = await sendToSubscriptions(admin, subs ?? [], payload, vapidDetails);
+    return json(200, result);
+  }
+
   return fail(400, '요청 형식이 올바르지 않습니다.');
 });
+

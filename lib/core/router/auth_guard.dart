@@ -53,8 +53,9 @@ String? authRedirect(AuthSnapshot auth, Uri uri) {
     return AppRoutes.home;
   }
   if (!profile.isCentralAdmin &&
-      (path == AppRoutes.adminCampuses ||
-          path.startsWith('${AppRoutes.adminCampuses}/'))) {
+      AppRoutes.centralOnly.any(
+        (p) => path == p || path.startsWith('$p/'),
+      )) {
     return AppRoutes.admin;
   }
   return null;

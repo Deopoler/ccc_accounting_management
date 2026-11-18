@@ -101,10 +101,11 @@ class AppShell extends ConsumerWidget {
   }
 }
 
-/// 캠퍼스별 데이터를 다루는 관리자 화면 (허브 / 캠퍼스 관리 제외).
+/// 캠퍼스별 데이터를 다루는 관리자 화면 (허브 / 캠퍼스 관리 / 피드백 제외).
 bool _isCampusScopedAdminPath(String location) =>
     location.startsWith('${AppRoutes.admin}/') &&
-    !location.startsWith(AppRoutes.adminCampuses);
+    !location.startsWith(AppRoutes.adminCampuses) &&
+    !location.startsWith(AppRoutes.adminFeedback);
 
 class _SideNav extends StatelessWidget {
   const _SideNav({

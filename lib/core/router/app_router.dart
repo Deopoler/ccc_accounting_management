@@ -15,6 +15,7 @@ import '../../features/auth/presentation/pending_approval_page.dart';
 import '../../features/auth/presentation/signup_page.dart';
 import '../../features/auth/presentation/splash_page.dart';
 import '../../features/events/presentation/events_page.dart';
+import '../../features/feedback/presentation/admin_feedback_page.dart';
 import '../../features/home/presentation/home_page.dart';
 import '../../features/campus/presentation/admin_campuses_page.dart';
 import '../../features/settings/presentation/admin_settings_page.dart';
@@ -127,6 +128,7 @@ final routerProvider = Provider<GoRouter>((ref) {
               ),
               _tab('settings', const AdminSettingsPage()),
               _tab('campuses', const AdminCampusesPage()),
+              _tab('feedback', const AdminFeedbackPage()),
             ],
           ),
         ],
@@ -134,7 +136,7 @@ final routerProvider = Provider<GoRouter>((ref) {
     ],
   );
 
-  // 가입 신청 알림을 누르면 열린 앱 창에서 회원 관리로 이동한다. (web/push/sw.js)
+  // 푸시 알림(가입 신청 → 회원 관리, 새 피드백 → 피드백함 등)을 누르면 열린 앱 창에서 해당 화면으로 이동한다. (web/push/sw.js)
   var disposed = false;
   listenPushOpenPath((path) {
     if (!disposed) router.go(path);

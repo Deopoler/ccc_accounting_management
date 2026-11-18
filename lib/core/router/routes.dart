@@ -24,6 +24,10 @@ abstract final class AppRoutes {
   static String adminEventDetail(String eventId) => '/admin/events/$eventId';
   static const adminSettings = '/admin/settings';
   static const adminCampuses = '/admin/campuses';
+  static const adminFeedback = '/admin/feedback';
+
+  /// 총괄 관리자만 들어갈 수 있는 관리자 화면.
+  static const centralOnly = [adminCampuses, adminFeedback];
 }
 
 class NavDestination {
@@ -107,6 +111,12 @@ const centralDestinations = <NavDestination>[
     label: '캠퍼스 관리',
     icon: Icons.domain_outlined,
     selectedIcon: Icons.domain,
+  ),
+  NavDestination(
+    path: AppRoutes.adminFeedback,
+    label: '피드백',
+    icon: Icons.feedback_outlined,
+    selectedIcon: Icons.feedback,
   ),
 ];
 

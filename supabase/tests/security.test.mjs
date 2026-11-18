@@ -81,6 +81,7 @@ describe('스키마 회귀 검사', () => {
       'public.list_campuses',
       'public.place_textbook_order',
       'public.save_push_subscription',
+      'public.submit_feedback',
       'public.update_textbook_order',
     ]);
   });

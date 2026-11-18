@@ -6,6 +6,7 @@ import '../../../core/router/routes.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/theme_mode_provider.dart';
 import '../../campus/presentation/campus_providers.dart';
+import '../../feedback/presentation/feedback_dialog.dart';
 import '../../push/presentation/push_providers.dart';
 import 'auth_providers.dart';
 
@@ -29,6 +30,8 @@ class AccountMenuButton extends ConsumerWidget {
             showThemeModeSheet(context);
           case 'password':
             context.push(AppRoutes.changePassword);
+          case 'feedback':
+            showFeedbackDialog(context);
           case 'logout':
             _signOut(ref);
         }
@@ -80,6 +83,14 @@ class AccountMenuButton extends ConsumerWidget {
           child: ListTile(
             leading: Icon(Icons.lock_reset),
             title: Text('비밀번호 변경'),
+            contentPadding: EdgeInsets.zero,
+          ),
+        ),
+        const PopupMenuItem(
+          value: 'feedback',
+          child: ListTile(
+            leading: Icon(Icons.rate_review_outlined),
+            title: Text('피드백 보내기'),
             contentPadding: EdgeInsets.zero,
           ),
         ),
