@@ -8,6 +8,13 @@ import 'package:web/web.dart' as web;
 
 bool _cleanedOldCaches = false;
 
+/// TrueType(0x00010000) 또는 OpenType CFF('OTTO') 머리글로 시작하는지.
+bool isTrueTypeData(ByteData data) {
+  if (data.lengthInBytes < 12) return false;
+  final tag = data.getUint32(0);
+  return tag == 0x00010000 || tag == 0x4F54544F;
+}
+
 /// 웹에서는 CacheStorage([cacheName])를 우선 조회하고, 없거나 실패하면 네트워크/번들로 내려받는다.
 Future<ByteData> loadExtendedFontAsset(
   String assetKey, {
@@ -25,21 +32,28 @@ Future<ByteData> loadExtendedFontAsset(
       final cache = await caches.open(cacheName).toDart;
       final cached = await cache.match(url.toJS).toDart;
       if (cached != null && cached.ok) {
-        final buffer = await cached.arrayBuffer().toDart;
-        return buffer.toDart.asByteData();
+        final data = (await cached.arrayBuffer().toDart).toDart.asByteData();
+        if (isTrueTypeData(data)) return data;
+        // 폰트가 아닌 응답(예: SPA 대체 페이지 HTML)이 저장돼 있으면 지우고 다시 받는다.
+        await cache.delete(url.toJS).toDart;
       }
 
       final response = await web.window.fetch(url.toJS).toDart;
       if (!response.ok) {
         throw StateError('확장 폰트 응답 오류 (${response.status}): $url');
       }
-      try {
-        await cache.put(url.toJS, response.clone()).toDart;
-      } catch (_) {
-        // 사설 브라우징·용량 초과 등으로 캐시 쓰기만 실패해도 내려받은 폰트는 바로 사용한다.
+      final data = (await response.arrayBuffer().toDart).toDart.asByteData();
+      if (!isTrueTypeData(data)) {
+        throw StateError('확장 폰트가 아닌 응답: $url');
       }
-      final buffer = await response.arrayBuffer().toDart;
-      return buffer.toDart.asByteData();
+      // 캐시 쓰기는 기다리지 않는다. 사설 브라우징·용량 초과로 실패해도 내려받은 폰트는 바로 쓴다.
+      unawaited(
+        cache
+            .put(url.toJS, web.Response(data.buffer.toJS))
+            .toDart
+            .then((_) {}, onError: (_) {}),
+      );
+      return data;
     } catch (_) {
       // CacheStorage 접근 제한 시 일반 자산 로드로 조용히 폴백한다.
     }

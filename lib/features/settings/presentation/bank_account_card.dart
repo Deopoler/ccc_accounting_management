@@ -144,6 +144,7 @@ class _CopyRow extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(horizontal: 10),
                 textStyle: const TextStyle(
                   fontFamily: AppTheme.fontFamily,
+                  fontFamilyFallback: AppTheme.fontFamilyFallback,
                   fontSize: 14,
                   fontWeight: FontWeight.w600,
                 ),

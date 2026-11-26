@@ -20,6 +20,7 @@ class StagingBanner extends StatelessWidget {
       color: const Color(0xFFFF9500),
       textStyle: const TextStyle(
         fontFamily: AppTheme.fontFamily,
+        fontFamilyFallback: AppTheme.fontFamilyFallback,
         fontSize: 10,
         fontWeight: FontWeight.w700,
         color: Color(0xFF191F28),
