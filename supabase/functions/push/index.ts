@@ -150,6 +150,7 @@ Deno.serve(async (req) => {
     order_id?: unknown;
     order_ids?: unknown;
     feedback_id?: unknown;
+    deposit_id?: unknown;
   };
   try {
     body = await req.json();
@@ -319,6 +320,155 @@ Deno.serve(async (req) => {
       .from('push_subscriptions')
       .select('id, endpoint, p256dh, auth')
       .in('user_id', centrals.map((a) => a.id));
+    if (subsError) return fail(500, `구독 조회 실패: ${subsError.message}`);
+
+    const result = await sendToSubscriptions(admin, subs ?? [], payload, vapidDetails);
+    return json(200, result);
+  }
+
+  if (body.type === 'deposit_confirmed') {
+    if (typeof body.deposit_id !== 'string' || !UUID.test(body.deposit_id)) {
+      return fail(400, '요청 형식이 올바르지 않습니다.');
+    }
+
+    const { data: deposit, error: depositError } = await admin
+      .from('bank_deposits')
+      .select('id, status')
+      .eq('id', body.deposit_id)
+      .maybeSingle();
+    if (depositError) return fail(500, `입금 조회 실패: ${depositError.message}`);
+    if (!deposit || deposit.status !== 'auto_matched') return json(200, { sent: 0 });
+
+    const { data: linkedEvent, error: eventErr } = await admin
+      .from('event_payments')
+      .select(
+        'id, user_id, is_paid, events(title), profiles:profiles!event_payments_user_id_fkey(is_approved, deactivated_at)',
+      )
+      .eq('confirmed_deposit_id', deposit.id)
+      .eq('is_paid', true)
+      .maybeSingle();
+    if (eventErr) return fail(500, `이벤트 송금 조회 실패: ${eventErr.message}`);
+
+    let targetUserId: string | null = null;
+    let payload: string | null = null;
+
+    if (linkedEvent) {
+      const prof = linkedEvent.profiles as { is_approved?: boolean; deactivated_at?: string | null } | null;
+      if (prof?.is_approved && !prof.deactivated_at) {
+        const eventTitle = (linkedEvent.events as { title?: string } | null)?.title?.trim();
+        targetUserId = linkedEvent.user_id;
+        payload = JSON.stringify({
+          title: '송금 확인',
+          body: eventTitle ? `${eventTitle} 입금이 확인되었습니다.` : '이벤트 입금이 확인되었습니다.',
+          url: 'events',
+          tag: `deposit-confirmed-${deposit.id}`,
+        });
+      }
+    } else {
+      const { data: linkedOrders, error: ordersErr } = await admin
+        .from('textbook_orders')
+        .select(
+          'id, user_id, status, ' +
+            'profiles:profiles!textbook_orders_user_id_fkey(is_approved, deactivated_at), ' +
+            'textbook_order_items(textbooks(title))',
+        )
+        .eq('confirmed_deposit_id', deposit.id)
+        .eq('status', 'paid');
+      if (ordersErr) return fail(500, `교재 신청 조회 실패: ${ordersErr.message}`);
+
+      const validOrders = ((linkedOrders ?? []) as unknown as OrderRow[]).filter(
+        (o) => o.profiles?.is_approved === true && !o.profiles?.deactivated_at,
+      );
+      if (validOrders.length > 0) {
+        const titles: string[] = [];
+        for (const o of validOrders) {
+          for (const item of o.textbook_order_items ?? []) {
+            const title = item.textbooks?.title?.trim();
+            if (title && !titles.includes(title)) titles.push(title);
+          }
+        }
+        const msg =
+          titles.length === 0
+            ? '교재 신청 입금이 확인되었습니다.'
+            : titles.length === 1
+              ? `${titles[0]} 교재 입금이 확인되었습니다.`
+              : `${titles[0]} 외 ${titles.length - 1}종 교재 입금이 확인되었습니다.`;
+        targetUserId = validOrders[0].user_id;
+        payload = JSON.stringify({
+          title: '입금 확인',
+          body: msg,
+          url: 'my-orders',
+          tag: `deposit-confirmed-${deposit.id}`,
+        });
+      }
+    }
+
+    if (!targetUserId || !payload) return json(200, { sent: 0 });
+
+    const { data: subs, error: subsError } = await admin
+      .from('push_subscriptions')
+      .select('id, endpoint, p256dh, auth')
+      .eq('user_id', targetUserId);
+    if (subsError) return fail(500, `구독 조회 실패: ${subsError.message}`);
+    if (!subs?.length) return json(200, { sent: 0 });
+
+    const result = await sendToSubscriptions(admin, subs, payload, vapidDetails);
+    return json(200, result);
+  }
+
+  if (body.type === 'deposit_review') {
+    if (typeof body.deposit_id !== 'string' || !UUID.test(body.deposit_id)) {
+      return fail(400, '요청 형식이 올바르지 않습니다.');
+    }
+
+    const { data: deposit, error: depositError } = await admin
+      .from('bank_deposits')
+      .select('id, status, campus_id')
+      .eq('id', body.deposit_id)
+      .maybeSingle();
+    if (depositError) return fail(500, `입금 조회 실패: ${depositError.message}`);
+    if (!deposit || !['unmatched', 'ambiguous', 'unparsed'].includes(deposit.status)) {
+      return json(200, { sent: 0 });
+    }
+
+    // Lock-screen text omits depositor names and amounts.
+    const reviewBody =
+      deposit.status === 'unparsed'
+        ? '해석하지 못한 입금 알림이 있습니다.'
+        : '확인이 필요한 입금이 있습니다.';
+    const payload = JSON.stringify({
+      title: '입금 확인 필요',
+      body: reviewBody,
+      url: 'admin/deposits',
+      tag: `deposit-review-${deposit.id}`,
+    });
+
+    const { data: localAdmins, error: adminsError } = await admin
+      .from('profiles')
+      .select('id')
+      .eq('is_approved', true)
+      .is('deactivated_at', null)
+      .eq('campus_id', deposit.campus_id)
+      .in('role', ['campus_admin', 'central_admin']);
+    if (adminsError) return fail(500, `관리자 조회 실패: ${adminsError.message}`);
+
+    let recipients = localAdmins ?? [];
+    if (recipients.length === 0) {
+      const { data: centrals, error: centralsError } = await admin
+        .from('profiles')
+        .select('id')
+        .eq('is_approved', true)
+        .is('deactivated_at', null)
+        .eq('role', 'central_admin');
+      if (centralsError) return fail(500, `관리자 조회 실패: ${centralsError.message}`);
+      recipients = centrals ?? [];
+    }
+    if (!recipients.length) return json(200, { sent: 0 });
+
+    const { data: subs, error: subsError } = await admin
+      .from('push_subscriptions')
+      .select('id, endpoint, p256dh, auth')
+      .in('user_id', recipients.map((a) => a.id));
     if (subsError) return fail(500, `구독 조회 실패: ${subsError.message}`);
 
     const result = await sendToSubscriptions(admin, subs ?? [], payload, vapidDetails);
