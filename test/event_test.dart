@@ -170,4 +170,38 @@ void main() {
       '{이름}MT',
     );
   });
+
+  group('sortEventPayments', () {
+    EventPayment pay(String id, String sid, String name, DateTime? paidAt) =>
+        EventPayment(
+          id: id,
+          eventId: 'e',
+          userId: 'u$id',
+          isPaid: paidAt != null,
+          paidAt: paidAt,
+          member: EventMember(studentId: sid, name: name),
+        );
+    final list = [
+      pay('a', '2024003', '가나다', DateTime(2026, 11, 1)),
+      pay('b', '2024001', '하회탈', null),
+      pay('c', '2024002', '가나다', DateTime(2026, 11, 3)),
+      pay('d', '2024004', '나무', null),
+    ];
+    List<String> ids(EventPaymentSort s) =>
+        sortEventPayments(list, s).map((p) => p.id).toList();
+
+    test('학번순', () {
+      expect(ids(EventPaymentSort.studentId), ['b', 'c', 'a', 'd']);
+    });
+    test('이름순, 같은 이름은 학번순', () {
+      expect(ids(EventPaymentSort.name), ['c', 'a', 'd', 'b']);
+    });
+    test('확인일순: 최근 확인이 위, 미납은 아래(학번순)', () {
+      expect(ids(EventPaymentSort.paidAt), ['c', 'a', 'b', 'd']);
+    });
+    test('원본 목록은 바꾸지 않는다', () {
+      sortEventPayments(list, EventPaymentSort.name);
+      expect(list.map((p) => p.id), ['a', 'b', 'c', 'd']);
+    });
+  });
 }

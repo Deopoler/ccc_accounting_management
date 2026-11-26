@@ -254,3 +254,42 @@ class EventSummary {
 
   String get rateLabel => '${(rate * 100).round()}%';
 }
+
+/// 관리자 송금 현황 목록의 정렬 기준.
+enum EventPaymentSort {
+  studentId('학번순'),
+  name('이름순'),
+  paidAt('확인일순');
+
+  const EventPaymentSort(this.label);
+  final String label;
+}
+
+/// [sort] 기준으로 정렬한 새 목록. 같은 값이면 학번순.
+/// 확인일순은 최근 확인이 위, 미납은 맨 아래.
+List<EventPayment> sortEventPayments(
+  Iterable<EventPayment> payments,
+  EventPaymentSort sort,
+) {
+  int byStudentId(EventPayment a, EventPayment b) =>
+      (a.member?.studentId ?? '').compareTo(b.member?.studentId ?? '');
+
+  int compare(EventPayment a, EventPayment b) {
+    switch (sort) {
+      case EventPaymentSort.studentId:
+        return byStudentId(a, b);
+      case EventPaymentSort.name:
+        final c = (a.member?.name ?? '').compareTo(b.member?.name ?? '');
+        return c != 0 ? c : byStudentId(a, b);
+      case EventPaymentSort.paidAt:
+        final pa = a.paidAt, pb = b.paidAt;
+        if (pa == null && pb == null) return byStudentId(a, b);
+        if (pa == null) return 1;
+        if (pb == null) return -1;
+        final c = pb.compareTo(pa);
+        return c != 0 ? c : byStudentId(a, b);
+    }
+  }
+
+  return payments.toList()..sort(compare);
+}

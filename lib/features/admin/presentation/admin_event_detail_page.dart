@@ -34,6 +34,7 @@ class AdminEventDetailPage extends ConsumerStatefulWidget {
 
 class _AdminEventDetailPageState extends ConsumerState<AdminEventDetailPage> {
   _PaidFilter _filter = _PaidFilter.all;
+  EventPaymentSort _sort = EventPaymentSort.studentId;
   final _search = TextEditingController();
   final Set<String> _busy = {};
 
@@ -98,7 +99,8 @@ class _AdminEventDetailPageState extends ConsumerState<AdminEventDetailPage> {
     final ok = await showConfirmDialog(
       context,
       title: '대상에서 제외',
-      message: '${withObject(p.member?.name ?? '이 회원')} 이 이벤트의 송금 대상에서 제외하시겠습니까?',
+      message:
+          '${withObject(p.member?.name ?? '이 회원')} 이 이벤트의 송금 대상에서 제외하시겠습니까?',
       confirmLabel: '제외',
       destructive: true,
     );
@@ -202,7 +204,7 @@ class _AdminEventDetailPageState extends ConsumerState<AdminEventDetailPage> {
     final all = payments.requireValue;
     final summary = EventSummary.fromPayments(all, e);
     final q = _search.text.trim().toLowerCase();
-    final visible = all.where((p) {
+    final filtered = all.where((p) {
       if (_filter == _PaidFilter.paid && !p.isPaid) return false;
       if (_filter == _PaidFilter.unpaid && p.isPaid) return false;
       if (q.isEmpty) return true;
@@ -210,7 +212,8 @@ class _AdminEventDetailPageState extends ConsumerState<AdminEventDetailPage> {
       return m != null &&
           (m.name.toLowerCase().contains(q) ||
               m.studentId.toLowerCase().contains(q));
-    }).toList();
+    });
+    final visible = sortEventPayments(filtered, _sort);
 
     final theme = Theme.of(context);
     return ScrollPageBody(
@@ -302,6 +305,20 @@ class _AdminEventDetailPageState extends ConsumerState<AdminEventDetailPage> {
                   labelText: '학번 / 이름 검색',
                   prefixIcon: Icon(Icons.search),
                 ),
+              ),
+            ),
+            SizedBox(
+              width: 140,
+              child: DropdownButtonFormField<EventPaymentSort>(
+                initialValue: _sort,
+                decoration: const InputDecoration(labelText: '정렬'),
+                items: [
+                  for (final s in EventPaymentSort.values)
+                    DropdownMenuItem(value: s, child: Text(s.label)),
+                ],
+                onChanged: (s) {
+                  if (s != null) setState(() => _sort = s);
+                },
               ),
             ),
           ],
