@@ -5,6 +5,23 @@ import '../theme/app_theme.dart';
 bool get _keyboardNavigating =>
     FocusManager.instance.highlightMode == FocusHighlightMode.traditional;
 
+/// 키보드/터치 전환 때 포커스가 그대로여도 테두리를 다시 그리도록 강조 모드를 구독한다.
+mixin _HighlightModeListener<T extends StatefulWidget> on State<T> {
+  void _onModeChange(FocusHighlightMode _) => setState(() {});
+
+  @override
+  void initState() {
+    super.initState();
+    FocusManager.instance.addHighlightModeListener(_onModeChange);
+  }
+
+  @override
+  void dispose() {
+    FocusManager.instance.removeHighlightModeListener(_onModeChange);
+    super.dispose();
+  }
+}
+
 BoxDecoration _ring(BuildContext context, BorderRadius radius, bool show) =>
     BoxDecoration(
       borderRadius: radius,
@@ -25,7 +42,7 @@ class FocusRing extends StatefulWidget {
   State<FocusRing> createState() => _FocusRingState();
 }
 
-class _FocusRingState extends State<FocusRing> {
+class _FocusRingState extends State<FocusRing> with _HighlightModeListener {
   bool _focused = false;
 
   @override
@@ -49,11 +66,17 @@ class _FocusRingState extends State<FocusRing> {
 
 /// NavigationBar 항목의 아이콘. 항목에 키보드 포커스가 오면 아이콘 둘레에 테두리를 그린다.
 /// NavigationBar 는 포커스 표시를 투명한 인디케이터에 맡기고 있어 직접 그려야 한다.
-class NavFocusIcon extends StatelessWidget {
+class NavFocusIcon extends StatefulWidget {
   const NavFocusIcon(this.icon, {super.key});
 
   final IconData icon;
 
+  @override
+  State<NavFocusIcon> createState() => _NavFocusIconState();
+}
+
+class _NavFocusIconState extends State<NavFocusIcon>
+    with _HighlightModeListener {
   @override
   Widget build(BuildContext context) {
     final focused = Focus.maybeOf(context)?.hasFocus ?? false;
@@ -67,7 +90,7 @@ class NavFocusIcon extends StatelessWidget {
           BorderRadius.circular(16),
           focused && _keyboardNavigating,
         ),
-        child: Center(child: Icon(icon)),
+        child: Center(child: Icon(widget.icon)),
       ),
     );
   }
