@@ -71,66 +71,82 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: AppRoutes.changePassword,
         builder: (_, _) => const ChangePasswordPage(),
       ),
-      ShellRoute(
-        builder: (context, state, child) =>
-            AppShell(location: state.uri.path, child: child),
-        routes: [
-          _tab(AppRoutes.home, const HomePage()),
-          GoRoute(
-            path: AppRoutes.textbooks,
-            pageBuilder: (_, state) {
-              final edit = state.uri.queryParameters['edit'];
-              // 카테고리가 바뀌어도 같은 위젯(선택 수량 상태)을 유지하도록 key 는 edit 로만 정한다.
-              return NoTransitionPage(
-                key: state.pageKey,
-                child: TextbooksPage(
-                  key: ValueKey(edit),
-                  editOrderId: edit,
-                  categoryId: state.uri.queryParameters['category'],
-                ),
-              );
-            },
+      StatefulShellRoute.indexedStack(
+        builder: (context, state, navigationShell) => AppShell(
+          location: state.uri.path,
+          uri: state.uri,
+          navigationShell: navigationShell,
+          child: navigationShell,
+        ),
+        branches: [
+          StatefulShellBranch(routes: [_tab(AppRoutes.home, const HomePage())]),
+          StatefulShellBranch(
             routes: [
               GoRoute(
-                path: 'complete/:orderId',
-                builder: (_, state) => OrderCompletePage(
-                  orderId: state.pathParameters['orderId']!,
-                  edited: state.uri.queryParameters['edited'] == '1',
-                ),
-              ),
-            ],
-          ),
-          _tab(AppRoutes.myOrders, const MyOrdersPage()),
-          _tab(AppRoutes.events, const EventsPage()),
-          GoRoute(
-            path: AppRoutes.admin,
-            pageBuilder: (_, state) => NoTransitionPage(
-              key: state.pageKey,
-              child: const AdminHubPage(),
-            ),
-            routes: [
-              _tab('members', const AdminMembersPage()),
-              _tab('textbooks', const AdminTextbooksPage()),
-              _tab('orders', const AdminOrdersPage()),
-              GoRoute(
-                path: 'events',
-                pageBuilder: (_, state) => NoTransitionPage(
-                  key: state.pageKey,
-                  child: const AdminEventsPage(),
-                ),
+                path: AppRoutes.textbooks,
+                pageBuilder: (_, state) {
+                  final edit = state.uri.queryParameters['edit'];
+                  // 카테고리가 바뀌어도 같은 위젯(선택 수량 상태)을 유지하도록 key 는 edit 로만 정한다.
+                  return NoTransitionPage(
+                    key: state.pageKey,
+                    child: TextbooksPage(
+                      key: ValueKey(edit),
+                      editOrderId: edit,
+                      categoryId: state.uri.queryParameters['category'],
+                    ),
+                  );
+                },
                 routes: [
                   GoRoute(
-                    path: ':eventId',
-                    builder: (_, state) => AdminEventDetailPage(
-                      eventId: state.pathParameters['eventId']!,
+                    path: 'complete/:orderId',
+                    builder: (_, state) => OrderCompletePage(
+                      orderId: state.pathParameters['orderId']!,
+                      edited: state.uri.queryParameters['edited'] == '1',
                     ),
                   ),
                 ],
               ),
-              _tab('deposits', const AdminDepositsPage()),
-              _tab('settings', const AdminSettingsPage()),
-              _tab('campuses', const AdminCampusesPage()),
-              _tab('feedback', const AdminFeedbackPage()),
+            ],
+          ),
+          StatefulShellBranch(
+            routes: [_tab(AppRoutes.myOrders, const MyOrdersPage())],
+          ),
+          StatefulShellBranch(
+            routes: [_tab(AppRoutes.events, const EventsPage())],
+          ),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: AppRoutes.admin,
+                pageBuilder: (_, state) => NoTransitionPage(
+                  key: state.pageKey,
+                  child: const AdminHubPage(),
+                ),
+                routes: [
+                  _tab('members', const AdminMembersPage()),
+                  _tab('textbooks', const AdminTextbooksPage()),
+                  _tab('orders', const AdminOrdersPage()),
+                  GoRoute(
+                    path: 'events',
+                    pageBuilder: (_, state) => NoTransitionPage(
+                      key: state.pageKey,
+                      child: const AdminEventsPage(),
+                    ),
+                    routes: [
+                      GoRoute(
+                        path: ':eventId',
+                        builder: (_, state) => AdminEventDetailPage(
+                          eventId: state.pathParameters['eventId']!,
+                        ),
+                      ),
+                    ],
+                  ),
+                  _tab('deposits', const AdminDepositsPage()),
+                  _tab('settings', const AdminSettingsPage()),
+                  _tab('campuses', const AdminCampusesPage()),
+                  _tab('feedback', const AdminFeedbackPage()),
+                ],
+              ),
             ],
           ),
         ],

@@ -196,11 +196,18 @@ class _AdminEventDetailPageState extends ConsumerState<AdminEventDetailPage> {
         onRetry: _refreshLists,
       );
     }
-    if (!event.hasValue || !payments.hasValue) return const LoadingView();
+    if (!event.hasUsableValue || !payments.hasUsableValue) {
+      return const LoadingView();
+    }
 
+    final refreshing =
+        event.isBackgroundRefreshing || payments.isBackgroundRefreshing;
     final e = event.requireValue;
     if (e == null) {
-      return const EmptyView(message: '이벤트를 찾을 수 없습니다.');
+      return RefreshOverlay(
+        refreshing: refreshing,
+        child: const EmptyView(message: '이벤트를 찾을 수 없습니다.'),
+      );
     }
     final all = payments.requireValue;
     final summary = EventSummary.fromPayments(all, e);
@@ -217,7 +224,9 @@ class _AdminEventDetailPageState extends ConsumerState<AdminEventDetailPage> {
     final visible = sortEventPayments(filtered, _sort);
 
     final theme = Theme.of(context);
-    return ScrollPageBody(
+    return RefreshOverlay(
+      refreshing: refreshing,
+      child: ScrollPageBody(
       maxWidth: 900,
       children: [
         Card(
@@ -389,6 +398,7 @@ class _AdminEventDetailPageState extends ConsumerState<AdminEventDetailPage> {
             ),
           ),
       ],
+      ),
     );
   }
 }

@@ -1039,7 +1039,7 @@ void main() {
         await pumpPushPage(
           tester,
           '/textbooks/complete/o1',
-          const OrderCompletePage(orderId: 'o1'),
+          const OrderPushCard(),
           scopeKey: sameScope,
         );
         final container = ProviderScope.containerOf(

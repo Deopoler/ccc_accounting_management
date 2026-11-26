@@ -30,35 +30,46 @@ class EventsPage extends ConsumerWidget {
         },
       );
     }
-    if (!events.hasValue || !payments.hasValue) return const LoadingView();
+    if (!events.hasUsableValue || !payments.hasUsableValue) {
+      return const LoadingView();
+    }
 
+    final refreshing =
+        events.isBackgroundRefreshing || payments.isBackgroundRefreshing;
     final list = events.requireValue;
     final mine = payments.requireValue;
     if (list.isEmpty) {
-      return const EmptyView(
-        icon: Icons.event_outlined,
-        message: '등록된 이벤트가 없습니다.',
+      return RefreshOverlay(
+        refreshing: refreshing,
+        child: const EmptyView(
+          icon: Icons.event_outlined,
+          message: '등록된 이벤트가 없습니다.',
+        ),
       );
     }
 
     final unpaidCount = list.where((e) => mine[e.id]?.isPaid == false).length;
 
-    return ScrollPageBody(
-      maxWidth: 800,
-      children: [
-        if (unpaidCount > 0) ...[
-          Text(
-            '미납 이벤트 $unpaidCount건 · 이벤트마다 안내된 금액과 입금자명으로 따로 송금해 주세요.',
-            style: Theme.of(context).textTheme.bodyMedium
-                ?.copyWith(color: context.colors.textSecondary),
-          ),
-          const SizedBox(height: 12),
+    return RefreshOverlay(
+      refreshing: refreshing,
+      child: ScrollPageBody(
+        maxWidth: 800,
+        children: [
+          if (unpaidCount > 0) ...[
+            Text(
+              '미납 이벤트 $unpaidCount건 · 이벤트마다 안내된 금액과 입금자명으로 따로 송금해 주세요.',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: context.colors.textSecondary,
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
+          for (final e in list) ...[
+            _EventCard(event: e, payment: mine[e.id]),
+            const SizedBox(height: 12),
+          ],
         ],
-        for (final e in list) ...[
-          _EventCard(event: e, payment: mine[e.id]),
-          const SizedBox(height: 12),
-        ],
-      ],
+      ),
     );
   }
 }

@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/riverpod/cache_for.dart';
 import '../../../core/supabase/supabase_providers.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../../campus/presentation/campus_providers.dart';
@@ -12,25 +13,38 @@ final eventRepositoryProvider = Provider<EventRepository>(
 
 final eventsProvider = FutureProvider.autoDispose
     .family<List<Event>, CampusScope>((ref, scope) async {
-      final campusId = await ref.watch(campusIdProvider(scope).future);
-      if (campusId == null) return const [];
+      final userId = ref.watch(currentUserIdProvider);
+      final campusId = ref.watch(campusIdProvider(scope));
+      if (userId == null || campusId == null) return const [];
+      ref.cacheFor(defaultCacheDuration, campusScope: scope);
       return ref.watch(eventRepositoryProvider).fetchEvents(campusId);
     });
 
-final eventProvider = FutureProvider.autoDispose.family<Event?, String>(
-  (ref, id) => ref.watch(eventRepositoryProvider).fetchEvent(id),
-);
+final eventProvider = FutureProvider.autoDispose.family<Event?, String>((
+  ref,
+  id,
+) async {
+  final userId = ref.watch(currentUserIdProvider);
+  if (userId == null) return null;
+  ref.cacheFor(defaultCacheDuration, campusScope: CampusScope.admin);
+  return ref.watch(eventRepositoryProvider).fetchEvent(id);
+});
 
 final eventSummariesProvider =
-    FutureProvider.autoDispose<Map<String, EventSummary>>(
-      (ref) => ref.watch(eventRepositoryProvider).fetchSummaries(),
-    );
+    FutureProvider.autoDispose<Map<String, EventSummary>>((ref) async {
+      final userId = ref.watch(currentUserIdProvider);
+      final campusId = ref.watch(adminCampusIdProvider);
+      if (userId == null || campusId == null) return const {};
+      ref.cacheFor(defaultCacheDuration, campusScope: CampusScope.admin);
+      return ref.watch(eventRepositoryProvider).fetchSummaries();
+    });
 
 /// 이벤트 id → 내 송금 행 (없으면 대상 아님).
 final myEventPaymentsProvider =
     FutureProvider.autoDispose<Map<String, EventPayment>>((ref) async {
       final userId = ref.watch(currentUserIdProvider);
       if (userId == null) return const {};
+      ref.cacheFor(defaultCacheDuration);
       return ref.watch(eventRepositoryProvider).fetchMyPayments(userId);
     });
 
@@ -46,8 +60,12 @@ class EventPaymentsNotifier extends AsyncNotifier<List<EventPayment>> {
   final String eventId;
 
   @override
-  Future<List<EventPayment>> build() =>
-      ref.watch(eventRepositoryProvider).fetchPayments(eventId);
+  Future<List<EventPayment>> build() async {
+    final userId = ref.watch(currentUserIdProvider);
+    if (userId == null) return const [];
+    ref.cacheFor(defaultCacheDuration, campusScope: CampusScope.admin);
+    return ref.watch(eventRepositoryProvider).fetchPayments(eventId);
+  }
 
   Future<void> setPaid(String paymentId, {required bool isPaid}) async {
     await ref.read(eventRepositoryProvider).setPaid(paymentId, isPaid: isPaid);

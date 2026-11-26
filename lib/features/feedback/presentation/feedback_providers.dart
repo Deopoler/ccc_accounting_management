@@ -1,6 +1,8 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/riverpod/cache_for.dart';
 import '../../../core/supabase/supabase_providers.dart';
+import '../../auth/presentation/auth_providers.dart';
 import '../data/feedback_repository.dart';
 import '../domain/feedback_entry.dart';
 
@@ -30,12 +32,13 @@ class FeedbackFilterNotifier extends Notifier<FeedbackFilter> {
   void select(FeedbackFilter filter) => state = filter;
 }
 
-/// 총괄 관리자가 보는 피드백 목록 (최신순). 필터가 바뀌면 다시 불러온다.
-final feedbackListProvider = FutureProvider.autoDispose<List<FeedbackEntry>>((
-  ref,
-) {
-  final filter = ref.watch(feedbackFilterProvider);
-  return ref
-      .watch(feedbackRepositoryProvider)
-      .fetchFeedback(unresolvedOnly: filter == FeedbackFilter.unresolved);
-});
+/// 총괄 관리자가 보는 피드백 목록 (최신순). 필터별로 캐시한다.
+final feedbackListProvider = FutureProvider.autoDispose
+    .family<List<FeedbackEntry>, FeedbackFilter>((ref, filter) async {
+      final userId = ref.watch(currentUserIdProvider);
+      if (userId == null) return const [];
+      ref.cacheFor(defaultCacheDuration);
+      return ref
+          .watch(feedbackRepositoryProvider)
+          .fetchFeedback(unresolvedOnly: filter == FeedbackFilter.unresolved);
+    });

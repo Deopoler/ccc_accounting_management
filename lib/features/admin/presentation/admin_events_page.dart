@@ -49,66 +49,73 @@ class AdminEventsPage extends ConsumerWidget {
         },
       );
     }
-    if (!events.hasValue || !summaries.hasValue) return const LoadingView();
+    if (!events.hasUsableValue || !summaries.hasUsableValue) {
+      return const LoadingView();
+    }
 
+    final refreshing =
+        events.isBackgroundRefreshing || summaries.isBackgroundRefreshing;
     final list = events.requireValue;
     final sums = summaries.requireValue;
 
-    return ScrollPageBody(
-      maxWidth: 900,
-      children: [
-        SectionTitle(
-          '이벤트 ${list.length}개',
-          trailing: FilledButton.icon(
-            onPressed: () => _create(context, ref),
-            icon: const Icon(Icons.add),
-            label: const Text('이벤트 추가'),
+    return RefreshOverlay(
+      refreshing: refreshing,
+      child: ScrollPageBody(
+        maxWidth: 900,
+        children: [
+          SectionTitle(
+            '이벤트 ${list.length}개',
+            trailing: FilledButton.icon(
+              onPressed: () => _create(context, ref),
+              icon: const Icon(Icons.add),
+              label: const Text('이벤트 추가'),
+            ),
           ),
-        ),
-        if (list.isEmpty)
-          const EmptyView(
-            icon: Icons.event_note_outlined,
-            message: '등록된 이벤트가 없습니다.',
-          ),
-        for (final e in list) ...[
-          Card(
-            clipBehavior: Clip.antiAlias,
-            child: Semantics(
-              button: true,
-              child: InkWell(
-                onTap: () => context.go(AppRoutes.adminEventDetail(e.id)),
-                child: Padding(
-                  padding: const EdgeInsets.all(20),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              e.title,
-                              style: Theme.of(context).textTheme.titleMedium
-                                  ?.copyWith(fontWeight: FontWeight.w600),
+          if (list.isEmpty)
+            const EmptyView(
+              icon: Icons.event_note_outlined,
+              message: '등록된 이벤트가 없습니다.',
+            ),
+          for (final e in list) ...[
+            Card(
+              clipBehavior: Clip.antiAlias,
+              child: Semantics(
+                button: true,
+                child: InkWell(
+                  onTap: () => context.go(AppRoutes.adminEventDetail(e.id)),
+                  child: Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                e.title,
+                                style: Theme.of(context).textTheme.titleMedium
+                                    ?.copyWith(fontWeight: FontWeight.w600),
+                              ),
                             ),
-                          ),
-                          const Icon(Icons.chevron_right),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                      EventMetaLine(event: e),
-                      const SizedBox(height: 12),
-                      PaymentProgress(
-                        summary: sums[e.id] ?? EventSummary.empty,
-                      ),
-                    ],
+                            const Icon(Icons.chevron_right),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        EventMetaLine(event: e),
+                        const SizedBox(height: 12),
+                        PaymentProgress(
+                          summary: sums[e.id] ?? EventSummary.empty,
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
-          const SizedBox(height: 12),
+            const SizedBox(height: 12),
+          ],
         ],
-      ],
+      ),
     );
   }
 }

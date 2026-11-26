@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/riverpod/cache_for.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../../campus/presentation/campus_providers.dart';
 import '../../textbooks/domain/textbook_order.dart';
@@ -18,8 +19,10 @@ class AdminOrdersNotifier extends AsyncNotifier<List<TextbookOrder>> {
 
   @override
   Future<List<TextbookOrder>> build() async {
-    final campusId = await ref.watch(adminCampusIdProvider.future);
-    if (campusId == null) return const [];
+    final userId = ref.watch(currentUserIdProvider);
+    final campusId = ref.watch(adminCampusIdProvider);
+    if (userId == null || campusId == null) return const [];
+    ref.cacheFor(defaultCacheDuration, campusScope: CampusScope.admin);
     return ref
         .watch(textbookRepositoryProvider)
         .fetchAllOrders(campusId, roundId: roundId);
@@ -89,7 +92,7 @@ class AdminOrdersNotifier extends AsyncNotifier<List<TextbookOrder>> {
     } finally {
       // 다시 불러오기가 실패해도 원래 오류를 가리지 않게 한다.
       try {
-        final campusId = await ref.read(adminCampusIdProvider.future);
+        final campusId = ref.read(adminCampusIdProvider);
         final repo = ref.read(textbookRepositoryProvider);
         final fresh = campusId == null
             ? const <TextbookOrder>[]

@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
 
+import '../../../core/riverpod/cache_for.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../domain/campus.dart';
@@ -8,7 +9,10 @@ import 'campus_providers.dart';
 
 /// 관리자 화면에서 다루는 캠퍼스 (없으면 null). 제목 / 전환기 표시용.
 final adminCampusProvider = FutureProvider.autoDispose<Campus?>((ref) async {
-  final id = await ref.watch(adminCampusIdProvider.future);
+  final userId = ref.watch(currentUserIdProvider);
+  final id = ref.watch(adminCampusIdProvider);
+  if (userId == null || id == null) return null;
+  ref.cacheFor(defaultCacheDuration, campusScope: CampusScope.admin);
   final list = await ref.watch(campusesProvider.future);
   for (final c in list) {
     if (c.id == id) return c;

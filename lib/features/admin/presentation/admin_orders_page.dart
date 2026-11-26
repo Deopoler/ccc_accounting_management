@@ -210,6 +210,7 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
       await ref.read(textbookRepositoryProvider).shiftOrders(ids, offset);
       // 옮긴 신청은 다른 회차 목록에 들어가고, 다음 회차가 새로 생겼을 수 있다.
       ref.invalidate(adminOrdersProvider);
+      ref.invalidate(adminCurrentRoundProvider);
       ref.invalidate(adminRoundsProvider);
       if (mounted) {
         setState(() => _picked.removeAll(ids));
@@ -243,23 +244,52 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
 
   @override
   Widget build(BuildContext context) {
+    ref.listen<String?>(adminCampusIdProvider, (prev, next) {
+      if (prev != next) {
+        setState(() {
+          _roundId = null;
+          _textbookId = null;
+          _picked.clear();
+        });
+      }
+    });
+
+    final activeCampusId = ref.watch(adminCampusIdProvider);
+    final currentRoundAsync = ref.watch(adminCurrentRoundProvider);
     final roundList = ref.watch(adminRoundsProvider);
     final textbooks = ref.watch(textbooksProvider(CampusScope.admin));
 
-    if (roundList.hasError) {
+    if (currentRoundAsync.hasError || roundList.hasError) {
       return ErrorView(
-        error: roundList.error!,
-        onRetry: () => ref.invalidate(adminRoundsProvider),
+        error: (currentRoundAsync.error ?? roundList.error)!,
+        onRetry: () {
+          ref.invalidate(adminCurrentRoundProvider);
+          ref.invalidate(adminRoundsProvider);
+        },
       );
     }
-    if (!roundList.hasValue) return const LoadingView();
+    if (!currentRoundAsync.hasUsableValue) return const LoadingView();
 
-    final rounds = roundList.requireValue;
-    if (rounds == null) return const EmptyView(message: '신청 회차가 없습니다.');
+    final currentRound = currentRoundAsync.requireValue;
+    if (currentRound == null || activeCampusId == null) {
+      return const EmptyView(message: '신청 회차가 없습니다.');
+    }
+
+    // Start fetching orders for the current round concurrently with fetchRounds.
+    final rounds =
+        roundList.hasValue && roundList.requireValue?.campusId == activeCampusId
+        ? roundList.requireValue!
+        : RoundList(
+            campusId: activeCampusId,
+            current: currentRound,
+            all: [currentRound],
+          );
     final selected = _selected(rounds);
     final roundId = selected?.id;
     final orders = ref.watch(adminOrdersProvider(roundId));
-    final books = textbooks.value ?? const <Textbook>[];
+    final books = textbooks.hasUsableValue
+        ? textbooks.requireValue
+        : const <Textbook>[];
     final filter = OrderFilter(
       textbookId: _textbookId,
       status: _status,
@@ -267,88 +297,100 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
       query: _search.text,
     );
     // 배송 칩의 건수는 배송 조건을 뺀 나머지 필터 기준으로 센다.
-    final loaded = orders.value;
+    final loaded = orders.hasUsableValue ? orders.requireValue : null;
     final deliveryCounts = loaded == null
         ? null
         : countByDelivery(filter.withDelivery(null).apply(loaded));
+    final refreshing =
+        currentRoundAsync.isBackgroundRefreshing ||
+        (roundList.isLoading &&
+            roundList.hasValue &&
+            roundList.value?.campusId == activeCampusId) ||
+        textbooks.isBackgroundRefreshing ||
+        orders.isBackgroundRefreshing;
 
-    return ListView(
-      children: [
-        PageBody(
-          maxWidth: 1200,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              _Filters(
-                rounds: rounds,
-                selected: selected,
-                onRoundChanged: (r) => setState(() {
-                  _allRounds = r == null;
-                  if (r != null) _roundId = r.id;
-                  _picked.clear();
-                }),
-                textbooks: books,
-                textbookId: _textbookId,
-                onTextbookChanged: (v) => setState(() => _textbookId = v),
-                status: _status,
-                onStatusChanged: (v) => setState(() => _status = v),
-                delivery: _delivery,
-                deliveryCounts: deliveryCounts,
-                onDeliveryChanged: (v) => setState(() => _delivery = v),
-                search: _search,
-                onSearchChanged: () => setState(() {}),
-              ),
-              const SizedBox(height: 16),
-              AsyncValueView(
-                value: orders,
-                onRetry: () => ref.invalidate(adminOrdersProvider(roundId)),
-                data: (all) {
-                  final filtered = filter.apply(all);
-                  // 필터에 가려진 신청은 처리하지 않는다.
-                  final picked = filtered
-                      .where((o) => _picked.contains(o.id))
-                      .toList();
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      _Summary(orders: filtered, textbookId: _textbookId),
-                      const SizedBox(height: 16),
-                      SectionTitle(
-                        '신청 ${filtered.length}건',
-                        trailing: _ExportMenu(
-                          enabled: filtered.isNotEmpty,
-                          onExport: (tally) =>
-                              _export(filtered, selected, tally: tally),
-                        ),
-                      ),
-                      if (filtered.isEmpty)
-                        const EmptyView(message: '조건에 맞는 신청이 없습니다.')
-                      else
-                        _OrdersList(
-                          orders: filtered,
-                          busy: _busy,
-                          picked: _picked,
-                          onPick: (o, v) => setState(
-                            () => v ? _picked.add(o.id) : _picked.remove(o.id),
+    return RefreshOverlay(
+      refreshing: refreshing,
+      child: ListView(
+        children: [
+          PageBody(
+            maxWidth: 1200,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _Filters(
+                  rounds: rounds,
+                  selected: selected,
+                  onRoundChanged: (r) => setState(() {
+                    _allRounds = r == null;
+                    if (r != null) _roundId = r.id;
+                    _picked.clear();
+                  }),
+                  textbooks: books,
+                  textbookId: _textbookId,
+                  onTextbookChanged: (v) => setState(() => _textbookId = v),
+                  status: _status,
+                  onStatusChanged: (v) => setState(() => _status = v),
+                  delivery: _delivery,
+                  deliveryCounts: deliveryCounts,
+                  onDeliveryChanged: (v) => setState(() => _delivery = v),
+                  search: _search,
+                  onSearchChanged: () => setState(() {}),
+                ),
+                const SizedBox(height: 16),
+                AsyncValueView(
+                  value: orders,
+                  showRefreshIndicator: false,
+                  onRetry: () => ref.invalidate(adminOrdersProvider(roundId)),
+                  data: (all) {
+                    final filtered = filter.apply(all);
+                    // 필터에 가려진 신청은 처리하지 않는다.
+                    final picked = filtered
+                        .where((o) => _picked.contains(o.id))
+                        .toList();
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        _Summary(orders: filtered, textbookId: _textbookId),
+                        const SizedBox(height: 16),
+                        SectionTitle(
+                          '신청 ${filtered.length}건',
+                          trailing: _ExportMenu(
+                            enabled: filtered.isNotEmpty,
+                            onExport: (tally) =>
+                                _export(filtered, selected, tally: tally),
                           ),
-                          onPickAll: (v) => setState(() {
-                            final ids = filtered.map((o) => o.id);
-                            v ? _picked.addAll(ids) : _picked.removeAll(ids);
-                          }),
-                          onStatus: (o, s) => _setStatus(roundId, o, s),
-                          onShipped: (o, v) => _setShipped(roundId, o, v),
-                          onReceived: (o, v) => _setReceived(roundId, o, v),
-                          onBulk: (f, v) => _bulk(roundId, picked, f, v),
-                          onShift: (offset) => _shift(picked, offset),
                         ),
-                    ],
-                  );
-                },
-              ),
-            ],
+                        if (filtered.isEmpty)
+                          const EmptyView(message: '조건에 맞는 신청이 없습니다.')
+                        else
+                          _OrdersList(
+                            orders: filtered,
+                            busy: _busy,
+                            picked: _picked,
+                            onPick: (o, v) => setState(
+                              () =>
+                                  v ? _picked.add(o.id) : _picked.remove(o.id),
+                            ),
+                            onPickAll: (v) => setState(() {
+                              final ids = filtered.map((o) => o.id);
+                              v ? _picked.addAll(ids) : _picked.removeAll(ids);
+                            }),
+                            onStatus: (o, s) => _setStatus(roundId, o, s),
+                            onShipped: (o, v) => _setShipped(roundId, o, v),
+                            onReceived: (o, v) => _setReceived(roundId, o, v),
+                            onBulk: (f, v) => _bulk(roundId, picked, f, v),
+                            onShift: (offset) => _shift(picked, offset),
+                          ),
+                      ],
+                    );
+                  },
+                ),
+              ],
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
