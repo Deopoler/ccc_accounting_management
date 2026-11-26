@@ -8,6 +8,7 @@ import '../../features/campus/presentation/campus_switcher.dart';
 import '../../features/push/presentation/push_providers.dart';
 import '../router/routes.dart';
 import '../theme/app_theme.dart';
+import 'focus_ring.dart';
 import 'responsive.dart';
 
 /// 로그인 후 화면 공통 틀. 데스크톱은 사이드 네비게이션, 모바일은 하단 네비게이션.
@@ -90,8 +91,8 @@ class AppShell extends ConsumerWidget {
           destinations: [
             for (final d in destinations)
               NavigationDestination(
-                icon: Icon(d.icon),
-                selectedIcon: Icon(d.selectedIcon),
+                icon: NavFocusIcon(d.icon),
+                selectedIcon: NavFocusIcon(d.selectedIcon),
                 label: d.label,
               ),
           ],
@@ -134,20 +135,23 @@ class _SideNav extends StatelessWidget {
       final isSelected = d.path == selectedPath;
       return Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
-        child: ListTile(
-          selected: isSelected,
-          selectedTileColor: c.surfaceMuted,
-          selectedColor: c.textPrimary,
-          iconColor: c.textTertiary,
-          textColor: c.textSecondary,
-          leading: Icon(isSelected ? d.selectedIcon : d.icon),
-          title: Text(
-            d.label,
-            style: TextStyle(
-              fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+        child: FocusRing(
+          borderRadius: BorderRadius.circular(AppRadius.sm),
+          child: ListTile(
+            selected: isSelected,
+            selectedTileColor: c.surfaceMuted,
+            selectedColor: c.textPrimary,
+            iconColor: c.textTertiary,
+            textColor: c.textSecondary,
+            leading: Icon(isSelected ? d.selectedIcon : d.icon),
+            title: Text(
+              d.label,
+              style: TextStyle(
+                fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+              ),
             ),
+            onTap: () => context.go(d.path),
           ),
-          onTap: () => context.go(d.path),
         ),
       );
     }

@@ -20,7 +20,7 @@ abstract final class AppTheme {
     final scheme = ColorScheme(
       brightness: brightness,
       primary: c.primary,
-      onPrimary: Colors.white,
+      onPrimary: c.onPrimary,
       primaryContainer: c.primarySoft,
       onPrimaryContainer: c.primary,
       // 보조 / 3차 색도 파랑·회색에 묶어 다른 강조색이 생기지 않게 한다.
@@ -29,11 +29,11 @@ abstract final class AppTheme {
       secondaryContainer: c.surfaceMuted,
       onSecondaryContainer: c.textPrimary,
       tertiary: c.primary,
-      onTertiary: Colors.white,
+      onTertiary: c.onPrimary,
       tertiaryContainer: c.primarySoft,
       onTertiaryContainer: c.primary,
       error: c.error,
-      onError: Colors.white,
+      onError: c.onError,
       errorContainer: c.errorSoft,
       onErrorContainer: c.error,
       surface: c.background,
@@ -44,7 +44,7 @@ abstract final class AppTheme {
       surfaceContainer: c.surfaceMuted,
       surfaceContainerHigh: c.surfaceMuted,
       surfaceContainerHighest: c.surfaceStrong,
-      outline: c.textTertiary,
+      outline: c.border,
       outlineVariant: c.divider,
       shadow: Colors.black,
       scrim: Colors.black,
@@ -91,9 +91,20 @@ abstract final class AppTheme {
           (s) => s.contains(WidgetState.selected) ? selected : other,
         );
 
+    // 키보드로 이동할 때만 보이는 2px 포커스 테두리 (마우스 클릭 뒤에는 숨김).
+    final focusSide = BorderSide(color: c.focusRing, width: 2);
+    bool keyboardFocus(Set<WidgetState> s) =>
+        s.contains(WidgetState.focused) &&
+        FocusManager.instance.highlightMode == FocusHighlightMode.traditional;
+    WidgetStateProperty<BorderSide?> focusBorder() =>
+        WidgetStateProperty.resolveWith(
+          (s) => keyboardFocus(s) ? focusSide : BorderSide.none,
+        );
+
     return base.copyWith(
       textTheme: text,
       extensions: [c],
+      materialTapTargetSize: MaterialTapTargetSize.padded,
       scaffoldBackgroundColor: c.background,
       canvasColor: c.background,
       splashFactory: InkSparkle.splashFactory,
@@ -126,9 +137,10 @@ abstract final class AppTheme {
           borderRadius: rSm,
           borderSide: BorderSide.none,
         ),
+        // 다이얼로그 / 카드 위에서도 입력칸 경계가 3:1 이상 보이도록.
         enabledBorder: OutlineInputBorder(
           borderRadius: rSm,
-          borderSide: BorderSide.none,
+          borderSide: BorderSide(color: c.border),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: rSm,
@@ -146,16 +158,17 @@ abstract final class AppTheme {
         floatingLabelStyle: TextStyle(color: c.textSecondary),
         hintStyle: TextStyle(color: c.textTertiary),
         helperStyle: TextStyle(color: c.textSecondary),
-        prefixIconColor: c.textTertiary,
-        suffixIconColor: c.textTertiary,
+        prefixIconColor: c.textSecondary,
+        suffixIconColor: c.textSecondary,
       ),
       // 파란 CTA: 화면당 하나
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
           backgroundColor: c.primary,
-          foregroundColor: Colors.white,
+          foregroundColor: c.onPrimary,
+          // 비활성 컨트롤은 WCAG 대비 예외라 흐린 색을 그대로 쓴다.
           disabledBackgroundColor: c.surfaceStrong,
-          disabledForegroundColor: c.textTertiary,
+          disabledForegroundColor: c.textDisabled,
           minimumSize: const Size(64, 52),
           padding: const EdgeInsets.symmetric(horizontal: 20),
           elevation: 0,
@@ -165,38 +178,43 @@ abstract final class AppTheme {
             fontSize: 16,
             fontWeight: FontWeight.w700,
           ),
-        ),
+        ).copyWith(side: focusBorder()),
       ),
       // 보조 버튼: 회색 면
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
           backgroundColor: c.surfaceMuted,
           foregroundColor: c.textPrimary,
-          disabledForegroundColor: c.textTertiary,
+          disabledForegroundColor: c.textDisabled,
           minimumSize: const Size(64, 48),
           padding: const EdgeInsets.symmetric(horizontal: 16),
-          side: BorderSide.none,
           shape: RoundedRectangleBorder(borderRadius: rSm),
           textStyle: const TextStyle(
             fontFamily: fontFamily,
             fontSize: 15,
             fontWeight: FontWeight.w600,
           ),
-        ),
+        ).copyWith(side: focusBorder()),
       ),
       textButtonTheme: TextButtonThemeData(
         style: TextButton.styleFrom(
           foregroundColor: c.primary,
+          minimumSize: const Size(44, 44),
+          tapTargetSize: MaterialTapTargetSize.padded,
           shape: RoundedRectangleBorder(borderRadius: rSm),
           textStyle: const TextStyle(
             fontFamily: fontFamily,
             fontSize: 15,
             fontWeight: FontWeight.w600,
           ),
-        ),
+        ).copyWith(side: focusBorder()),
       ),
       iconButtonTheme: IconButtonThemeData(
-        style: IconButton.styleFrom(foregroundColor: c.textSecondary),
+        style: IconButton.styleFrom(
+          foregroundColor: c.textSecondary,
+          minimumSize: const Size(44, 44),
+          tapTargetSize: MaterialTapTargetSize.padded,
+        ).copyWith(side: focusBorder()),
       ),
       iconTheme: IconThemeData(color: c.textSecondary),
       listTileTheme: ListTileThemeData(
@@ -211,7 +229,9 @@ abstract final class AppTheme {
         backgroundColor: c.surfaceMuted,
         selectedColor: c.primarySoft,
         disabledColor: c.surfaceMuted,
-        side: BorderSide.none,
+        side: WidgetStateBorderSide.resolveWith(
+          (s) => keyboardFocus(s) ? focusSide : BorderSide.none,
+        ),
         shape: const StadiumBorder(),
         showCheckmark: false,
         labelStyle: TextStyle(
@@ -224,17 +244,18 @@ abstract final class AppTheme {
           fontWeight: FontWeight.w600,
           color: c.primary,
         ),
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+        // 라벨 20px + 위아래 12px = 높이 44px
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 12),
       ),
       switchTheme: SwitchThemeData(
-        thumbColor: WidgetStateProperty.all(Colors.white),
+        thumbColor: states(Colors.white, c.border),
         trackColor: states(c.primary, c.surfaceStrong),
-        trackOutlineColor: WidgetStateProperty.all(Colors.transparent),
+        trackOutlineColor: states(Colors.transparent, c.border),
       ),
       checkboxTheme: CheckboxThemeData(
         fillColor: states(c.primary, Colors.transparent),
-        checkColor: WidgetStateProperty.all(Colors.white),
-        side: BorderSide(color: c.textTertiary, width: 1.5),
+        checkColor: WidgetStateProperty.all(c.onPrimary),
+        side: BorderSide(color: c.border, width: 1.5),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
       ),
       progressIndicatorTheme: ProgressIndicatorThemeData(
@@ -367,47 +388,63 @@ class AppColors extends ThemeExtension<AppColors> {
     required this.textPrimary,
     required this.textSecondary,
     required this.textTertiary,
+    required this.textDisabled,
     required this.background,
     required this.surfaceMuted,
     required this.surfaceStrong,
     required this.elevatedSurface,
     required this.divider,
+    required this.border,
+    required this.focusRing,
+    required this.onPrimary,
     required this.error,
+    required this.onError,
     required this.errorSoft,
     required this.inverseSurface,
     required this.onInverseSurface,
   });
 
   static const light = AppColors(
-    primary: Color(0xFF0064FF),
+    primary: Color(0xFF005AE6),
     primarySoft: Color(0xFFE8F3FF),
     textPrimary: Color(0xFF191F28),
-    textSecondary: Color(0xFF8B95A1),
-    textTertiary: Color(0xFFB0B8C1),
+    textSecondary: Color(0xFF4E5968),
+    textTertiary: Color(0xFF66707E),
+    textDisabled: Color(0xFFB0B8C1),
     background: Color(0xFFFFFFFF),
     surfaceMuted: Color(0xFFF2F4F6),
     surfaceStrong: Color(0xFFE5E8EB),
     elevatedSurface: Color(0xFFFFFFFF),
     divider: Color(0xFFF2F4F6),
-    error: Color(0xFFF04452),
+    border: Color(0xFF78828F),
+    focusRing: Color(0xFF0B0F14),
+    onPrimary: Color(0xFFFFFFFF),
+    error: Color(0xFFC9202F),
+    onError: Color(0xFFFFFFFF),
     errorSoft: Color(0xFFFFEEEE),
     inverseSurface: Color(0xFF191F28),
     onInverseSurface: Color(0xFFFFFFFF),
   );
 
-  /// 어두운 배경에서는 #0064FF 글자가 읽기 어려워 같은 파랑을 밝게 쓴다.
+  /// 어두운 배경에서는 #005AE6 글자가 읽기 어려워 같은 파랑을 밝게 쓴다.
+  /// 밝은 파랑 면 위의 글자는 흰색이면 3.3:1 이라 어두운 [onPrimary] 를 쓴다.
   static const dark = AppColors(
     primary: Color(0xFF3D8BFF),
-    primarySoft: Color(0xFF17294A),
+    primarySoft: Color(0xFF13203B),
     textPrimary: Color(0xFFECEEF1),
     textSecondary: Color(0xFF8B95A1),
-    textTertiary: Color(0xFF5E6773),
+    textTertiary: Color(0xFF7F8999),
+    textDisabled: Color(0xFF5E6773),
     background: Color(0xFF111217),
     surfaceMuted: Color(0xFF1E2027),
     surfaceStrong: Color(0xFF2C2F38),
     elevatedSurface: Color(0xFF1E2027),
     divider: Color(0xFF24262E),
-    error: Color(0xFFFF6B75),
+    border: Color(0xFF78828F),
+    focusRing: Color(0xFFFFFFFF),
+    onPrimary: Color(0xFF111217),
+    error: Color(0xFFFF5C68),
+    onError: Color(0xFF111217),
     errorSoft: Color(0xFF3A1D22),
     inverseSurface: Color(0xFFECEEF1),
     onInverseSurface: Color(0xFF111217),
@@ -425,8 +462,11 @@ class AppColors extends ThemeExtension<AppColors> {
   /// 보조 글자
   final Color textSecondary;
 
-  /// 더 흐린 글자 (힌트, 비활성)
+  /// 더 흐린 글자 (힌트, 흐린 배지, 선택 안 된 탭). 4.5:1 이상을 지킨다.
   final Color textTertiary;
+
+  /// 비활성 컨트롤의 글자 / 장식. 대비 기준을 일부러 따르지 않으므로 읽어야 하는 글자에는 쓰지 않는다.
+  final Color textDisabled;
 
   /// 화면 배경
   final Color background;
@@ -443,8 +483,20 @@ class AppColors extends ThemeExtension<AppColors> {
   /// 구분선
   final Color divider;
 
+  /// 입력칸 / 체크박스 / 스위치 경계. 흰 면과 회색 면 모두에서 3:1 이상.
+  final Color border;
+
+  /// 키보드 포커스 테두리. 면 색과 파랑 / 빨강 버튼 면 위에서 3:1 이상.
+  final Color focusRing;
+
+  /// [primary] 면 위의 글자
+  final Color onPrimary;
+
   /// 오류 / 위험 동작에만 사용
   final Color error;
+
+  /// [error] 면 위의 글자
+  final Color onError;
   final Color errorSoft;
 
   /// 스낵바 / 툴팁
@@ -458,12 +510,17 @@ class AppColors extends ThemeExtension<AppColors> {
     Color? textPrimary,
     Color? textSecondary,
     Color? textTertiary,
+    Color? textDisabled,
     Color? background,
     Color? surfaceMuted,
     Color? surfaceStrong,
     Color? elevatedSurface,
     Color? divider,
+    Color? border,
+    Color? focusRing,
+    Color? onPrimary,
     Color? error,
+    Color? onError,
     Color? errorSoft,
     Color? inverseSurface,
     Color? onInverseSurface,
@@ -473,12 +530,17 @@ class AppColors extends ThemeExtension<AppColors> {
     textPrimary: textPrimary ?? this.textPrimary,
     textSecondary: textSecondary ?? this.textSecondary,
     textTertiary: textTertiary ?? this.textTertiary,
+    textDisabled: textDisabled ?? this.textDisabled,
     background: background ?? this.background,
     surfaceMuted: surfaceMuted ?? this.surfaceMuted,
     surfaceStrong: surfaceStrong ?? this.surfaceStrong,
     elevatedSurface: elevatedSurface ?? this.elevatedSurface,
     divider: divider ?? this.divider,
+    border: border ?? this.border,
+    focusRing: focusRing ?? this.focusRing,
+    onPrimary: onPrimary ?? this.onPrimary,
     error: error ?? this.error,
+    onError: onError ?? this.onError,
     errorSoft: errorSoft ?? this.errorSoft,
     inverseSurface: inverseSurface ?? this.inverseSurface,
     onInverseSurface: onInverseSurface ?? this.onInverseSurface,
@@ -494,12 +556,17 @@ class AppColors extends ThemeExtension<AppColors> {
       textPrimary: l(textPrimary, other.textPrimary),
       textSecondary: l(textSecondary, other.textSecondary),
       textTertiary: l(textTertiary, other.textTertiary),
+      textDisabled: l(textDisabled, other.textDisabled),
       background: l(background, other.background),
       surfaceMuted: l(surfaceMuted, other.surfaceMuted),
       surfaceStrong: l(surfaceStrong, other.surfaceStrong),
       elevatedSurface: l(elevatedSurface, other.elevatedSurface),
       divider: l(divider, other.divider),
+      border: l(border, other.border),
+      focusRing: l(focusRing, other.focusRing),
+      onPrimary: l(onPrimary, other.onPrimary),
       error: l(error, other.error),
+      onError: l(onError, other.onError),
       errorSoft: l(errorSoft, other.errorSoft),
       inverseSurface: l(inverseSurface, other.inverseSurface),
       onInverseSurface: l(onInverseSurface, other.onInverseSurface),
