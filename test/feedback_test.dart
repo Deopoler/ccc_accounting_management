@@ -94,6 +94,7 @@ Future<void> _pump(
       key: UniqueKey(),
       retry: (_, _) => null,
       overrides: [
+        currentUserIdProvider.overrideWith((ref) => profile?.id ?? 'u1'),
         if (profile != null)
           currentProfileProvider.overrideWith((ref) async => profile),
         campusesProvider.overrideWith((ref) async => const <Campus>[]),

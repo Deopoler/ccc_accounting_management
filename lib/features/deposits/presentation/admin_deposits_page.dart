@@ -305,8 +305,8 @@ class _AdminDepositsPageState extends ConsumerState<AdminDepositsPage> {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
-    ref.listen<AsyncValue<String?>>(adminCampusIdProvider, (prev, next) {
-      if (prev?.asData?.value != next.asData?.value) {
+    ref.listen<String?>(adminCampusIdProvider, (prev, next) {
+      if (prev != next) {
         setState(() {
           _extraItems = [];
           _reachedEnd = false;

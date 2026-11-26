@@ -201,6 +201,7 @@ class _RoundDeadlineFormState extends ConsumerState<_RoundDeadlineForm> {
       await ref
           .read(textbookRepositoryProvider)
           .setRoundDeadline(round.id, deadline);
+      ref.invalidate(adminCurrentRoundProvider);
       ref.invalidate(adminRoundsProvider);
       ref.invalidate(currentRoundProvider);
       if (!mounted) return;
@@ -222,7 +223,7 @@ class _RoundDeadlineFormState extends ConsumerState<_RoundDeadlineForm> {
 
   @override
   Widget build(BuildContext context) {
-    final rounds = ref.watch(adminRoundsProvider);
+    final currentRound = ref.watch(adminCurrentRoundProvider);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Column(
@@ -236,11 +237,12 @@ class _RoundDeadlineFormState extends ConsumerState<_RoundDeadlineForm> {
           ),
           const SizedBox(height: 16),
           AsyncValueView(
-            value: rounds,
-            onRetry: () => ref.invalidate(adminRoundsProvider),
-            isEmpty: (list) => list == null,
+            value: currentRound,
+            showRefreshIndicator: false,
+            onRetry: () => ref.invalidate(adminCurrentRoundProvider),
+            isEmpty: (round) => round == null,
             empty: const EmptyView(message: '신청 회차가 없습니다.'),
-            data: (list) => _body(list!.current),
+            data: (round) => _body(round!),
           ),
         ],
       ),

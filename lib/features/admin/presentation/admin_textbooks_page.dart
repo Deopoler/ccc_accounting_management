@@ -240,17 +240,21 @@ class AdminTextbooksPage extends ConsumerWidget {
         },
       );
     }
-    if (!textbooks.hasValue || !categories.hasValue) {
+    if (!textbooks.hasUsableValue || !categories.hasUsableValue) {
       return const LoadingView();
     }
 
+    final refreshing =
+        textbooks.isBackgroundRefreshing || categories.isBackgroundRefreshing;
     final books = textbooks.requireValue;
     final cats = categories.requireValue;
     final groups = groupByCategory(cats, books, includeEmpty: true);
     final ordered = [for (final g in groups) ?g.category];
     final theme = Theme.of(context);
 
-    return ScrollPageBody(
+    return RefreshOverlay(
+      refreshing: refreshing,
+      child: ScrollPageBody(
       maxWidth: 900,
       children: [
         // ---- 카테고리
@@ -395,6 +399,7 @@ class AdminTextbooksPage extends ConsumerWidget {
             ],
           ],
       ],
+      ),
     );
   }
 }

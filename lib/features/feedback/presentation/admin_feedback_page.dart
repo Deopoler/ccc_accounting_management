@@ -41,49 +41,52 @@ class _AdminFeedbackPageState extends ConsumerState<AdminFeedbackPage> {
   @override
   Widget build(BuildContext context) {
     final filter = ref.watch(feedbackFilterProvider);
-    final list = ref.watch(feedbackListProvider);
+    final list = ref.watch(feedbackListProvider(filter));
 
-    return ScrollPageBody(
-      maxWidth: 720,
-      children: [
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            for (final f in FeedbackFilter.values)
-              ChoiceChip(
-                label: Text(f.label),
-                selected: filter == f,
-                onSelected: (_) =>
-                    ref.read(feedbackFilterProvider.notifier).select(f),
+    return RefreshOverlay(
+      refreshing: list.isBackgroundRefreshing,
+      child: ScrollPageBody(
+        maxWidth: 720,
+        children: [
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final f in FeedbackFilter.values)
+                ChoiceChip(
+                  label: Text(f.label),
+                  selected: filter == f,
+                  onSelected: (_) =>
+                      ref.read(feedbackFilterProvider.notifier).select(f),
+                ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          if (list.hasError)
+            ErrorView(
+              error: list.error!,
+              onRetry: () => ref.invalidate(feedbackListProvider(filter)),
+            )
+          else if (!list.hasUsableValue)
+            const LoadingView()
+          else if (list.requireValue.isEmpty)
+            EmptyView(
+              icon: Icons.inbox_outlined,
+              message: filter == FeedbackFilter.unresolved
+                  ? '확인하지 않은 피드백이 없습니다.'
+                  : '받은 피드백이 없습니다.',
+            )
+          else
+            for (final entry in list.requireValue) ...[
+              _FeedbackCard(
+                entry: entry,
+                busy: _busy.contains(entry.id),
+                onToggle: (resolved) => _setResolved(entry, resolved),
               ),
-          ],
-        ),
-        const SizedBox(height: 16),
-        if (list.hasError)
-          ErrorView(
-            error: list.error!,
-            onRetry: () => ref.invalidate(feedbackListProvider),
-          )
-        else if (!list.hasValue)
-          const LoadingView()
-        else if (list.requireValue.isEmpty)
-          EmptyView(
-            icon: Icons.inbox_outlined,
-            message: filter == FeedbackFilter.unresolved
-                ? '확인하지 않은 피드백이 없습니다.'
-                : '받은 피드백이 없습니다.',
-          )
-        else
-          for (final entry in list.requireValue) ...[
-            _FeedbackCard(
-              entry: entry,
-              busy: _busy.contains(entry.id),
-              onToggle: (resolved) => _setResolved(entry, resolved),
-            ),
-            const SizedBox(height: 12),
-          ],
-      ],
+              const SizedBox(height: 12),
+            ],
+        ],
+      ),
     );
   }
 }
