@@ -249,3 +249,27 @@ Deno.test('ingest_utils: external_id reuse with different notification produces 
   assert.deepEqual(first.dedupeKey, exactRetry.dedupeKey);
   assert.notEqual(first.dedupeKey, reusedIdDifferentNotif.dedupeKey);
 });
+
+// 실제 토스 모임통장 입금 알림 형식 (2026-11-27 확인): 제목 "N원 입금", 내용 "<이름> → 내 <별칭> 모임통장"
+Deno.test('toss: real 모임통장 deposit notification', () => {
+  const res = parseDepositNotification(
+    'toss',
+    raw('15,000원 입금', '김철수 → 내 KAIST CCC 모임통장'),
+    KAIST_CONFIG,
+  );
+  assert.deepEqual(res, { kind: 'deposit', depositorName: '김철수', amount: 15000 });
+});
+
+Deno.test('toss: real format with masked name (self transfer) is unparsed', () => {
+  const res = parseDepositNotification(
+    'toss',
+    raw('1원 입금', '**** → 내 KAIST CCC 모임통장'),
+    KAIST_CONFIG,
+  );
+  assert.deepEqual(res, { kind: 'unparsed', reason: 'no_depositor' });
+});
+
+Deno.test('toss: title only (empty text variable) is ignored as no_account_label', () => {
+  const res = parseDepositNotification('toss', raw('1원 입금', ''), KAIST_CONFIG);
+  assert.deepEqual(res, { kind: 'ignored', reason: 'no_account_label' });
+});
