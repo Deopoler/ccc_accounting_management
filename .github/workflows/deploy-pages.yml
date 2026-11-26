@@ -56,7 +56,7 @@ jobs:
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
         run: |
-          for fn in admin-members push; do
+          for fn in admin-members push deposit-ingest deposit-reparse; do
             supabase functions deploy "$fn" --project-ref "${{ secrets.PROD_PROJECT_REF }}" --yes
           done
 

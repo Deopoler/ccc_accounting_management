@@ -17,7 +17,7 @@ typedef ShipmentState = ({
 
 const _orderColumns =
     'id, user_id, round_id, status, total_price, created_at, '
-    'is_shipped, shipped_at, received_at, received_by, '
+    'is_shipped, shipped_at, received_at, received_by, confirmed_deposit_id, '
     'order_rounds(id, starts_at, deadline), '
     'textbook_order_items(textbook_id, quantity, unit_price, textbooks(title))';
 
@@ -212,6 +212,7 @@ class TextbookRepository {
         // shipped_by 도 profiles 를 참조하므로 신청자 FK 를 지정한다.
         .select(
           '$_orderColumns, '
+          'bank_deposits(status, matched_by), '
           'profiles:profiles!textbook_orders_user_id_fkey(student_id, name)',
         )
         .eq('campus_id', campusId);

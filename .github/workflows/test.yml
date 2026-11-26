@@ -33,3 +33,10 @@ jobs:
         run: |
           npm install
           npm test
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: 입금 알림 파서 테스트 (Deno)
+        run: deno test supabase/functions/_shared/deposit-parsers

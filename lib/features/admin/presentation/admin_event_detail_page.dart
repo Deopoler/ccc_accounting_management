@@ -440,6 +440,7 @@ class _PaymentTargetRow extends StatelessWidget {
             ),
           if (p.paidAt != null)
             TextSpan(text: ' · 확인 ${formatDateTime(p.paidAt!)}'),
+          if (p.isAutoConfirmed) const TextSpan(text: ' · 자동 확인'),
         ],
       ),
       style: compact
