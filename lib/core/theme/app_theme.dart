@@ -10,8 +10,14 @@ import 'package:material_ui/material_ui.dart';
 ///
 /// 색·폰트·둥글기는 이 파일에서만 정한다. 화면에서는 [AppColors] / [AppRadius] 를 쓴다.
 abstract final class AppTheme {
-  /// 앱에 포함한 Pretendard (현대 한글 전체). pubspec.yaml 의 fonts 참고.
+  /// 앱 시작 시 먼저 받는 Pretendard 기본 폰트 (KS X 1001 상용 2,350자 + 기호). pubspec.yaml 참고.
   static const fontFamily = 'Pretendard';
+
+  /// 첫 화면 뒤 백그라운드에서 등록하는 확장 한글 폰트 (나머지 현대 한글 8,822자).
+  static const extFontFamily = 'PretendardExt';
+
+  /// 기본 폰트에 없는 드문 한글 음절을 확장 폰트로 이어서 그린다.
+  static const fontFamilyFallback = [extFontFamily];
 
   static ThemeData light() => _build(AppColors.light, Brightness.light);
   static ThemeData dark() => _build(AppColors.dark, Brightness.dark);
@@ -58,6 +64,7 @@ abstract final class AppTheme {
       brightness: brightness,
       colorScheme: scheme,
       fontFamily: fontFamily,
+      fontFamilyFallback: fontFamilyFallback,
     );
     final text = base.textTheme
         .apply(bodyColor: c.textPrimary, displayColor: c.textPrimary)
@@ -175,6 +182,7 @@ abstract final class AppTheme {
           shape: RoundedRectangleBorder(borderRadius: rSm),
           textStyle: const TextStyle(
             fontFamily: fontFamily,
+            fontFamilyFallback: fontFamilyFallback,
             fontSize: 16,
             fontWeight: FontWeight.w700,
           ),
@@ -191,6 +199,7 @@ abstract final class AppTheme {
           shape: RoundedRectangleBorder(borderRadius: rSm),
           textStyle: const TextStyle(
             fontFamily: fontFamily,
+            fontFamilyFallback: fontFamilyFallback,
             fontSize: 15,
             fontWeight: FontWeight.w600,
           ),
@@ -204,6 +213,7 @@ abstract final class AppTheme {
           shape: RoundedRectangleBorder(borderRadius: rSm),
           textStyle: const TextStyle(
             fontFamily: fontFamily,
+            fontFamilyFallback: fontFamilyFallback,
             fontSize: 15,
             fontWeight: FontWeight.w600,
           ),
@@ -236,11 +246,13 @@ abstract final class AppTheme {
         showCheckmark: false,
         labelStyle: TextStyle(
           fontFamily: fontFamily,
+          fontFamilyFallback: fontFamilyFallback,
           fontWeight: FontWeight.w600,
           color: c.textPrimary,
         ),
         secondaryLabelStyle: TextStyle(
           fontFamily: fontFamily,
+          fontFamilyFallback: fontFamilyFallback,
           fontWeight: FontWeight.w600,
           color: c.primary,
         ),
@@ -276,12 +288,14 @@ abstract final class AppTheme {
         labelTextStyle: states(
           TextStyle(
             fontFamily: fontFamily,
+            fontFamilyFallback: fontFamilyFallback,
             fontSize: 12,
             fontWeight: FontWeight.w700,
             color: c.textPrimary,
           ),
           TextStyle(
             fontFamily: fontFamily,
+            fontFamilyFallback: fontFamilyFallback,
             fontSize: 12,
             fontWeight: FontWeight.w600,
             color: c.textTertiary,
@@ -343,6 +357,7 @@ abstract final class AppTheme {
         backgroundColor: c.inverseSurface,
         contentTextStyle: TextStyle(
           fontFamily: fontFamily,
+          fontFamilyFallback: fontFamilyFallback,
           color: c.onInverseSurface,
           fontSize: 15,
         ),
@@ -362,6 +377,7 @@ abstract final class AppTheme {
         ),
         textStyle: TextStyle(
           fontFamily: fontFamily,
+          fontFamilyFallback: fontFamilyFallback,
           color: c.onInverseSurface,
           fontSize: 12,
         ),
@@ -409,7 +425,7 @@ class AppColors extends ThemeExtension<AppColors> {
     primarySoft: Color(0xFFE8F3FF),
     textPrimary: Color(0xFF191F28),
     textSecondary: Color(0xFF4E5968),
-    textTertiary: Color(0xFF66707E),
+    textTertiary: Color(0xFF5F6875),
     textDisabled: Color(0xFFB0B8C1),
     background: Color(0xFFFFFFFF),
     surfaceMuted: Color(0xFFF2F4F6),
@@ -432,8 +448,8 @@ class AppColors extends ThemeExtension<AppColors> {
     primary: Color(0xFF3D8BFF),
     primarySoft: Color(0xFF13203B),
     textPrimary: Color(0xFFECEEF1),
-    textSecondary: Color(0xFF8B95A1),
-    textTertiary: Color(0xFF7F8999),
+    textSecondary: Color(0xFF9AA4B2),
+    textTertiary: Color(0xFF8D97A7),
     textDisabled: Color(0xFF5E6773),
     background: Color(0xFF111217),
     surfaceMuted: Color(0xFF1E2027),

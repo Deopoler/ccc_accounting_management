@@ -33,8 +33,12 @@ flutter:
 
   assets:
     - assets/fonts/Pretendard-LICENSE.txt
+    # 확장 한글 8,822자(KS X 1001 외 현대 한글): fonts 에 넣지 않아 초기 부팅 시 받지 않고 첫 화면 뒤 지연 로드한다.
+    # 폰트를 재생성하면 lib/core/theme/font_loader.dart 의 extFontCacheName 버전을 함께 올려야 한다.
+    - assets/fonts/PretendardExt-Regular.ttf
+    - assets/fonts/PretendardExt-Bold.ttf
 
-  # Pretendard: 현대 한글 11,172자 전체 포함 (tool/fonts/build_fonts.mjs 로 생성, SIL OFL 1.1)
+  # Pretendard 기본(Core): KS X 1001 상용 한글 2,350자 + 자모·기호 (tool/fonts/build_fonts.mjs 로 생성, SIL OFL 1.1)
   fonts:
     - family: Pretendard
       fonts:

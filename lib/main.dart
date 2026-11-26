@@ -9,6 +9,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'app.dart';
 import 'core/config/env.dart';
+import 'core/theme/font_loader.dart';
 import 'core/theme/theme_mode_provider.dart';
 import 'core/widgets/config_error_app.dart';
 
@@ -49,4 +50,7 @@ Future<void> main() async {
       child: const CccApp(),
     ),
   );
+
+  // 첫 화면을 그린 뒤 나머지 현대 한글 음절(PretendardExt)을 백그라운드에서 내려받는다.
+  scheduleExtendedFontsLoad();
 }
