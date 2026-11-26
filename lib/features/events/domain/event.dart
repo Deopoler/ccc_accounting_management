@@ -9,6 +9,7 @@ class Event {
     required this.description,
     required this.createdAt,
     this.depositName = '',
+    this.autoEnrollNewMembers = false,
   });
 
   factory Event.fromJson(Map<String, dynamic> json) => Event(
@@ -22,6 +23,7 @@ class Event {
     description: json['description'] as String? ?? '',
     createdAt: DateTime.parse(json['created_at'] as String),
     depositName: json['deposit_name'] as String? ?? '',
+    autoEnrollNewMembers: json['auto_enroll_new_members'] as bool? ?? false,
   );
 
   final String id;
@@ -33,6 +35,9 @@ class Event {
 
   /// 입금자명 형식. `{이름}`, `{학번}` 자리표시자를 쓸 수 있고, 비어 있으면 회원 이름.
   final String depositName;
+
+  /// 켜 두면 가입이 승인된 같은 캠퍼스 회원이 마감 전까지 송금 대상에 자동 추가된다.
+  final bool autoEnrollNewMembers;
 
   /// 회원에게 안내할 입금자명.
   String depositNameFor({required String name, required String studentId}) =>
@@ -94,6 +99,7 @@ class EventInput {
     required this.dueDate,
     required this.description,
     this.depositName = '',
+    this.autoEnrollNewMembers = false,
   });
 
   final String title;
@@ -101,6 +107,7 @@ class EventInput {
   final DateTime? dueDate;
   final String description;
   final String depositName;
+  final bool autoEnrollNewMembers;
 
   Map<String, dynamic> toJson() => {
     'title': title,
@@ -108,6 +115,7 @@ class EventInput {
     'due_date': dueDate == null ? null : toDateOnly(dueDate!),
     'description': description,
     'deposit_name': depositName.trim(),
+    'auto_enroll_new_members': autoEnrollNewMembers,
   };
 }
 

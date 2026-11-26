@@ -106,6 +106,38 @@ void main() {
     expect(json['due_date'], '2026-10-03');
   });
 
+  test('신규 가입자 자동 추가: 기본 꺼짐, 값은 읽고 저장한다', () {
+    expect(_event('a').autoEnrollNewMembers, isFalse);
+    final on = Event.fromJson({
+      'id': 'e',
+      'title': 't',
+      'amount': 1,
+      'due_date': null,
+      'description': '',
+      'created_at': '2026-09-01T00:00:00Z',
+      'auto_enroll_new_members': true,
+    });
+    expect(on.autoEnrollNewMembers, isTrue);
+
+    const input = EventInput(
+      title: 't',
+      amount: 1,
+      dueDate: null,
+      description: '',
+    );
+    expect(input.toJson()['auto_enroll_new_members'], isFalse);
+    expect(
+      const EventInput(
+        title: 't',
+        amount: 1,
+        dueDate: null,
+        description: '',
+        autoEnrollNewMembers: true,
+      ).toJson()['auto_enroll_new_members'],
+      isTrue,
+    );
+  });
+
   test('입금자명: 자리표시자 치환, 비어 있으면 이름', () {
     expect(renderDepositName('', name: '홍길동', studentId: '2024'), '홍길동');
     expect(renderDepositName('  ', name: '홍길동', studentId: '2024'), '홍길동');

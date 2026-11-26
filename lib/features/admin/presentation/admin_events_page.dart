@@ -140,6 +140,7 @@ class _EventFormDialogState extends State<_EventFormDialog> {
     text: widget.initial?.depositName,
   );
   late DateTime? _dueDate = widget.initial?.dueDate;
+  late bool _autoEnroll = widget.initial?.autoEnrollNewMembers ?? false;
 
   @override
   void dispose() {
@@ -171,6 +172,7 @@ class _EventFormDialogState extends State<_EventFormDialog> {
         dueDate: _dueDate,
         description: _description.text.trim(),
         depositName: _depositName.text.trim(),
+        autoEnrollNewMembers: _autoEnroll,
       ),
     );
   }
@@ -261,6 +263,16 @@ class _EventFormDialogState extends State<_EventFormDialog> {
                   decoration: const InputDecoration(labelText: '설명'),
                   minLines: 2,
                   maxLines: 5,
+                ),
+                const SizedBox(height: 8),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('새로 가입한 회원을 자동으로 송금 대상에 추가'),
+                  subtitle: const Text(
+                    '가입 승인된 같은 캠퍼스 회원이 마감 전까지 자동으로 추가됩니다.',
+                  ),
+                  value: _autoEnroll,
+                  onChanged: (v) => setState(() => _autoEnroll = v),
                 ),
               ],
             ),

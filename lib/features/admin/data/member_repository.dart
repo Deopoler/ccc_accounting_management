@@ -19,7 +19,7 @@ class MemberRepository {
     return rows.map(Profile.fromJson).toList();
   }
 
-  /// 가입 승인. 승인되면 DB 트리거가 진행 중인 이벤트의 송금 대상으로 등록한다.
+  /// 가입 승인. 신규 가입자 자동 추가가 켜진 이벤트(같은 캠퍼스, 마감 전)에는 DB 트리거가 송금 대상으로 등록한다.
   Future<void> approve(Iterable<String> userIds) async {
     final ids = userIds.toList();
     if (ids.isEmpty) return;

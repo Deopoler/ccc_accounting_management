@@ -251,6 +251,13 @@ class _AdminEventDetailPageState extends ConsumerState<AdminEventDetailPage> {
                       : '입금자명 형식: ${e.depositName}',
                   style: theme.textTheme.bodySmall,
                 ),
+                if (e.autoEnrollNewMembers) ...[
+                  const SizedBox(height: 8),
+                  const Align(
+                    alignment: Alignment.centerLeft,
+                    child: AppBadge('신규 가입자 자동 추가'),
+                  ),
+                ],
                 if (e.description.isNotEmpty) ...[
                   const SizedBox(height: 8),
                   Text(e.description),
