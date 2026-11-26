@@ -133,6 +133,8 @@ class EventPayment {
     required this.userId,
     required this.isPaid,
     required this.paidAt,
+    this.confirmedBy,
+    this.confirmedDepositId,
     this.amountOverride,
     this.member,
   });
@@ -148,6 +150,8 @@ class EventPayment {
         final String t => DateTime.parse(t),
         _ => null,
       },
+      confirmedBy: json['confirmed_by'] as String?,
+      confirmedDepositId: json['confirmed_deposit_id'] as String?,
       amountOverride: json['amount_override'] as int?,
       member: profile == null
           ? null
@@ -163,12 +167,18 @@ class EventPayment {
   final String userId;
   final bool isPaid;
   final DateTime? paidAt;
+  final String? confirmedBy;
+  final String? confirmedDepositId;
 
   /// 이 회원에게만 적용되는 금액. null 이면 이벤트 기본 금액.
   final int? amountOverride;
   final EventMember? member;
 
   bool get hasCustomAmount => amountOverride != null;
+
+  /// 입금 알림으로 자동 확인된 송금인지.
+  bool get isAutoConfirmed =>
+      isPaid && confirmedDepositId != null && confirmedBy == null;
 
   /// 실제로 내야 하는 금액.
   int amountFor(Event event) => amountOverride ?? event.amount;
@@ -181,6 +191,8 @@ class EventPayment {
       userId: userId,
       isPaid: paid,
       paidAt: paid ? (paidAt ?? DateTime.now()) : null,
+      confirmedBy: paid ? confirmedBy : null,
+      confirmedDepositId: paid ? confirmedDepositId : null,
       amountOverride: amountOverride == null
           ? this.amountOverride
           : amountOverride(),

@@ -4,8 +4,8 @@ import '../../../core/supabase/postgrest_ext.dart';
 import '../domain/event.dart';
 
 const _paymentColumns =
-    'id, event_id, user_id, is_paid, paid_at, amount_override, '
-    'member:profiles!event_payments_user_id_fkey(student_id, name)';
+    'id, event_id, user_id, is_paid, paid_at, confirmed_by, confirmed_deposit_id, '
+    'amount_override, member:profiles!event_payments_user_id_fkey(student_id, name)';
 
 class EventRepository {
   EventRepository(this._client);
@@ -66,7 +66,10 @@ class EventRepository {
   Future<Map<String, EventPayment>> fetchMyPayments(String userId) async {
     final rows = await _client
         .from('event_payments')
-        .select('id, event_id, user_id, is_paid, paid_at, amount_override')
+        .select(
+          'id, event_id, user_id, is_paid, paid_at, confirmed_by, '
+          'confirmed_deposit_id, amount_override',
+        )
         .eq('user_id', userId);
     return {
       for (final r in rows) r['event_id'] as String: EventPayment.fromJson(r),

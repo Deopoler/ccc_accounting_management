@@ -29,7 +29,12 @@ import 'package:ccc_accounting_management/features/campus/presentation/admin_cam
 import 'package:ccc_accounting_management/features/campus/presentation/campus_switcher.dart';
 import 'package:ccc_accounting_management/features/campus/domain/campus.dart';
 import 'package:ccc_accounting_management/features/campus/presentation/campus_providers.dart';
+import 'package:ccc_accounting_management/features/deposits/data/deposit_repository.dart';
+import 'package:ccc_accounting_management/features/deposits/domain/bank_deposit.dart';
+import 'package:ccc_accounting_management/features/deposits/presentation/admin_deposits_page.dart';
+import 'package:ccc_accounting_management/features/deposits/presentation/deposit_providers.dart';
 import 'package:ccc_accounting_management/features/events/data/event_repository.dart';
+import 'package:ccc_accounting_management/features/push/presentation/signup_push_card.dart';
 import 'package:ccc_accounting_management/features/events/domain/event.dart';
 import 'package:ccc_accounting_management/features/events/presentation/event_providers.dart';
 import 'package:ccc_accounting_management/features/events/presentation/events_page.dart';
@@ -355,6 +360,67 @@ class _FakeMembers implements MemberRepository {
   dynamic noSuchMethod(Invocation i) => super.noSuchMethod(i);
 }
 
+class _FakeDeposits implements DepositRepository {
+  @override
+  Future<CampusDepositSettings> fetchSettings(String campusId) async =>
+      CampusDepositSettings(
+        campusId: campusId,
+        enabled: true,
+        accountLabel: 'KAIST CCC',
+        tokenPrefix: 'dep_123456',
+        tokenRotatedAt: DateTime(2026, 11, 20, 9, 30),
+        lastReceivedAt: DateTime(2026, 11, 26, 12, 10),
+        lastDepositNotificationAt: DateTime(2026, 11, 26, 12, 5),
+        lastIgnoredAt: DateTime(2026, 11, 26, 11, 50),
+        lastIgnoredReason: 'no_account_label',
+        ignoredCount: 3,
+      );
+
+  @override
+  Future<List<BankDeposit>> fetchDeposits(String campusId) async => [
+    BankDeposit(
+      id: 'd1',
+      campusId: campusId,
+      bankCode: 'toss',
+      status: DepositStatus.ambiguous,
+      depositorName: _longName,
+      amount: 25000,
+      depositedAt: DateTime(2026, 11, 26, 12),
+      receivedAt: DateTime(2026, 11, 26, 12, 1),
+      matchReason: 'same_name_members',
+      candidates: const [
+        DepositCandidate(
+          kind: 'textbook_single',
+          userId: 'u1',
+          orderIds: ['o1'],
+          label: '$_longName 교재 신청',
+          amount: 25000,
+        ),
+      ],
+    ),
+    BankDeposit(
+      id: 'd2',
+      campusId: campusId,
+      bankCode: 'toss',
+      status: DepositStatus.unparsed,
+      depositedAt: DateTime(2026, 11, 26, 11),
+      receivedAt: DateTime(2026, 11, 26, 11, 1),
+      rawTitle: '토스뱅크',
+      rawText: 'KAIST CCC 알 수 없는 알림 형식 테스트 문자열입니다',
+      rawPackage: 'viva.republica.toss',
+      rawExpiresAt: DateTime(2026, 12, 10),
+      matchReason: 'no_amount',
+    ),
+  ];
+
+  @override
+  Future<UnpaidLinkTargets> fetchUnpaidLinkTargets(String campusId) async =>
+      UnpaidLinkTargets.empty;
+
+  @override
+  dynamic noSuchMethod(Invocation i) => super.noSuchMethod(i);
+}
+
 // ---------------------------------------------------------------------------
 // 테스트
 // ---------------------------------------------------------------------------
@@ -386,6 +452,7 @@ final _pages = <(String, Widget, bool)>[
   ('/admin/orders', const AdminOrdersPage(), true),
   ('/admin/events', const AdminEventsPage(), true),
   ('/admin/events/e1', const AdminEventDetailPage(eventId: 'e1'), true),
+  ('/admin/deposits', const AdminDepositsPage(), true),
   ('/admin/settings', const AdminSettingsPage(), true),
   ('/login', const LoginPage(), false),
   ('/signup', const SignupPage(), false),
@@ -417,6 +484,7 @@ List<Override> get _overrides => [
   eventRepositoryProvider.overrideWithValue(_FakeEvents()),
   settingsRepositoryProvider.overrideWithValue(_FakeSettings()),
   memberRepositoryProvider.overrideWithValue(_FakeMembers()),
+  depositRepositoryProvider.overrideWithValue(_FakeDeposits()),
   campusRepositoryProvider.overrideWithValue(_FakeCampuses()),
 ];
 
@@ -657,6 +725,8 @@ void main() {
       expect(tester.widget<FilledButton>(save).onPressed, isNull);
 
       // 달력에서 날짜를 확인하면 바뀐 것으로 보고 저장할 수 있다.
+      await tester.ensureVisible(find.byIcon(Icons.event));
+      await tester.pumpAndSettle();
       await tester.tap(find.byIcon(Icons.event));
       await tester.pumpAndSettle();
       await tester.tap(
@@ -1040,7 +1110,17 @@ void main() {
       expect(tester.widget<Switch>(find.byType(Switch)).value, isFalse);
 
       await pumpPushPage(tester, '/admin/settings', const AdminSettingsPage());
-      expect(tester.widget<Switch>(find.byType(Switch)).value, isFalse);
+      expect(
+        tester
+            .widget<Switch>(
+              find.descendant(
+                of: find.byType(SignupPushCard),
+                matching: find.byType(Switch),
+              ),
+            )
+            .value,
+        isFalse,
+      );
     });
 
     testWidgets('권한 미요청 상태에서 교재 신청 확인 시에만 권한을 묻고 취소 시에는 묻지 않는다', (

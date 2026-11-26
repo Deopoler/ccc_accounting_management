@@ -77,10 +77,12 @@ Deno.serve(async (req) => {
     raw_package: string | null;
   }> = [];
 
+  const nowIso = new Date().toISOString();
+
   if (depositId) {
     const { data: row, error } = await admin
       .from('bank_deposits')
-      .select('id, campus_id, status, deposited_at, raw_title, raw_text, raw_package')
+      .select('id, campus_id, status, deposited_at, raw_title, raw_text, raw_package, raw_expires_at')
       .eq('id', depositId)
       .maybeSingle();
     if (error) return fail(500, `입금 조회 실패: ${error.message}`);
@@ -90,7 +92,8 @@ Deno.serve(async (req) => {
     if (row.status !== 'unparsed') {
       return fail(400, '해석 실패 상태의 입금만 다시 해석할 수 있습니다.');
     }
-    if (!row.raw_text && !row.raw_title) {
+    const expired = !row.raw_expires_at || row.raw_expires_at <= nowIso;
+    if (expired || (!row.raw_text && !row.raw_title)) {
       return fail(400, '원문 보관 기간이 만료되어 다시 해석할 수 없습니다.');
     }
     rows = [row];
@@ -104,6 +107,7 @@ Deno.serve(async (req) => {
       .select('id, campus_id, deposited_at, raw_title, raw_text, raw_package')
       .eq('campus_id', targetCampus)
       .eq('status', 'unparsed')
+      .gt('raw_expires_at', nowIso)
       .not('raw_text', 'is', null)
       .order('received_at', { ascending: true })
       .limit(MAX_BATCH);

@@ -1,20 +1,21 @@
 -- 자동 입금 확인: 캠퍼스 설정, 입금 내역, 자동 매칭/취소/수동 연결, 보관 기간, 푸시 알림.
 
 create table public.campus_deposit_settings (
-  campus_id            uuid primary key references public.campuses (id) on delete cascade,
-  enabled              boolean not null default false,
-  bank_code            text not null default 'toss' check (bank_code in ('toss')),
-  account_label        text not null default '' check (char_length(account_label) <= 50),
-  token_hash           text unique check (token_hash is null or token_hash ~ '^[0-9a-f]{64}$'),
-  token_prefix         text check (token_prefix is null or char_length(token_prefix) <= 20),
-  token_rotated_at     timestamptz,
-  last_received_at     timestamptz,
-  last_ignored_at      timestamptz,
-  last_ignored_reason  text check (last_ignored_reason is null or char_length(last_ignored_reason) <= 50),
-  ignored_count        integer not null default 0 check (ignored_count >= 0),
-  rate_window_start    timestamptz,
-  rate_window_count    integer not null default 0 check (rate_window_count >= 0),
-  updated_at           timestamptz not null default now(),
+  campus_id                     uuid primary key references public.campuses (id) on delete cascade,
+  enabled                       boolean not null default false,
+  bank_code                     text not null default 'toss' check (bank_code in ('toss')),
+  account_label                 text not null default '' check (char_length(account_label) <= 50),
+  token_hash                    text unique check (token_hash is null or token_hash ~ '^[0-9a-f]{64}$'),
+  token_prefix                  text check (token_prefix is null or char_length(token_prefix) <= 20),
+  token_rotated_at              timestamptz,
+  last_received_at              timestamptz,
+  last_deposit_notification_at  timestamptz,
+  last_ignored_at               timestamptz,
+  last_ignored_reason           text check (last_ignored_reason is null or char_length(last_ignored_reason) <= 50),
+  ignored_count                 integer not null default 0 check (ignored_count >= 0),
+  rate_window_start             timestamptz,
+  rate_window_count             integer not null default 0 check (rate_window_count >= 0),
+  updated_at                    timestamptz not null default now(),
   constraint campus_deposit_settings_enabled_requires_label
     check (not enabled or char_length(btrim(account_label)) > 0)
 );
@@ -48,6 +49,9 @@ create table public.bank_deposits (
   undone_by           uuid references public.profiles (id) on delete set null,
   ignored_at          timestamptz,
   ignored_by          uuid references public.profiles (id) on delete set null,
+  duplicate_count     integer not null default 0 check (duplicate_count >= 0),
+  last_duplicate_at   timestamptz,
+  duplicate_of_id     uuid references public.bank_deposits (id) on delete set null,
   created_at          timestamptz not null default now(),
   updated_at          timestamptz not null default now(),
   constraint bank_deposits_campus_dedupe_key unique (campus_id, dedupe_key),
@@ -137,6 +141,29 @@ as $$
     );
 $$;
 
+-- 개인 계좌 알림이 섞이지 않도록 너무 짧거나 일반적인 계좌 별칭을 막는다.
+create function private.validate_deposit_account_label(p_label text)
+returns void
+language plpgsql
+immutable
+set search_path = ''
+as $$
+declare
+  v_norm text := private.normalize_depositor_name(p_label);
+begin
+  if char_length(v_norm) < 4 then
+    raise exception '계좌 별칭은 공백 제외 4자 이상 입력해 주세요.';
+  end if;
+  if v_norm = any (array[
+    '토스', '토스뱅크', '모임', '모임통장', '통장', '입금', '계좌',
+    '내계좌', '내통장', '회비', '회비통장', '동아리', '동아리통장',
+    '은행', 'toss', 'tossbank', 'bank', 'account'
+  ]) then
+    raise exception '너무 일반적인 계좌 별칭은 사용할 수 없습니다. 캠퍼스 이름이 들어가게 입력해 주세요.';
+  end if;
+end;
+$$;
+
 -- 입금 푸시 알림 요청. 알림 실패가 입금 처리를 되돌리지 않는다.
 create function private.notify_deposit_push(p_deposit_id uuid, p_is_new_ingest boolean)
 returns void
@@ -185,7 +212,7 @@ exception when others then
 end;
 $$;
 
--- 한 트랜잭션 안에서 미납 주문/송금을 잠그고 정확히 1건일 때만 자동 확인한다.
+-- 잠금 순서: deposit 행 -> 캠퍼스 매칭 advisory lock -> textbook_orders(id순) -> event_payments(id순).
 create function private.match_and_confirm_deposit(p_deposit_id uuid)
 returns text
 language plpgsql
@@ -202,6 +229,7 @@ declare
   v_cand record;
   v_event_template text;
   v_has_homonym boolean := false;
+  v_updated int := 0;
 begin
   select * into v_deposit from public.bank_deposits where id = p_deposit_id for update;
   if not found then
@@ -225,7 +253,6 @@ begin
     return 'unmatched';
   end if;
 
-  -- 관리자 수동 확인이나 회원 주문 수정과 경합하지 않도록 같은 캠퍼스 미납 행을 고정 순서로 잠근다.
   perform 1 from public.textbook_orders o
   where o.campus_id = v_deposit.campus_id and o.status = 'requested'
   order by o.id
@@ -258,6 +285,7 @@ begin
     where e.campus_id = v_deposit.campus_id
       and not ep.is_paid
       and p.is_approved
+      and p.deactivated_at is null
       and coalesce(ep.amount_override, e.amount) = v_deposit.amount
       and private.depositor_name_matches(
         v_dep_norm,
@@ -286,6 +314,7 @@ begin
       and o.status = 'requested'
       and o.total_price = v_deposit.amount
       and p.is_approved
+      and p.deactivated_at is null
       and private.depositor_name_matches(v_dep_norm, private.normalize_depositor_name(p.name))
 
     union all
@@ -308,6 +337,7 @@ begin
       and o.status = 'requested'
       and o.total_price > 0
       and p.is_approved
+      and p.deactivated_at is null
       and private.depositor_name_matches(v_dep_norm, private.normalize_depositor_name(p.name))
     group by o.user_id, o.round_id, p.name
     having count(*) >= 2 and sum(o.total_price) = v_deposit.amount
@@ -374,7 +404,7 @@ begin
   from jsonb_array_elements(v_snapshot) as x
   limit 1;
 
-  -- 같은 캠퍼스의 다른 활성 승인 회원이 같은 입금자명을 만들 수 있으면 오매칭을 막기 위해 검토로 보낸다.
+  -- 비활성화된 동명이인 회원이 입금했을 가능성까지 고려해 승인된 동명이인이 있으면 검토로 보낸다.
   if v_cand.kind = 'event' then
     select deposit_name into v_event_template from public.events where id = v_cand.event_id;
     select exists (
@@ -382,7 +412,6 @@ begin
       where p2.campus_id = v_deposit.campus_id
         and p2.id <> v_cand.user_id
         and p2.is_approved
-        and p2.deactivated_at is null
         and private.depositor_name_matches(
           v_dep_norm,
           private.normalize_depositor_name(
@@ -396,7 +425,6 @@ begin
       where p2.campus_id = v_deposit.campus_id
         and p2.id <> v_cand.user_id
         and p2.is_approved
-        and p2.deactivated_at is null
         and private.depositor_name_matches(v_dep_norm, private.normalize_depositor_name(p2.name))
     ) into v_has_homonym;
   end if;
@@ -412,20 +440,27 @@ begin
     return 'ambiguous';
   end if;
 
-  perform set_config('app.deposit_rpc', 'match', true);
-
   if v_cand.kind = 'event' then
     update public.event_payments
     set is_paid = true,
         confirmed_deposit_id = v_deposit.id
     where id = v_cand.event_payment_id
       and not is_paid;
+    get diagnostics v_updated = row_count;
+    if v_updated <> 1 then
+      raise exception '이벤트 송금 상태를 업데이트하지 못했습니다 (expected=1, actual=%).', v_updated;
+    end if;
   else
     update public.textbook_orders
     set status = 'paid',
         confirmed_deposit_id = v_deposit.id
     where id = any (v_cand.order_ids)
       and status = 'requested';
+    get diagnostics v_updated = row_count;
+    if v_updated <> cardinality(v_cand.order_ids) then
+      raise exception '교재 신청 상태를 업데이트하지 못했습니다 (expected=%, actual=%).',
+        cardinality(v_cand.order_ids), v_updated;
+    end if;
   end if;
 
   update public.bank_deposits
@@ -440,16 +475,14 @@ begin
 end;
 $$;
 
--- 주문이나 송금을 기존 화면에서 수동으로 미납/취소로 바꾸면 연결된 입금도 함께 정리한다.
+-- 주문이나 송금이 미납/취소 상태로 바뀌면 연결된 입금 참조를 비운다.
 create function private.clear_order_deposit_on_unpay()
 returns trigger
 language plpgsql
 set search_path = ''
 as $$
 begin
-  if old.confirmed_deposit_id is not null
-     and new.status <> 'paid'
-     and current_setting('app.deposit_rpc', true) is distinct from 'undo' then
+  if old.confirmed_deposit_id is not null and new.status <> 'paid' then
     new.confirmed_deposit_id := null;
   end if;
   return new;
@@ -466,9 +499,7 @@ language plpgsql
 set search_path = ''
 as $$
 begin
-  if old.confirmed_deposit_id is not null
-     and not new.is_paid
-     and current_setting('app.deposit_rpc', true) is distinct from 'undo' then
+  if old.confirmed_deposit_id is not null and not new.is_paid then
     new.confirmed_deposit_id := null;
   end if;
   return new;
@@ -479,6 +510,7 @@ create trigger event_payments_clear_deposit_on_unpay
   before update of is_paid on public.event_payments
   for each row execute function private.clear_event_payment_deposit_on_unpay();
 
+-- UPDATE 로 연결이 모두 해제됐을 때만 입금을 undone 처리한다. DELETE(정리/삭제)는 입금 상태를 유지한다.
 create function private.sync_deposit_after_unlink()
 returns trigger
 language plpgsql
@@ -487,12 +519,19 @@ set search_path = ''
 as $$
 declare
   v_deposit_id uuid := old.confirmed_deposit_id;
+  v_status text;
 begin
   if v_deposit_id is null
-     or current_setting('app.deposit_rpc', true) = 'undo' then
+     or new.confirmed_deposit_id is not distinct from old.confirmed_deposit_id then
     return null;
   end if;
-  if tg_op = 'UPDATE' and new.confirmed_deposit_id is not distinct from old.confirmed_deposit_id then
+
+  select status into v_status
+  from public.bank_deposits
+  where id = v_deposit_id
+  for update;
+
+  if not found or v_status not in ('auto_matched', 'manual_matched') then
     return null;
   end if;
 
@@ -504,19 +543,18 @@ begin
         undone_by = auth.uid(),
         matched_at = null,
         matched_by = null
-    where id = v_deposit_id
-      and status in ('auto_matched', 'manual_matched');
+    where id = v_deposit_id;
   end if;
   return null;
 end;
 $$;
 
 create trigger textbook_orders_sync_deposit_unlink
-  after update or delete on public.textbook_orders
+  after update on public.textbook_orders
   for each row execute function private.sync_deposit_after_unlink();
 
 create trigger event_payments_sync_deposit_unlink
-  after update or delete on public.event_payments
+  after update on public.event_payments
   for each row execute function private.sync_deposit_after_unlink();
 
 -- 만료된 원문(14일)을 지운다.
@@ -601,6 +639,7 @@ declare
   v_now timestamptz := now();
   v_deposited_at timestamptz := coalesce(p_deposited_at, v_now);
   v_existing_id uuid;
+  v_near_dup_id uuid;
   v_id uuid;
   v_final_status text;
 begin
@@ -645,7 +684,8 @@ begin
 
   if p_parse_kind = 'ignored' then
     update public.campus_deposit_settings
-    set last_ignored_at = v_now,
+    set last_deposit_notification_at = v_now,
+        last_ignored_at = v_now,
         last_ignored_reason = left(coalesce(nullif(btrim(p_reason), ''), 'ignored'), 50),
         ignored_count = ignored_count + 1
     where campus_id = p_campus_id;
@@ -659,30 +699,38 @@ begin
 
   perform pg_advisory_xact_lock(hashtextextended('deposit_match:' || p_campus_id::text, 0));
 
+  -- 정확히 같은 dedupe_key 재전송만 중복으로 처리하고 원본 행에 횟수와 시각을 남긴다.
   select id into v_existing_id
   from public.bank_deposits
-  where campus_id = p_campus_id and dedupe_key = p_dedupe_key;
+  where campus_id = p_campus_id and dedupe_key = p_dedupe_key
+  for update;
   if found then
+    update public.bank_deposits
+    set duplicate_count = duplicate_count + 1,
+        last_duplicate_at = v_now
+    where id = v_existing_id;
     return query select 'duplicate'::text, v_existing_id;
     return;
   end if;
 
-  select id into v_existing_id
+  update public.campus_deposit_settings
+  set last_deposit_notification_at = v_now
+  where campus_id = p_campus_id;
+
+  -- 60초 안에 같은 원문 해시가 있으면 버리지 않고 새 행을 저장하되 자동 확인은 막는다.
+  select id into v_near_dup_id
   from public.bank_deposits
   where campus_id = p_campus_id
     and raw_hash = p_raw_hash
-    and abs(extract(epoch from deposited_at - v_deposited_at)) <= 15
+    and abs(extract(epoch from deposited_at - v_deposited_at)) <= 60
   order by received_at desc
   limit 1;
-  if found then
-    return query select 'duplicate'::text, v_existing_id;
-    return;
-  end if;
 
   if p_parse_kind = 'unparsed' then
     insert into public.bank_deposits (
       campus_id, dedupe_key, raw_hash, bank_code, status,
-      deposited_at, raw_title, raw_text, raw_package, raw_expires_at, match_reason
+      deposited_at, raw_title, raw_text, raw_package, raw_expires_at,
+      match_reason, duplicate_of_id
     )
     values (
       p_campus_id, p_dedupe_key, p_raw_hash, p_bank_code, 'unparsed',
@@ -691,12 +739,36 @@ begin
       left(coalesce(p_raw_text, ''), 1000),
       left(coalesce(p_raw_package, ''), 100),
       v_now + interval '14 days',
-      left(coalesce(nullif(btrim(p_reason), ''), 'parse_failed'), 100)
+      case
+        when v_near_dup_id is not null then 'possible_duplicate'
+        else left(coalesce(nullif(btrim(p_reason), ''), 'parse_failed'), 100)
+      end,
+      v_near_dup_id
     )
     returning id into v_id;
 
     perform private.notify_deposit_push(v_id, true);
     return query select 'unparsed'::text, v_id;
+    return;
+  end if;
+
+  if v_near_dup_id is not null then
+    insert into public.bank_deposits (
+      campus_id, dedupe_key, raw_hash, bank_code, status,
+      depositor_name, amount, deposited_at, match_reason, duplicate_of_id
+    )
+    values (
+      p_campus_id, p_dedupe_key, p_raw_hash, p_bank_code, 'ambiguous',
+      left(btrim(coalesce(p_depositor_name, '')), 100),
+      p_amount,
+      v_deposited_at,
+      'possible_duplicate',
+      v_near_dup_id
+    )
+    returning id into v_id;
+
+    perform private.notify_deposit_push(v_id, true);
+    return query select 'ambiguous'::text, v_id;
     return;
   end if;
 
@@ -712,7 +784,20 @@ begin
   )
   returning id into v_id;
 
-  v_final_status := private.match_and_confirm_deposit(v_id);
+  begin
+    v_final_status := private.match_and_confirm_deposit(v_id);
+  exception when others then
+    raise warning '입금 자동 매칭 오류(%): %', v_id, sqlerrm;
+    update public.bank_deposits
+    set status = 'unmatched',
+        match_reason = 'match_error',
+        candidate_snapshot = null,
+        matched_at = null,
+        matched_by = null
+    where id = v_id;
+    v_final_status := 'unmatched';
+  end;
+
   perform private.notify_deposit_push(v_id, true);
   return query select v_final_status, v_id;
 end;
@@ -780,11 +865,98 @@ begin
       match_reason = null
   where id = p_deposit_id;
 
-  v_final_status := private.match_and_confirm_deposit(p_deposit_id);
+  begin
+    v_final_status := private.match_and_confirm_deposit(p_deposit_id);
+  exception when others then
+    raise warning '재해석 자동 매칭 오류(%): %', p_deposit_id, sqlerrm;
+    update public.bank_deposits
+    set status = 'unmatched',
+        match_reason = 'match_error',
+        candidate_snapshot = null,
+        matched_at = null,
+        matched_by = null
+    where id = p_deposit_id;
+    v_final_status := 'unmatched';
+  end;
+
   if v_final_status = 'auto_matched' then
     perform private.notify_deposit_push(p_deposit_id, false);
   end if;
   return query select v_final_status, p_deposit_id;
+end;
+$$;
+
+-- 관리자 조회 RPC: raw_expires_at 이 지난 원문은 정리가 돌기 전이라도 노출하지 않는다.
+create function public.admin_list_bank_deposits(p_campus_id uuid, p_limit integer default 500)
+returns table (
+  id uuid,
+  campus_id uuid,
+  bank_code text,
+  status text,
+  depositor_name text,
+  amount integer,
+  deposited_at timestamptz,
+  received_at timestamptz,
+  raw_title text,
+  raw_text text,
+  raw_package text,
+  raw_expires_at timestamptz,
+  match_reason text,
+  candidate_snapshot jsonb,
+  matched_at timestamptz,
+  matched_by uuid,
+  undone_at timestamptz,
+  undone_by uuid,
+  ignored_at timestamptz,
+  ignored_by uuid,
+  duplicate_count integer,
+  last_duplicate_at timestamptz,
+  duplicate_of_id uuid
+)
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+declare
+  v_limit int := greatest(1, least(coalesce(p_limit, 500), 1000));
+begin
+  if private.can_admin_campus(p_campus_id) is not true then
+    raise exception '입금 내역을 조회할 권한이 없습니다.';
+  end if;
+
+  return query
+  select
+    d.id,
+    d.campus_id,
+    d.bank_code,
+    d.status,
+    d.depositor_name,
+    d.amount,
+    d.deposited_at,
+    d.received_at,
+    case when d.raw_expires_at is not null and d.raw_expires_at > now() then d.raw_title else null end,
+    case when d.raw_expires_at is not null and d.raw_expires_at > now() then d.raw_text else null end,
+    case when d.raw_expires_at is not null and d.raw_expires_at > now() then d.raw_package else null end,
+    d.raw_expires_at,
+    case
+      when d.status = 'unparsed' and d.raw_expires_at is not null and d.raw_expires_at <= now() then 'raw_expired'
+      else d.match_reason
+    end,
+    d.candidate_snapshot,
+    d.matched_at,
+    d.matched_by,
+    d.undone_at,
+    d.undone_by,
+    d.ignored_at,
+    d.ignored_by,
+    d.duplicate_count,
+    d.last_duplicate_at,
+    d.duplicate_of_id
+  from public.bank_deposits d
+  where d.campus_id = p_campus_id
+  order by d.received_at desc
+  limit v_limit;
 end;
 $$;
 
@@ -817,6 +989,9 @@ begin
   end if;
   if p_enabled and v_label = '' then
     raise exception '계좌 별칭을 먼저 입력해 주세요.';
+  end if;
+  if v_label <> '' then
+    perform private.validate_deposit_account_label(v_label);
   end if;
 
   insert into public.campus_deposit_settings (campus_id, enabled, bank_code, account_label)
@@ -864,7 +1039,7 @@ set search_path = ''
 as $$
 declare
   v_deposit public.bank_deposits;
-  v_payment public.event_payments;
+  v_payment_is_paid boolean;
   v_event_campus uuid;
 begin
   select * into v_deposit from public.bank_deposits where id = p_deposit_id for update;
@@ -877,8 +1052,8 @@ begin
     raise exception '연결할 수 없는 입금 상태입니다.';
   end if;
 
-  select ep.*, e.campus_id into v_payment.id, v_payment.event_id, v_payment.user_id, v_payment.is_paid,
-    v_payment.paid_at, v_payment.confirmed_by, v_payment.amount_override, v_payment.confirmed_deposit_id, v_event_campus
+  select ep.is_paid, e.campus_id
+  into v_payment_is_paid, v_event_campus
   from public.event_payments ep
   join public.events e on e.id = ep.event_id
   where ep.id = p_event_payment_id
@@ -887,7 +1062,7 @@ begin
   if not found or v_event_campus <> v_deposit.campus_id then
     raise exception '이벤트 송금 대상을 찾을 수 없습니다.';
   end if;
-  if v_payment.is_paid then
+  if v_payment_is_paid then
     raise exception '이미 송금 확인된 대상입니다.';
   end if;
 
@@ -989,7 +1164,14 @@ begin
     raise exception '확인 완료된 입금만 취소할 수 있습니다.';
   end if;
 
-  perform set_config('app.deposit_rpc', 'undo', true);
+  -- 먼저 deposit 을 undone 으로 바꿔 후속 주문/송금 UPDATE 의 sync 트리거가 중복 갱신하지 않게 한다.
+  update public.bank_deposits
+  set status = 'undone',
+      undone_at = now(),
+      undone_by = auth.uid(),
+      matched_at = null,
+      matched_by = null
+  where id = p_deposit_id;
 
   perform 1 from public.textbook_orders
   where confirmed_deposit_id = p_deposit_id
@@ -1010,14 +1192,6 @@ begin
   set is_paid = false,
       confirmed_deposit_id = null
   where confirmed_deposit_id = p_deposit_id;
-
-  update public.bank_deposits
-  set status = 'undone',
-      undone_at = now(),
-      undone_by = auth.uid(),
-      matched_at = null,
-      matched_by = null
-  where id = p_deposit_id;
 end;
 $$;
 
@@ -1098,7 +1272,7 @@ begin
 end;
 $$;
 
--- RLS 및 권한: 관리자는 자기 캠퍼스만 조회, 쓰기는 RPC 로만 허용. token_hash 는 관리자도 읽지 못한다.
+-- RLS 및 권한: raw_* 컬럼과 token_hash 는 직접 SELECT 를 막고, 원문은 만료 검사를 거치는 RPC 로만 노출한다.
 alter table public.campus_deposit_settings enable row level security;
 alter table public.bank_deposits enable row level security;
 
@@ -1127,6 +1301,7 @@ grant select (
   token_prefix,
   token_rotated_at,
   last_received_at,
+  last_deposit_notification_at,
   last_ignored_at,
   last_ignored_reason,
   ignored_count,
@@ -1134,12 +1309,36 @@ grant select (
 ) on public.campus_deposit_settings to authenticated;
 
 revoke all on public.bank_deposits from anon, authenticated;
-grant select on public.bank_deposits to authenticated;
+grant select (
+  id,
+  campus_id,
+  bank_code,
+  status,
+  depositor_name,
+  amount,
+  deposited_at,
+  received_at,
+  raw_expires_at,
+  match_reason,
+  candidate_snapshot,
+  matched_at,
+  matched_by,
+  undone_at,
+  undone_by,
+  ignored_at,
+  ignored_by,
+  duplicate_count,
+  last_duplicate_at,
+  duplicate_of_id,
+  created_at,
+  updated_at
+) on public.bank_deposits to authenticated;
 
 revoke execute on function
   private.render_event_deposit_name(text, text, text),
   private.normalize_depositor_name(text),
   private.depositor_name_matches(text, text),
+  private.validate_deposit_account_label(text),
   private.notify_deposit_push(uuid, boolean),
   private.match_and_confirm_deposit(uuid),
   private.clear_order_deposit_on_unpay(),
@@ -1158,6 +1357,7 @@ grant execute on function
 to service_role;
 
 revoke execute on function
+  public.admin_list_bank_deposits(uuid, integer),
   public.admin_update_deposit_settings(uuid, boolean, text, text),
   public.admin_rotate_deposit_token(uuid),
   public.admin_link_deposit_to_event(uuid, uuid),
@@ -1168,6 +1368,7 @@ revoke execute on function
 from public, anon;
 
 grant execute on function
+  public.admin_list_bank_deposits(uuid, integer),
   public.admin_update_deposit_settings(uuid, boolean, text, text),
   public.admin_rotate_deposit_token(uuid),
   public.admin_link_deposit_to_event(uuid, uuid),

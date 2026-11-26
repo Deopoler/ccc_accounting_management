@@ -75,10 +75,21 @@ class TextbookOrder {
     this.shippedAt,
     this.receivedAt,
     this.receivedBy,
+    this.confirmedDepositId,
+    this.isAutoConfirmed = false,
   });
 
   factory TextbookOrder.fromJson(Map<String, dynamic> json) {
     final profile = json['profiles'] as Map<String, dynamic>?;
+    final deposit = json['bank_deposits'] as Map<String, dynamic>?;
+    final status = OrderStatus.parse(json['status'] as String);
+    final confirmedDepositId = json['confirmed_deposit_id'] as String?;
+    final autoConfirmed =
+        status == OrderStatus.paid &&
+        confirmedDepositId != null &&
+        deposit != null &&
+        deposit['status'] == 'auto_matched' &&
+        deposit['matched_by'] == null;
     final items =
         (json['textbook_order_items'] as List<dynamic>? ?? const [])
             .cast<Map<String, dynamic>>()
@@ -92,7 +103,7 @@ class TextbookOrder {
       round: json['order_rounds'] == null
           ? null
           : OrderRound.fromJson(json['order_rounds'] as Map<String, dynamic>),
-      status: OrderStatus.parse(json['status'] as String),
+      status: status,
       totalPrice: json['total_price'] as int,
       createdAt: DateTime.parse(json['created_at'] as String),
       items: items,
@@ -100,6 +111,8 @@ class TextbookOrder {
       shippedAt: _parseTime(json['shipped_at']),
       receivedAt: _parseTime(json['received_at']),
       receivedBy: json['received_by'] as String?,
+      confirmedDepositId: confirmedDepositId,
+      isAutoConfirmed: autoConfirmed,
       member: profile == null
           ? null
           : OrderMember(
@@ -130,6 +143,11 @@ class TextbookOrder {
 
   /// 수령을 체크한 사람 (회원 본인 또는 관리자).
   final String? receivedBy;
+
+  final String? confirmedDepositId;
+
+  /// 입금 알림으로 자동 확인된 신청인지.
+  final bool isAutoConfirmed;
 
   /// 회원 본인이 아니라 관리자가 수령 처리했는지.
   bool get receivedByAdmin =>
@@ -163,21 +181,27 @@ class TextbookOrder {
     DateTime? Function()? shippedAt,
     DateTime? Function()? receivedAt,
     String? Function()? receivedBy,
-  }) => TextbookOrder(
-    id: id,
-    userId: userId,
-    roundId: round?.id ?? roundId,
-    round: round ?? this.round,
-    status: status ?? this.status,
-    totalPrice: totalPrice,
-    createdAt: createdAt,
-    items: items,
-    member: member,
-    isShipped: isShipped ?? this.isShipped,
-    shippedAt: shippedAt == null ? this.shippedAt : shippedAt(),
-    receivedAt: receivedAt == null ? this.receivedAt : receivedAt(),
-    receivedBy: receivedBy == null ? this.receivedBy : receivedBy(),
-  );
+  }) {
+    final nextStatus = status ?? this.status;
+    final clearedDeposit = nextStatus != OrderStatus.paid;
+    return TextbookOrder(
+      id: id,
+      userId: userId,
+      roundId: round?.id ?? roundId,
+      round: round ?? this.round,
+      status: nextStatus,
+      totalPrice: totalPrice,
+      createdAt: createdAt,
+      items: items,
+      member: member,
+      isShipped: isShipped ?? this.isShipped,
+      shippedAt: shippedAt == null ? this.shippedAt : shippedAt(),
+      receivedAt: receivedAt == null ? this.receivedAt : receivedAt(),
+      receivedBy: receivedBy == null ? this.receivedBy : receivedBy(),
+      confirmedDepositId: clearedDeposit ? null : confirmedDepositId,
+      isAutoConfirmed: clearedDeposit ? false : isAutoConfirmed,
+    );
+  }
 }
 
 DateTime? _parseTime(Object? value) =>

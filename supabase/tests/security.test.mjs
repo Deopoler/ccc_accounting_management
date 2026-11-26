@@ -74,6 +74,7 @@ describe('스키마 회귀 검사', () => {
       'public.admin_ignore_deposit',
       'public.admin_link_deposit_to_event',
       'public.admin_link_deposit_to_orders',
+      'public.admin_list_bank_deposits',
       'public.admin_move_textbook_order',
       'public.admin_rematch_deposit',
       'public.admin_rotate_deposit_token',

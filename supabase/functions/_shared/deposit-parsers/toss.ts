@@ -3,31 +3,6 @@ import type { BankParser, ParseResult, ParserConfig, RawNotification } from './t
 const MAX_AMOUNT = 100_000_000;
 const ARROWS = /(?:->|→|➜|➡|▶)/;
 
-const AD_KEYWORDS = [
-  '(광고)',
-  '[광고]',
-  '광고',
-  '혜택',
-  '캐시백',
-  '쿠폰',
-  '포인트 적립',
-  '이벤트 안내',
-];
-
-const WITHDRAWAL_KEYWORDS = [
-  '출금',
-  '결제',
-  '승인',
-  '보냈어요',
-  '송금했어요',
-  '이체 완료',
-  '이체완료',
-  '자동이체',
-  '카드',
-  '취소',
-  '환불',
-];
-
 const GENERIC_NON_NAMES = new Set([
   '토스',
   '토스뱅크',
@@ -62,7 +37,6 @@ function buildFlexibleLabelPattern(label: string): string {
 
 function cleanDepositorCandidate(raw: string): string {
   let s = raw.normalize('NFC').trim();
-  // Remove leading app/bank tags, deposit markers, or amounts on the same line.
   let prev = '';
   while (s !== prev) {
     prev = s;
@@ -74,8 +48,7 @@ function cleanDepositorCandidate(raw: string): string {
       .replace(/\s*[:：·\-•|]+$/, '')
       .trim();
   }
-  s = s.replace(/\s+/g, ' ').trim();
-  return s;
+  return s.replace(/\s+/g, ' ').trim();
 }
 
 function isValidDepositorName(name: string): boolean {
@@ -86,12 +59,55 @@ function isValidDepositorName(name: string): boolean {
   return true;
 }
 
-function extractAmount(combined: string): { ok: true; amount: number } | { ok: false; reason: string; ignored?: boolean } {
-  const withoutBalance = combined.replace(/잔액\s*[\d,]+\s*원/g, '');
-  if (/-\s*(?:\d{1,3}(?:,\d{3})+|\d+)\s*원/.test(withoutBalance)) {
-    return { ok: false, reason: 'withdrawal', ignored: true };
+// Structural withdrawal / outgoing checks only: never ignore on keywords inside depositor names or memos.
+function detectStructuralWithdrawal(
+  title: string,
+  combined: string,
+  label: string,
+): string | null {
+  const compactLabel = compactLower(label);
+  const labelPattern = buildFlexibleLabelPattern(label);
+
+  if (/^(?:\(광고\)|\[광고\])/.test(title) || /^(?:\(광고\)|\[광고\])/.test(combined)) {
+    return 'ad';
   }
 
+  for (const line of combined.split('\n')) {
+    if (!ARROWS.test(line)) continue;
+    const [left, right = ''] = line.split(ARROWS);
+    if (compactLower(left).includes(compactLabel) && !compactLower(right).includes(compactLabel)) {
+      return 'outgoing_transfer';
+    }
+  }
+
+  if (
+    /^(?:\[[^\]]{1,20}\]\s*)?(?:토스(?:뱅크)?\s*)?(?:출금|결제|승인|자동이체|카드\s*결제|체크카드\s*결제|이체\s*완료|송금\s*완료)(?:\s|$|[\d,]+원)/.test(
+      title,
+    )
+  ) {
+    return 'withdrawal';
+  }
+
+  const labelOutRe = new RegExp(
+    `(?:내\\s*)?${labelPattern}(?:\\s*(?:계좌|통장))?(?:에서)?\\s*(?:[\\d,]+\\s*원\\s*)?(?:출금|결제|이체\\s*완료|보냈어요|송금했어요)`,
+    'i',
+  );
+  if (labelOutRe.test(combined)) {
+    return 'withdrawal';
+  }
+
+  const withoutBalance = combined.replace(/잔액\s*[\d,]+\s*원/g, '');
+  if (/-\s*(?:\d{1,3}(?:,\d{3})+|\d+)\s*원/.test(withoutBalance)) {
+    return 'withdrawal';
+  }
+
+  return null;
+}
+
+function extractAmount(
+  combined: string,
+): { ok: true; amount: number } | { ok: false; reason: string } {
+  const withoutBalance = combined.replace(/잔액\s*[\d,]+\s*원/g, '');
   const amounts = new Set<number>();
   const re = /(\d{1,3}(?:,\d{3})+|\d+)\s*원/g;
   let match: RegExpExecArray | null;
@@ -116,7 +132,7 @@ function extractDepositorName(combined: string, accountLabel: string): string | 
   const lines = combined.split('\n').map((l) => l.trim()).filter(Boolean);
   const labelPattern = buildFlexibleLabelPattern(accountLabel);
 
-  // Pattern 1: "<depositor> -> 내 <accountLabel>" (primary expected Toss format).
+  // Pattern 1: "<depositor> -> 내 <accountLabel>"
   const arrowRe = new RegExp(
     `^(.*?)\\s*(?:->|→|➜|➡|▶)\\s*(?:내\\s*)?${labelPattern}(?:\\s|$|\\b|계좌|통장|모임)`,
     'i',
@@ -130,7 +146,7 @@ function extractDepositorName(combined: string, accountLabel: string): string | 
   }
 
   if (combined.includes('입금')) {
-    // Pattern 2: "<depositor>님이 ... 입금".
+    // Pattern 2: "<depositor>님이 ... 입금"
     for (const line of lines) {
       const m = line.match(/^(.{1,60}?)\s*님이(?:\s|$)/);
       if (m) {
@@ -139,7 +155,7 @@ function extractDepositorName(combined: string, accountLabel: string): string | 
       }
     }
 
-    // Pattern 3: "[<accountLabel>] <depositor> 10,000원 입금" or "<accountLabel> 입금 10,000원 <depositor>".
+    // Pattern 3: "[<accountLabel>] <depositor> 10,000원 입금" or "<accountLabel> 입금 10,000원 <depositor>"
     const labelStripRe = new RegExp(`(?:내\\s*)?${labelPattern}(?:\\s*(?:계좌|통장))?`, 'gi');
     for (const line of lines) {
       const stripped = line
@@ -179,36 +195,20 @@ export const tossParser: BankParser = {
       return { kind: 'ignored', reason: 'empty' };
     }
 
+    // Account-label privacy gate runs first before any structural withdrawal/ad checks.
     const compact = compactLower(combined);
-
-    if (AD_KEYWORDS.some((kw) => compact.includes(compactLower(kw)))) {
-      return { kind: 'ignored', reason: 'ad' };
-    }
-
-    if (WITHDRAWAL_KEYWORDS.some((kw) => compact.includes(compactLower(kw)))) {
-      return { kind: 'ignored', reason: 'withdrawal' };
-    }
-
-    // Privacy gate: drop notifications that do not mention the configured campus account label.
     const compactLabel = compactLower(label);
     if (!compact.includes(compactLabel)) {
       return { kind: 'ignored', reason: 'no_account_label' };
     }
 
-    // Reject outgoing transfers where the campus account appears before the arrow.
-    for (const line of combined.split('\n')) {
-      if (!ARROWS.test(line)) continue;
-      const [left, right = ''] = line.split(ARROWS);
-      if (compactLower(left).includes(compactLabel) && !compactLower(right).includes(compactLabel)) {
-        return { kind: 'ignored', reason: 'outgoing_transfer' };
-      }
+    const structuralIgnore = detectStructuralWithdrawal(title, combined, label);
+    if (structuralIgnore !== null) {
+      return { kind: 'ignored', reason: structuralIgnore };
     }
 
     const amountResult = extractAmount(combined);
     if (!amountResult.ok) {
-      if (amountResult.ignored) {
-        return { kind: 'ignored', reason: amountResult.reason };
-      }
       return { kind: 'unparsed', reason: amountResult.reason };
     }
 

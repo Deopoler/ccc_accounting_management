@@ -22,6 +22,7 @@ abstract final class AppRoutes {
   static const adminOrders = '/admin/orders';
   static const adminEvents = '/admin/events';
   static String adminEventDetail(String eventId) => '/admin/events/$eventId';
+  static const adminDeposits = '/admin/deposits';
   static const adminSettings = '/admin/settings';
   static const adminCampuses = '/admin/campuses';
   static const adminFeedback = '/admin/feedback';
@@ -95,6 +96,12 @@ const adminDestinations = <NavDestination>[
     label: '이벤트 관리',
     icon: Icons.event_note_outlined,
     selectedIcon: Icons.event_note,
+  ),
+  NavDestination(
+    path: AppRoutes.adminDeposits,
+    label: '입금 내역',
+    icon: Icons.account_balance_wallet_outlined,
+    selectedIcon: Icons.account_balance_wallet,
   ),
   NavDestination(
     path: AppRoutes.adminSettings,

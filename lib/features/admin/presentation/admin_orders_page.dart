@@ -1114,10 +1114,23 @@ class _OrdersList extends StatelessWidget {
                               ),
                               DataCell(Text(formatShortDateTime(o.createdAt))),
                               DataCell(
-                                _PaidCheckbox(
-                                  order: o,
-                                  enabled: !busy.contains(o.id),
-                                  onStatus: onStatus,
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    _PaidCheckbox(
+                                      order: o,
+                                      enabled: !busy.contains(o.id),
+                                      onStatus: onStatus,
+                                    ),
+                                    if (o.isAutoConfirmed)
+                                      Text(
+                                        '자동 확인',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: context.colors.textSecondary,
+                                        ),
+                                      ),
+                                  ],
                                 ),
                               ),
                               DataCell(
@@ -1273,7 +1286,9 @@ class _OrderCard extends StatelessWidget {
                           style: theme.textTheme.bodySmall,
                         ),
                       ),
-                      const Text('입금확인'),
+                      Text(
+                        order.isAutoConfirmed ? '입금확인 (자동 확인)' : '입금확인',
+                      ),
                       _PaidCheckbox(
                         order: order,
                         enabled: enabled,

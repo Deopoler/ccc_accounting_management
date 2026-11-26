@@ -1,4 +1,5 @@
 import { parseDepositNotification } from './index.ts';
+import { computeDedupeHashes, parseIngestTimestamp } from './ingest_utils.ts';
 
 function assertDeepEqual(actual: unknown, expected: unknown): void {
   const a = JSON.stringify(actual);
@@ -8,7 +9,13 @@ function assertDeepEqual(actual: unknown, expected: unknown): void {
   }
 }
 
-const assert = { deepEqual: assertDeepEqual };
+function assertNotEqual(actual: unknown, expected: unknown): void {
+  if (actual === expected) {
+    throw new Error(`Expected values to differ, both were: ${JSON.stringify(actual)}`);
+  }
+}
+
+const assert = { deepEqual: assertDeepEqual, notEqual: assertNotEqual };
 
 const KAIST_CONFIG = { accountLabel: 'KAIST CCC' };
 
@@ -74,19 +81,25 @@ Deno.test('toss: NFD Korean input and flexible label spacing', () => {
   assert.deepEqual(res, { kind: 'deposit', depositorName: '홍길동', amount: 5000 });
 });
 
-Deno.test('toss: ignores personal account notifications without campus label', () => {
-  const res = parseDepositNotification(
-    'toss',
-    raw('입금 50,000원', '엄마 -> 내 토스뱅크 통장'),
-    KAIST_CONFIG,
+Deno.test('toss: account-label gate runs first even on withdrawal or ad notifications', () => {
+  assert.deepEqual(
+    parseDepositNotification('toss', raw('입금 50,000원', '엄마 -> 내 토스뱅크 통장'), KAIST_CONFIG),
+    { kind: 'ignored', reason: 'no_account_label' },
   );
-  assert.deepEqual(res, { kind: 'ignored', reason: 'no_account_label' });
+  assert.deepEqual(
+    parseDepositNotification('toss', raw('출금 10,000원', '내 토스뱅크 -> 홍길동'), KAIST_CONFIG),
+    { kind: 'ignored', reason: 'no_account_label' },
+  );
+  assert.deepEqual(
+    parseDepositNotification('toss', raw('(광고) 토스뱅크', '혜택을 확인하세요'), KAIST_CONFIG),
+    { kind: 'ignored', reason: 'no_account_label' },
+  );
 });
 
-Deno.test('toss: ignores withdrawals, card approvals, and ads', () => {
+Deno.test('toss: structural withdrawals, outgoing transfers, and ad prefix are ignored when label matches', () => {
   assert.deepEqual(
     parseDepositNotification('toss', raw('출금 10,000원', '내 KAIST CCC -> 홍길동'), KAIST_CONFIG),
-    { kind: 'ignored', reason: 'withdrawal' },
+    { kind: 'ignored', reason: 'outgoing_transfer' },
   );
   assert.deepEqual(
     parseDepositNotification('toss', raw('결제 승인', 'KAIST CCC 체크카드 4,500원'), KAIST_CONFIG),
@@ -102,43 +115,97 @@ Deno.test('toss: ignores withdrawals, card approvals, and ads', () => {
   );
 });
 
+Deno.test('toss: keywords inside depositor name or memo are NOT dropped on label-matching notifications', () => {
+  assert.deepEqual(
+    parseDepositNotification('toss', raw('입금 10,000원', '홍길동카드취소 -> 내 KAIST CCC'), KAIST_CONFIG),
+    { kind: 'deposit', depositorName: '홍길동카드취소', amount: 10000 },
+  );
+  assert.deepEqual(
+    parseDepositNotification('toss', raw('입금 10,000원', '김광고혜택 -> 내 KAIST CCC'), KAIST_CONFIG),
+    { kind: 'deposit', depositorName: '김광고혜택', amount: 10000 },
+  );
+  assert.deepEqual(
+    parseDepositNotification('toss', raw('입금 10,000원', '이출금 -> 내 KAIST CCC'), KAIST_CONFIG),
+    { kind: 'deposit', depositorName: '이출금', amount: 10000 },
+  );
+  // Unrecognized format with keyword + campus label becomes unparsed (not silently ignored).
+  assert.deepEqual(
+    parseDepositNotification('toss', raw('토스뱅크', 'KAIST CCC 환불 안내 10,000원'), KAIST_CONFIG),
+    { kind: 'unparsed', reason: 'no_depositor' },
+  );
+});
+
 Deno.test('toss: returns unparsed when campus label matches but layout is unknown', () => {
-  const noAmount = parseDepositNotification(
-    'toss',
-    raw('토스뱅크', 'KAIST CCC 계좌에 새 알림이 도착했습니다'),
-    KAIST_CONFIG,
+  assert.deepEqual(
+    parseDepositNotification('toss', raw('토스뱅크', 'KAIST CCC 계좌에 새 알림이 도착했습니다'), KAIST_CONFIG),
+    { kind: 'unparsed', reason: 'no_amount' },
   );
-  assert.deepEqual(noAmount, { kind: 'unparsed', reason: 'no_amount' });
-
-  const noDepositor = parseDepositNotification(
-    'toss',
-    raw('KAIST CCC', '10,000원이 도착했어요'),
-    KAIST_CONFIG,
+  assert.deepEqual(
+    parseDepositNotification('toss', raw('KAIST CCC', '10,000원이 도착했어요'), KAIST_CONFIG),
+    { kind: 'unparsed', reason: 'no_depositor' },
   );
-  assert.deepEqual(noDepositor, { kind: 'unparsed', reason: 'no_depositor' });
-
-  const multiAmount = parseDepositNotification(
-    'toss',
-    raw('입금 10,000원', '홍길동 -> 내 KAIST CCC 수수료 500원'),
-    KAIST_CONFIG,
+  assert.deepEqual(
+    parseDepositNotification('toss', raw('입금 10,000원', '홍길동 -> 내 KAIST CCC 수수료 500원'), KAIST_CONFIG),
+    { kind: 'unparsed', reason: 'multiple_amounts' },
   );
-  assert.deepEqual(multiAmount, { kind: 'unparsed', reason: 'multiple_amounts' });
 });
 
 Deno.test('toss: ignores when accountLabel config is empty', () => {
-  const res = parseDepositNotification(
-    'toss',
-    raw('입금 10,000원', '홍길동 -> 내 KAIST CCC'),
-    { accountLabel: '   ' },
+  assert.deepEqual(
+    parseDepositNotification('toss', raw('입금 10,000원', '홍길동 -> 내 KAIST CCC'), { accountLabel: '   ' }),
+    { kind: 'ignored', reason: 'config_missing_label' },
   );
-  assert.deepEqual(res, { kind: 'ignored', reason: 'config_missing_label' });
 });
 
 Deno.test('registry: unsupported bank code returns unparsed', () => {
-  const res = parseDepositNotification(
-    'unknown_bank',
-    raw('입금 10,000원', '홍길동 -> 내 KAIST CCC'),
-    KAIST_CONFIG,
+  assert.deepEqual(
+    parseDepositNotification('unknown_bank', raw('입금 10,000원', '홍길동 -> 내 KAIST CCC'), KAIST_CONFIG),
+    { kind: 'unparsed', reason: 'unsupported_bank' },
   );
-  assert.deepEqual(res, { kind: 'unparsed', reason: 'unsupported_bank' });
+});
+
+Deno.test('ingest_utils: offset-less timestamp strings are interpreted as Asia/Seoul (+09:00)', () => {
+  const now = new Date('2026-11-26T06:00:00Z');
+  const a = parseIngestTimestamp('2026-11-26 14:30:05', now);
+  assert.deepEqual(a.supplied, true);
+  assert.deepEqual(a.date.toISOString(), '2026-11-26T05:30:05.000Z');
+
+  const b = parseIngestTimestamp('2026-11-26T14:30', now);
+  assert.deepEqual(b.supplied, true);
+  assert.deepEqual(b.date.toISOString(), '2026-11-26T05:30:00.000Z');
+
+  const missing = parseIngestTimestamp(undefined, now);
+  assert.deepEqual(missing.supplied, false);
+  assert.deepEqual(missing.date.toISOString(), now.toISOString());
+});
+
+Deno.test('ingest_utils: external_id reuse with different notification produces a distinct dedupe_key', async () => {
+  const ts = new Date('2026-11-26T05:30:05Z');
+  const first = await computeDedupeHashes({
+    appPackage: 'viva.republica.toss',
+    title: '입금 10,000원',
+    text: '홍길동 -> 내 KAIST CCC',
+    externalId: 'notif-42',
+    depositedAt: ts,
+    tsSupplied: true,
+  });
+  const exactRetry = await computeDedupeHashes({
+    appPackage: 'viva.republica.toss',
+    title: '입금 10,000원',
+    text: '홍길동 -> 내 KAIST CCC',
+    externalId: 'notif-42',
+    depositedAt: ts,
+    tsSupplied: true,
+  });
+  const reusedIdDifferentNotif = await computeDedupeHashes({
+    appPackage: 'viva.republica.toss',
+    title: '입금 20,000원',
+    text: '김철수 -> 내 KAIST CCC',
+    externalId: 'notif-42',
+    depositedAt: ts,
+    tsSupplied: true,
+  });
+
+  assert.deepEqual(first.dedupeKey, exactRetry.dedupeKey);
+  assert.notEqual(first.dedupeKey, reusedIdDifferentNotif.dedupeKey);
 });

@@ -3,14 +3,18 @@
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { parseDepositNotification } from '../_shared/deposit-parsers/index.ts';
+import {
+  computeDedupeHashes,
+  normalizeForHash,
+  parseIngestTimestamp,
+  sha256Hex,
+} from '../_shared/deposit-parsers/ingest_utils.ts';
 
 const MAX_BODY_BYTES = 8 * 1024;
 const MAX_TITLE_LEN = 300;
 const MAX_TEXT_LEN = 1000;
 const MAX_PACKAGE_LEN = 100;
 const MAX_EXTERNAL_ID_LEN = 128;
-const MAX_FUTURE_SKEW_MS = 5 * 60 * 1000;
-const MIN_VALID_TS_MS = Date.UTC(2020, 0, 1);
 
 const AUTH_FAIL_WINDOW_MS = 60 * 1000;
 const AUTH_FAIL_LIMIT = 20;
@@ -31,14 +35,6 @@ function json(status: number, body: Record<string, unknown>): Response {
 
 const fail = (status: number, error: string) => json(status, { ok: false, error });
 
-async function sha256Hex(input: string): Promise<string> {
-  const bytes = new TextEncoder().encode(input);
-  const digest = await crypto.subtle.digest('SHA-256', bytes);
-  return Array.from(new Uint8Array(digest))
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
-}
-
 function getClientIp(req: Request): string {
   const forwarded = req.headers.get('x-forwarded-for');
   if (forwarded) return forwarded.split(',')[0].trim();
@@ -55,7 +51,7 @@ function isAuthRateLimited(ip: string, nowMs: number): boolean {
   return recent.length >= AUTH_FAIL_LIMIT;
 }
 
-function recordAuthFailure(ip: string, nowMs: number): void {
+function recordAuthFailure(ip: string, nowMs: number): boolean {
   const recent = (authFailuresByIp.get(ip) ?? []).filter((t) => nowMs - t < AUTH_FAIL_WINDOW_MS);
   recent.push(nowMs);
   authFailuresByIp.set(ip, recent);
@@ -66,35 +62,49 @@ function recordAuthFailure(ip: string, nowMs: number): void {
       }
     }
   }
+  return recent.length > AUTH_FAIL_LIMIT;
 }
 
-function parseTimestamp(raw: unknown, now: Date): { date: Date; supplied: boolean } {
-  if (raw === undefined || raw === null || raw === '') {
-    return { date: now, supplied: false };
+async function readBodyWithLimit(
+  req: Request,
+  maxBytes: number,
+): Promise<{ ok: true; text: string } | { ok: false; status: number; error: string }> {
+  const contentLength = Number(req.headers.get('content-length') ?? '0');
+  if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+    return { ok: false, status: 413, error: '요청 크기가 제한을 초과했습니다.' };
   }
 
-  let ms: number | null = null;
-  if (typeof raw === 'number' && Number.isFinite(raw)) {
-    ms = raw >= 1e12 ? raw : raw >= 1e9 ? raw * 1000 : null;
-  } else if (typeof raw === 'string') {
-    const trimmed = raw.trim();
-    if (/^\d+$/.test(trimmed)) {
-      const n = Number(trimmed);
-      ms = n >= 1e12 ? n : n >= 1e9 ? n * 1000 : null;
-    } else {
-      const parsed = Date.parse(trimmed);
-      if (!Number.isNaN(parsed)) ms = parsed;
+  const stream = req.body;
+  if (!stream) return { ok: true, text: '' };
+
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel();
+        return { ok: false, status: 413, error: '요청 크기가 제한을 초과했습니다.' };
+      }
+      chunks.push(value);
     }
+  } catch {
+    return { ok: false, status: 400, error: '요청 본문을 읽을 수 없습니다.' };
+  } finally {
+    reader.releaseLock();
   }
 
-  if (ms === null || ms < MIN_VALID_TS_MS || ms > now.getTime() + MAX_FUTURE_SKEW_MS) {
-    return { date: now, supplied: false };
+  const merged = new Uint8Array(total);
+  let offset = 0;
+  for (const c of chunks) {
+    merged.set(c, offset);
+    offset += c.byteLength;
   }
-  return { date: new Date(ms), supplied: true };
-}
-
-function normalizeForHash(input: string): string {
-  return input.normalize('NFC').replace(/\r\n?/g, '\n').trim();
+  return { ok: true, text: new TextDecoder().decode(merged) };
 }
 
 Deno.serve(async (req) => {
@@ -103,40 +113,14 @@ Deno.serve(async (req) => {
 
   const now = new Date();
   const ip = getClientIp(req);
-  if (isAuthRateLimited(ip, now.getTime())) {
-    return fail(429, '요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.');
-  }
 
+  // Verify the token before reading the request body; valid tokens are never blocked by per-IP auth limits.
   const token = req.headers.get('x-deposit-token')?.trim() ?? '';
   if (!token || token.length > 200) {
-    recordAuthFailure(ip, now.getTime());
-    return fail(401, '인증 토큰이 필요합니다.');
-  }
-
-  const contentLength = Number(req.headers.get('content-length') ?? '0');
-  if (Number.isFinite(contentLength) && contentLength > MAX_BODY_BYTES) {
-    return fail(413, '요청 크기가 제한을 초과했습니다.');
-  }
-
-  let rawBytes: ArrayBuffer;
-  try {
-    rawBytes = await req.arrayBuffer();
-  } catch {
-    return fail(400, '요청 본문을 읽을 수 없습니다.');
-  }
-  if (rawBytes.byteLength > MAX_BODY_BYTES) {
-    return fail(413, '요청 크기가 제한을 초과했습니다.');
-  }
-
-  let body: Record<string, unknown>;
-  try {
-    const parsed = JSON.parse(new TextDecoder().decode(rawBytes));
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return fail(400, '요청 형식이 올바르지 않습니다.');
+    if (isAuthRateLimited(ip, now.getTime()) || recordAuthFailure(ip, now.getTime())) {
+      return fail(429, '요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.');
     }
-    body = parsed as Record<string, unknown>;
-  } catch {
-    return fail(400, 'JSON 형식이 올바르지 않습니다.');
+    return fail(401, '인증 토큰이 필요합니다.');
   }
 
   const url = Deno.env.get('SUPABASE_URL');
@@ -156,11 +140,27 @@ Deno.serve(async (req) => {
 
   if (settingsError) return fail(500, '설정을 확인하지 못했습니다.');
   if (!settings) {
-    recordAuthFailure(ip, now.getTime());
+    if (isAuthRateLimited(ip, now.getTime()) || recordAuthFailure(ip, now.getTime())) {
+      return fail(429, '요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.');
+    }
     return fail(401, '유효하지 않은 토큰입니다.');
   }
   if (!settings.enabled || !settings.account_label?.trim()) {
     return fail(403, '자동 입금 확인이 비활성화되어 있습니다.');
+  }
+
+  const bodyResult = await readBodyWithLimit(req, MAX_BODY_BYTES);
+  if (!bodyResult.ok) return fail(bodyResult.status, bodyResult.error);
+
+  let body: Record<string, unknown>;
+  try {
+    const parsed = JSON.parse(bodyResult.text);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return fail(400, '요청 형식이 올바르지 않습니다.');
+    }
+    body = parsed as Record<string, unknown>;
+  } catch {
+    return fail(400, 'JSON 형식이 올바르지 않습니다.');
   }
 
   if (body.ping === true) {
@@ -188,15 +188,15 @@ Deno.serve(async (req) => {
   if (appPackage.length > MAX_PACKAGE_LEN) return fail(400, 'app_package 길이가 제한을 초과했습니다.');
   if (externalId.length > MAX_EXTERNAL_ID_LEN) return fail(400, 'external_id 길이가 제한을 초과했습니다.');
 
-  const { date: depositedAt, supplied: tsSupplied } = parseTimestamp(body.timestamp, now);
-  const normTitle = normalizeForHash(title);
-  const normText = normalizeForHash(text);
-  const rawHash = await sha256Hex(`${appPackage}|${normTitle}|${normText}`);
-  const dedupeKey = externalId
-    ? await sha256Hex(`ext:${externalId}`)
-    : tsSupplied
-      ? await sha256Hex(`raw:${appPackage}|${normTitle}|${normText}|${Math.floor(depositedAt.getTime() / 1000)}`)
-      : await sha256Hex(`raw:${appPackage}|${normTitle}|${normText}|b:${Math.floor(now.getTime() / 30_000)}`);
+  const { date: depositedAt, supplied: tsSupplied } = parseIngestTimestamp(body.timestamp, now);
+  const { rawHash, dedupeKey } = await computeDedupeHashes({
+    appPackage,
+    title,
+    text,
+    externalId,
+    depositedAt,
+    tsSupplied,
+  });
 
   const parsed = parseDepositNotification(
     settings.bank_code,
@@ -217,8 +217,8 @@ Deno.serve(async (req) => {
     rpcParams.p_depositor_name = parsed.depositorName;
     rpcParams.p_amount = parsed.amount;
   } else if (parsed.kind === 'unparsed') {
-    rpcParams.p_raw_title = normTitle;
-    rpcParams.p_raw_text = normText;
+    rpcParams.p_raw_title = normalizeForHash(title);
+    rpcParams.p_raw_text = normalizeForHash(text);
     rpcParams.p_raw_package = appPackage;
     rpcParams.p_reason = parsed.reason;
   } else {

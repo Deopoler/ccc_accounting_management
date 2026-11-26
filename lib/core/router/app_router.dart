@@ -14,6 +14,7 @@ import '../../features/auth/presentation/login_page.dart';
 import '../../features/auth/presentation/pending_approval_page.dart';
 import '../../features/auth/presentation/signup_page.dart';
 import '../../features/auth/presentation/splash_page.dart';
+import '../../features/deposits/presentation/admin_deposits_page.dart';
 import '../../features/events/presentation/events_page.dart';
 import '../../features/feedback/presentation/admin_feedback_page.dart';
 import '../../features/home/presentation/home_page.dart';
@@ -126,6 +127,7 @@ final routerProvider = Provider<GoRouter>((ref) {
                   ),
                 ],
               ),
+              _tab('deposits', const AdminDepositsPage()),
               _tab('settings', const AdminSettingsPage()),
               _tab('campuses', const AdminCampusesPage()),
               _tab('feedback', const AdminFeedbackPage()),
