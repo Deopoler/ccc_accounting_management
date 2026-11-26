@@ -191,6 +191,7 @@ class _NewCampusDialogState extends State<_NewCampusDialog> {
           child: Form(
             key: _formKey,
             child: SingleChildScrollView(
+              padding: const EdgeInsets.only(top: 6),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
