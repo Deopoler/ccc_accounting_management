@@ -413,7 +413,7 @@ class _PendingSection extends StatelessWidget {
             else ...[
               Text(
                 '학번과 이름이 실제 회원과 일치하는지 확인한 뒤 승인해 주세요. '
-                '승인하면 신규 가입자 자동 추가가 켜진 이벤트에만 송금 대상으로 추가됩니다. 다른 이벤트는 이벤트 관리에서 직접 추가해 주세요.',
+                '승인한 회원은 신규 가입자 자동 추가가 켜진 이벤트에만 송금 대상으로 들어갑니다. 다른 이벤트에는 이벤트 관리에서 직접 넣어 주세요.',
                 style: theme.textTheme.bodySmall,
               ),
               CheckboxListTile(

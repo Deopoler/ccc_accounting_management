@@ -267,9 +267,9 @@ class _EventFormDialogState extends State<_EventFormDialog> {
                 const SizedBox(height: 8),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
-                  title: const Text('새로 가입한 회원을 자동으로 송금 대상에 추가'),
+                  title: const Text('새로 가입한 회원을 송금 대상에 자동 추가'),
                   subtitle: const Text(
-                    '가입 승인된 같은 캠퍼스 회원이 마감 전까지 자동으로 추가됩니다.',
+                    '마감일까지 가입이 승인된 같은 캠퍼스 회원을 넣습니다. 이미 가입한 회원은 넣지 않습니다.',
                   ),
                   value: _autoEnroll,
                   onChanged: (v) => setState(() => _autoEnroll = v),
