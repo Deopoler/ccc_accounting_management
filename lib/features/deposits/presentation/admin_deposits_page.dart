@@ -31,6 +31,7 @@ class _AdminDepositsPageState extends ConsumerState<AdminDepositsPage> {
   List<BankDeposit> _extraItems = [];
   bool _loadingMore = false;
   bool _reachedEnd = false;
+  int _loadGeneration = 0;
 
   @override
   void dispose() {
@@ -45,6 +46,7 @@ class _AdminDepositsPageState extends ConsumerState<AdminDepositsPage> {
       _extraItems = [];
       _reachedEnd = false;
       _loadingMore = false;
+      _loadGeneration++;
     });
   }
 
@@ -53,6 +55,7 @@ class _AdminDepositsPageState extends ConsumerState<AdminDepositsPage> {
       _extraItems = [];
       _reachedEnd = false;
       _loadingMore = false;
+      _loadGeneration++;
     });
     ref
       ..invalidate(bankDepositsProvider)
@@ -66,6 +69,7 @@ class _AdminDepositsPageState extends ConsumerState<AdminDepositsPage> {
   Future<void> _loadMore(List<BankDeposit> loaded) async {
     if (_loadingMore || _reachedEnd) return;
     final filter = _filter;
+    final generation = _loadGeneration;
     setState(() => _loadingMore = true);
     try {
       final campusId = await ref.requireAdminCampusId();
@@ -77,7 +81,9 @@ class _AdminDepositsPageState extends ConsumerState<AdminDepositsPage> {
             limit: depositPageSize,
             offset: loaded.length,
           );
-      if (!mounted || _filter != filter) return;
+      if (!mounted || generation != _loadGeneration || _filter != filter) {
+        return;
+      }
       final seen = {for (final d in loaded) d.id};
       final added = next.where((d) => seen.add(d.id)).toList();
       setState(() {
@@ -87,9 +93,11 @@ class _AdminDepositsPageState extends ConsumerState<AdminDepositsPage> {
         }
       });
     } catch (e) {
-      if (mounted) showErrorSnack(context, e);
+      if (mounted && generation == _loadGeneration) showErrorSnack(context, e);
     } finally {
-      if (mounted) setState(() => _loadingMore = false);
+      if (mounted && generation == _loadGeneration) {
+        setState(() => _loadingMore = false);
+      }
     }
   }
 
@@ -296,35 +304,38 @@ class _AdminDepositsPageState extends ConsumerState<AdminDepositsPage> {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.colors;
     ref.listen<AsyncValue<String?>>(adminCampusIdProvider, (prev, next) {
       if (prev?.asData?.value != next.asData?.value) {
         setState(() {
           _extraItems = [];
           _reachedEnd = false;
           _loadingMore = false;
+          _loadGeneration++;
         });
       }
     });
 
     final depositsAsync = ref.watch(bankDepositsProvider(_filter));
     final countsAsync = ref.watch(depositCountsProvider);
-    final counts = countsAsync.asData?.value ?? DepositCounts.empty;
+    final counts = countsAsync.asData?.value;
 
     return AsyncValueView<List<BankDeposit>>(
       value: depositsAsync,
       onRetry: _refreshAll,
       data: (firstPage) {
         final loaded = [...firstPage, ..._extraItems];
-        final totalInFilter = counts.countFor(_filter);
+        final totalInFilter = counts?.countFor(_filter);
         final hasMore =
             !_reachedEnd &&
             firstPage.length >= depositPageSize &&
-            loaded.length < totalInFilter;
+            (totalInFilter == null || loaded.length < totalInFilter);
         final visible = loaded
             .where((d) => _matchesSearch(d, _search.text))
             .toList();
-        final unparsedWithRawCount = counts.unparsedWithRaw;
-        final isEmptyCampus = counts.all == 0 && loaded.isEmpty;
+        final unparsedWithRawCount = counts?.unparsedWithRaw ?? 0;
+        final isEmptyCampus =
+            counts != null && counts.all == 0 && loaded.isEmpty;
 
         return ListView(
           children: [
@@ -333,13 +344,45 @@ class _AdminDepositsPageState extends ConsumerState<AdminDepositsPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  if (countsAsync.hasError) ...[
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(Icons.error_outline, size: 18, color: c.error),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                '상태별 건수를 불러오지 못했습니다.',
+                                style: TextStyle(fontSize: 13, color: c.error),
+                              ),
+                            ),
+                            TextButton(
+                              onPressed: () =>
+                                  ref.invalidate(depositCountsProvider),
+                              child: const Text('다시 시도'),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                  ],
                   Wrap(
                     spacing: 8,
                     runSpacing: 8,
                     children: [
                       for (final f in DepositFilter.values)
                         ChoiceChip(
-                          label: Text('${f.label} ${counts.countFor(f)}'),
+                          label: Text(
+                            counts == null
+                                ? f.label
+                                : '${f.label} ${counts.countFor(f)}',
+                          ),
                           selected: _filter == f,
                           onSelected: (_) => _selectFilter(f),
                         ),
@@ -414,6 +457,8 @@ class _AdminDepositsPageState extends ConsumerState<AdminDepositsPage> {
                       message: _filter == DepositFilter.needsReview &&
                               _search.text.trim().isEmpty
                           ? '확인이 필요한 입금이 없습니다.'
+                          : hasMore
+                          ? '불러온 ${loaded.length}건 중 조건에 맞는 입금 내역이 없습니다.'
                           : '조건에 맞는 입금 내역이 없습니다.',
                     )
                   else
@@ -422,6 +467,7 @@ class _AdminDepositsPageState extends ConsumerState<AdminDepositsPage> {
                       children: [
                         SectionTitle(
                           _search.text.trim().isEmpty &&
+                                  totalInFilter != null &&
                                   totalInFilter > loaded.length
                               ? '입금 ${visible.length} / $totalInFilter건'
                               : '입금 ${visible.length}건',
@@ -440,23 +486,25 @@ class _AdminDepositsPageState extends ConsumerState<AdminDepositsPage> {
                           ),
                           const SizedBox(height: 10),
                         ],
-                        if (hasMore) ...[
-                          const SizedBox(height: 4),
-                          Center(
-                            child: OutlinedButton(
-                              onPressed: _loadingMore
-                                  ? null
-                                  : () => _loadMore(loaded),
-                              child: Text(
-                                _loadingMore
-                                    ? '불러오는 중...'
-                                    : '더 보기 (${loaded.length} / $totalInFilter)',
-                              ),
-                            ),
-                          ),
-                        ],
                       ],
                     ),
+                  if (hasMore) ...[
+                    const SizedBox(height: 4),
+                    Center(
+                      child: OutlinedButton(
+                        onPressed: _loadingMore
+                            ? null
+                            : () => _loadMore(loaded),
+                        child: Text(
+                          _loadingMore
+                              ? '불러오는 중...'
+                              : totalInFilter != null
+                              ? '더 보기 (${loaded.length} / $totalInFilter)'
+                              : '더 보기',
+                        ),
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -720,17 +768,37 @@ class _LinkDepositDialogState extends ConsumerState<_LinkDepositDialog> {
     }
   }
 
-  void _pickCandidate(DepositCandidate cand) {
+  int _freshCandidateAmount(DepositCandidate cand, UnpaidLinkTargets targets) {
+    if (cand.isEvent) {
+      for (final p in targets.eventPayments) {
+        if (p.paymentId == cand.eventPaymentId) return p.amount;
+      }
+      return cand.amount;
+    }
+    final wanted = cand.orderIds.toSet();
+    var matchedCount = 0;
+    var sum = 0;
+    for (final o in targets.orders) {
+      if (wanted.contains(o.orderId)) {
+        matchedCount++;
+        sum += o.amount;
+      }
+    }
+    return matchedCount == wanted.length ? sum : cand.amount;
+  }
+
+  void _pickCandidate(DepositCandidate cand, UnpaidLinkTargets targets) {
     if (!cand.isLinkable) return;
+    final amount = _freshCandidateAmount(cand, targets);
     if (cand.isEvent) {
       Navigator.pop(
         context,
-        _EventLinkSelection(cand.eventPaymentId!, targetAmount: cand.amount),
+        _EventLinkSelection(cand.eventPaymentId!, targetAmount: amount),
       );
     } else {
       Navigator.pop(
         context,
-        _OrdersLinkSelection(cand.orderIds, targetAmount: cand.amount),
+        _OrdersLinkSelection(cand.orderIds, targetAmount: amount),
       );
     }
   }
@@ -833,7 +901,14 @@ class _LinkDepositDialogState extends ConsumerState<_LinkDepositDialog> {
                                   style: theme.textTheme.bodyMedium,
                                 ),
                                 Text(
-                                  formatWon(cand.amount),
+                                  formatWon(
+                                    loadedTargets == null
+                                        ? cand.amount
+                                        : _freshCandidateAmount(
+                                            cand,
+                                            loadedTargets,
+                                          ),
+                                  ),
                                   style: theme.textTheme.bodySmall,
                                 ),
                               ],
@@ -841,7 +916,9 @@ class _LinkDepositDialogState extends ConsumerState<_LinkDepositDialog> {
                           ),
                           const SizedBox(width: 8),
                           OutlinedButton(
-                            onPressed: () => _pickCandidate(cand),
+                            onPressed: loadedTargets == null
+                                ? null
+                                : () => _pickCandidate(cand, loadedTargets),
                             child: const Text('연결'),
                           ),
                         ],

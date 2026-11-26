@@ -1,4 +1,6 @@
 // 자동 입금 확인: 도메인 파싱, 라우트 접근, 입금 내역 화면, 캠퍼스 설정 카드, 자동 확인 표시.
+import 'dart:async';
+
 import 'package:ccc_accounting_management/core/router/auth_guard.dart';
 import 'package:ccc_accounting_management/core/router/routes.dart';
 import 'package:ccc_accounting_management/core/theme/app_theme.dart';
@@ -41,14 +43,15 @@ Profile _profile(UserRole role) => Profile(
   createdAt: DateTime(2026),
 );
 
-String? _go(String location, Profile profile) => authRedirect(
-  (signedIn: true, profile: profile),
-  Uri.parse(location),
-);
+String? _go(String location, Profile profile) =>
+    authRedirect((signedIn: true, profile: profile), Uri.parse(location));
 
 class _FakeDepositRepo implements DepositRepository {
   final calls = <String>[];
   Object? fetchError;
+  Object? countsError;
+  Completer<DepositCounts>? pendingCounts;
+  Completer<List<BankDeposit>>? pendingLoadMore;
   CampusDepositSettings settings = CampusDepositSettings(
     campusId: 'k',
     enabled: true,
@@ -177,6 +180,9 @@ class _FakeDepositRepo implements DepositRepository {
   }) async {
     if (fetchError != null) throw fetchError!;
     calls.add('fetchDeposits ${filter.dbGroup} limit=$limit offset=$offset');
+    if (offset > 0 && pendingLoadMore != null) {
+      return pendingLoadMore!.future;
+    }
     return deposits
         .where((d) => filter.matches(d.status))
         .skip(offset)
@@ -186,7 +192,9 @@ class _FakeDepositRepo implements DepositRepository {
 
   @override
   Future<DepositCounts> fetchDepositCounts(String campusId) async {
+    if (countsError != null) throw countsError!;
     if (fetchError != null) throw fetchError!;
+    if (pendingCounts != null) return pendingCounts!.future;
     return DepositCounts(
       needsReview: deposits
           .where((d) => DepositFilter.needsReview.matches(d.status))
@@ -253,10 +261,7 @@ class _FakeDepositRepo implements DepositRepository {
   }) async {
     calls.add('reparse deposit=$depositId campus=$campusId');
     return [
-      (
-        depositId: depositId ?? 'd-unp',
-        status: DepositStatus.autoMatched,
-      ),
+      (depositId: depositId ?? 'd-unp', status: DepositStatus.autoMatched),
     ];
   }
 
@@ -400,8 +405,14 @@ void main() {
     });
 
     test('DepositFilter 는 검토 필요(unmatched+ambiguous+unparsed)와 각 상태를 분류한다', () {
-      expect(DepositFilter.needsReview.matches(DepositStatus.unmatched), isTrue);
-      expect(DepositFilter.needsReview.matches(DepositStatus.ambiguous), isTrue);
+      expect(
+        DepositFilter.needsReview.matches(DepositStatus.unmatched),
+        isTrue,
+      );
+      expect(
+        DepositFilter.needsReview.matches(DepositStatus.ambiguous),
+        isTrue,
+      );
       expect(DepositFilter.needsReview.matches(DepositStatus.unparsed), isTrue);
       expect(
         DepositFilter.needsReview.matches(DepositStatus.autoMatched),
@@ -439,22 +450,10 @@ void main() {
         depositReasonLabel('match_error'),
         '자동 매칭 중 오류가 발생해 수동 확인이 필요합니다.',
       );
-      expect(
-        validateDepositAccountLabel('CCC', enabled: true),
-        isNotNull,
-      );
-      expect(
-        validateDepositAccountLabel('모임통장', enabled: true),
-        isNotNull,
-      );
-      expect(
-        validateDepositAccountLabel('KAIST CCC', enabled: true),
-        isNull,
-      );
-      expect(
-        validateDepositAccountLabel('', enabled: false),
-        isNull,
-      );
+      expect(validateDepositAccountLabel('CCC', enabled: true), isNotNull);
+      expect(validateDepositAccountLabel('모임통장', enabled: true), isNotNull);
+      expect(validateDepositAccountLabel('KAIST CCC', enabled: true), isNull);
+      expect(validateDepositAccountLabel('', enabled: false), isNull);
       expect(
         depositIngestUrl('https://abc.supabase.co/'),
         'https://abc.supabase.co/functions/v1/deposit-ingest',
@@ -553,7 +552,10 @@ void main() {
         'bank_deposits': {'status': 'auto_matched', 'matched_by': null},
       });
       expect(autoOrder.isAutoConfirmed, isTrue);
-      expect(autoOrder.copyWith(status: OrderStatus.requested).isAutoConfirmed, isFalse);
+      expect(
+        autoOrder.copyWith(status: OrderStatus.requested).isAutoConfirmed,
+        isFalse,
+      );
 
       final manualOrder = TextbookOrder.fromJson({
         'id': 'o2',
@@ -613,9 +615,7 @@ void main() {
   });
 
   group('AdminDepositsPage (375px)', () {
-    testWidgets('기본 검토 필요 필터, 원문 표시, 재해석, 수동 연결, 확인 취소, 무시 동작', (
-      tester,
-    ) async {
+    testWidgets('기본 검토 필요 필터, 원문 표시, 재해석, 수동 연결, 확인 취소, 무시 동작', (tester) async {
       final repo = _FakeDepositRepo();
       await _pump(tester, const AdminDepositsPage(), depositRepo: repo);
 
@@ -735,12 +735,18 @@ void main() {
               status: DepositStatus.unmatched,
               depositorName: '입금자$i',
               amount: 10000,
-              depositedAt: DateTime(2026, 11, 26, 12).subtract(
-                Duration(minutes: i),
-              ),
-              receivedAt: DateTime(2026, 11, 26, 12).subtract(
-                Duration(minutes: i),
-              ),
+              depositedAt: DateTime(
+                2026,
+                11,
+                26,
+                12,
+              ).subtract(Duration(minutes: i)),
+              receivedAt: DateTime(
+                2026,
+                11,
+                26,
+                12,
+              ).subtract(Duration(minutes: i)),
               matchReason: 'no_candidate',
             ),
         ];
@@ -765,6 +771,181 @@ void main() {
       );
       expect(find.text('입금자54'), findsOneWidget);
       expect(find.textContaining('더 보기'), findsNothing);
+    });
+
+    testWidgets('검색 결과가 첫 페이지에 없어도 더 보기가 유지되어 이전 항목을 불러올 수 있다', (tester) async {
+      final repo = _FakeDepositRepo()
+        ..deposits = [
+          for (var i = 0; i < 55; i++)
+            BankDeposit(
+              id: 'd-$i',
+              campusId: 'k',
+              bankCode: 'toss',
+              status: DepositStatus.unmatched,
+              depositorName: '입금자$i',
+              amount: 10000,
+              depositedAt: DateTime(
+                2026,
+                11,
+                26,
+                12,
+              ).subtract(Duration(minutes: i)),
+              receivedAt: DateTime(
+                2026,
+                11,
+                26,
+                12,
+              ).subtract(Duration(minutes: i)),
+              matchReason: 'no_candidate',
+            ),
+        ];
+      await _pump(tester, const AdminDepositsPage(), depositRepo: repo);
+
+      await tester.enterText(find.byType(TextField), '입금자54');
+      await tester.pumpAndSettle();
+      // 검색창(EditableText)이 아닌 목록 행의 Text 만 센다.
+      final row54 = find.byWidgetPredicate(
+        (w) => w is Text && w.data == '입금자54',
+      );
+
+      expect(row54, findsNothing);
+      final loadMoreBtn = find.widgetWithText(OutlinedButton, '더 보기 (50 / 55)');
+      expect(loadMoreBtn, findsOneWidget);
+
+      await tester.tap(loadMoreBtn);
+      await tester.pumpAndSettle();
+      expect(row54, findsOneWidget);
+    });
+
+    testWidgets('새로고침 후 늦게 도착한 이전 더 보기 응답은 무시한다', (tester) async {
+      final completer = Completer<List<BankDeposit>>();
+      final repo = _FakeDepositRepo()
+        ..pendingLoadMore = completer
+        ..deposits = [
+          for (var i = 0; i < 55; i++)
+            BankDeposit(
+              id: 'd-$i',
+              campusId: 'k',
+              bankCode: 'toss',
+              status: DepositStatus.unmatched,
+              depositorName: '입금자$i',
+              amount: 10000,
+              depositedAt: DateTime(
+                2026,
+                11,
+                26,
+                12,
+              ).subtract(Duration(minutes: i)),
+              receivedAt: DateTime(
+                2026,
+                11,
+                26,
+                12,
+              ).subtract(Duration(minutes: i)),
+              matchReason: 'no_candidate',
+            ),
+        ];
+      await _pump(tester, const AdminDepositsPage(), depositRepo: repo);
+
+      final loadMoreBtn = find.widgetWithText(OutlinedButton, '더 보기 (50 / 55)');
+      await tester.scrollUntilVisible(
+        loadMoreBtn,
+        600,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.ensureVisible(loadMoreBtn);
+      await tester.pumpAndSettle();
+      await tester.tap(loadMoreBtn);
+      await tester.pump();
+
+      final refreshBtn = find.text('새로고침');
+      await tester.scrollUntilVisible(
+        refreshBtn,
+        -600,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.ensureVisible(refreshBtn);
+      await tester.pumpAndSettle();
+      await tester.tap(refreshBtn);
+      await tester.pumpAndSettle();
+
+      completer.complete([
+        BankDeposit(
+          id: 'd-stale',
+          campusId: 'k',
+          bankCode: 'toss',
+          status: DepositStatus.unmatched,
+          depositorName: '오래된응답',
+          amount: 99000,
+          depositedAt: DateTime(2026, 11, 20),
+          receivedAt: DateTime(2026, 11, 20),
+          matchReason: 'no_candidate',
+        ),
+      ]);
+      await tester.pumpAndSettle();
+
+      expect(find.text('오래된응답'), findsNothing);
+    });
+
+    testWidgets('건수 로딩 중에는 0을 표시하지 않고, 건수 조회 실패 시 오류와 재시도를 표시한다', (
+      tester,
+    ) async {
+      final pending = Completer<DepositCounts>();
+      final loadingRepo = _FakeDepositRepo()..pendingCounts = pending;
+      await _pump(tester, const AdminDepositsPage(), depositRepo: loadingRepo);
+
+      expect(find.text('검토 필요'), findsOneWidget);
+      expect(find.text('검토 필요 0'), findsNothing);
+      pending.complete(const DepositCounts(needsReview: 2, all: 3));
+      await tester.pumpAndSettle();
+      expect(find.text('검토 필요 2'), findsOneWidget);
+
+      final errRepo = _FakeDepositRepo()
+        ..countsError = const AppException('건수 조회 실패');
+      await _pump(tester, const AdminDepositsPage(), depositRepo: errRepo);
+      expect(find.text('상태별 건수를 불러오지 못했습니다.'), findsOneWidget);
+      expect(find.widgetWithText(TextButton, '다시 시도'), findsOneWidget);
+      expect(find.text('검토 필요 0'), findsNothing);
+    });
+
+    testWidgets('추천 후보 연결 시 스냅샷이 아닌 최신 미납 금액으로 금액 불일치를 검사한다', (tester) async {
+      final repo = _FakeDepositRepo()
+        ..targets = UnpaidLinkTargets(
+          orders: [
+            UnpaidOrderTarget(
+              orderId: 'o1',
+              memberName: '홍길동',
+              studentId: '20240001',
+              roundLabel: '11/25',
+              itemsSummary: '교재A ×1',
+              amount: 12000,
+              createdAt: DateTime(2026, 11, 25),
+            ),
+          ],
+          eventPayments: const [],
+        );
+      await _pump(tester, const AdminDepositsPage(), depositRepo: repo);
+
+      final linkBtn = find.widgetWithText(OutlinedButton, '대상 연결');
+      await tester.ensureVisible(linkBtn);
+      await tester.pumpAndSettle();
+      await tester.tap(linkBtn);
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.widgetWithText(OutlinedButton, '연결').first);
+      await tester.pumpAndSettle();
+
+      expect(find.text('금액 불일치 확인'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.textContaining('12,000원'),
+        ),
+        findsOneWidget,
+      );
+      await tester.tap(find.widgetWithText(FilledButton, '금액 달라도 연결'));
+      await tester.pumpAndSettle();
+      expect(repo.calls, contains('linkOrders d-amb o1 mismatch=true'));
     });
 
     testWidgets('빈 상태와 오류 상태를 표시한다', (tester) async {
@@ -825,9 +1006,7 @@ void main() {
   });
 
   group('관리자 화면 자동 확인 표시', () {
-    testWidgets('교재 신청 현황과 이벤트 상세에서 자동 확인된 항목에만 "자동 확인"을 표시한다', (
-      tester,
-    ) async {
+    testWidgets('교재 신청 현황과 이벤트 상세에서 자동 확인된 항목에만 "자동 확인"을 표시한다', (tester) async {
       final round = OrderRound(
         id: 'r1',
         start: DateTime(2026, 11, 25, 9),
@@ -915,10 +1094,7 @@ void main() {
         size: const Size(900, 800),
         eventRepo: _FakeEvents(event, payments),
       );
-      expect(
-        find.textContaining('자동 확인', findRichText: true),
-        findsOneWidget,
-      );
+      expect(find.textContaining('자동 확인', findRichText: true), findsOneWidget);
     });
   });
 }

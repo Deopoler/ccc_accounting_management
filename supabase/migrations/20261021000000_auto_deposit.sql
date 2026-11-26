@@ -839,11 +839,33 @@ security definer
 set search_path = ''
 as $$
 declare
+  v_campus_id uuid;
   v_deposit public.bank_deposits;
   v_final_status text;
 begin
   if p_parse_kind not in ('ignored', 'unparsed', 'deposit') then
     raise exception '올바르지 않은 재해석 결과입니다.';
+  end if;
+
+  if p_parse_kind = 'deposit' then
+    -- 잠금 순서 통일: advisory lock -> textbook_orders(id순) -> event_payments(id순) -> bank_deposits.
+    select campus_id into v_campus_id from public.bank_deposits where id = p_deposit_id;
+    if not found then
+      raise exception '입금 내역을 찾을 수 없습니다.';
+    end if;
+
+    perform pg_advisory_xact_lock(hashtextextended('deposit_match:' || v_campus_id::text, 0));
+
+    perform 1 from public.textbook_orders o
+    where o.campus_id = v_campus_id and o.status = 'requested'
+    order by o.id
+    for update of o;
+
+    perform 1 from public.event_payments ep
+    join public.events e on e.id = ep.event_id
+    where e.campus_id = v_campus_id and not ep.is_paid
+    order by ep.id
+    for update of ep;
   end if;
 
   select * into v_deposit from public.bank_deposits where id = p_deposit_id for update;

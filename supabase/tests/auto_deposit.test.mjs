@@ -948,6 +948,22 @@ describe('보안, RLS, 캠퍼스 격리', () => {
       asUser(db, member, 'select id from public.admin_list_bank_deposits($1)', [kaist]),
       /권한이 없습니다/,
     );
+    await assertRaises(
+      asUser(db, otherAdmin, 'select * from public.admin_count_bank_deposits($1)', [kaist]),
+      /권한이 없습니다/,
+    );
+    await assertRaises(
+      asUser(db, member, 'select * from public.admin_count_bank_deposits($1)', [kaist]),
+      /권한이 없습니다/,
+    );
+    await assertRaises(
+      asUser(db, otherAdmin, 'select public.admin_clear_possible_duplicate($1)', [depositId]),
+      /입금 내역을 찾을 수 없습니다/,
+    );
+    await assertRaises(
+      asUser(db, member, 'select public.admin_clear_possible_duplicate($1)', [depositId]),
+      /입금 내역을 찾을 수 없습니다/,
+    );
     await assertDenied(asAnon(db, 'select id from public.bank_deposits'));
     await assertDenied(asUser(db, kaistAdmin, `update public.bank_deposits set status = 'ignored'`));
     await assertDenied(asUser(db, kaistAdmin, 'delete from public.bank_deposits'));
