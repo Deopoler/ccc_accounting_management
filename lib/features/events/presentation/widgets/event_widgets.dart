@@ -59,7 +59,9 @@ class EventMetaLine extends StatelessWidget {
         if (due != null) ...[
           const SizedBox(height: 2),
           Text(
-            '마감 ${formatDate(due)}${dDay == null ? '' : ' · $dDay'}',
+            dDay == '마감'
+                ? '${formatDate(due)} 마감'
+                : '마감 ${formatDate(due)}${dDay == null ? '' : ' · $dDay'}',
             style: TextStyle(fontSize: 14, color: c.textSecondary),
           ),
         ],
@@ -100,12 +102,14 @@ class PaymentProgress extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 8),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(4),
-          child: LinearProgressIndicator(
-            value: summary.rate,
-            minHeight: 6,
-            backgroundColor: c.surfaceStrong,
+        ExcludeSemantics(
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(
+              value: summary.rate,
+              minHeight: 6,
+              backgroundColor: c.surfaceStrong,
+            ),
           ),
         ),
         const SizedBox(height: 8),

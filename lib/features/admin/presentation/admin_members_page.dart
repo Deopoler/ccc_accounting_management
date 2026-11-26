@@ -220,19 +220,31 @@ class _AdminMembersPageState extends ConsumerState<AdminMembersPage> {
               onReject: _reject,
             ),
             const SizedBox(height: 24),
-            SectionTitle(
-              '회원 ${active.length}명',
-              trailing: SizedBox(
-                width: 220,
-                child: TextField(
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final searchField = TextField(
                   controller: _search,
                   onChanged: (_) => setState(() {}),
                   decoration: const InputDecoration(
                     labelText: '학번 / 이름 검색',
                     prefixIcon: Icon(Icons.search),
                   ),
-                ),
-              ),
+                );
+                if (constraints.maxWidth < 600) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      SectionTitle('회원 ${active.length}명'),
+                      searchField,
+                      const SizedBox(height: 12),
+                    ],
+                  );
+                }
+                return SectionTitle(
+                  '회원 ${active.length}명',
+                  trailing: SizedBox(width: 220, child: searchField),
+                );
+              },
             ),
             if (approved.isEmpty)
               const EmptyView(message: '해당하는 회원이 없습니다.')
@@ -425,31 +437,92 @@ class _PendingSection extends StatelessWidget {
                 title: const Text('전체 선택'),
               ),
               const Divider(height: 1),
-              for (final m in pending)
-                CheckboxListTile(
-                  contentPadding: EdgeInsets.zero,
-                  controlAffinity: ListTileControlAffinity.leading,
-                  value: selected.contains(m.id),
-                  onChanged: busy ? null : (v) => onSelect(m.id, v ?? false),
-                  title: Text('${m.name}  ${m.studentId}'),
-                  subtitle: Text('가입 ${formatDateTime(m.createdAt)}'),
-                  secondary: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      TextButton(
-                        onPressed: busy ? null : () => onReject(m),
-                        style: TextButton.styleFrom(
-                          foregroundColor: theme.colorScheme.error,
+              for (final (i, m) in pending.indexed) ...[
+                if (i > 0) const Divider(height: 1),
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final checkbox = MergeSemantics(
+                      child: Semantics(
+                        label: '${m.name} (${m.studentId}) 선택',
+                        child: Checkbox(
+                          value: selected.contains(m.id),
+                          onChanged: busy
+                              ? null
+                              : (v) => onSelect(m.id, v ?? false),
                         ),
-                        child: const Text('거절'),
                       ),
-                      TextButton(
-                        onPressed: busy ? null : () => onApprove({m.id}),
-                        child: const Text('승인'),
+                    );
+                    final info = Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '${m.name}  ${m.studentId}',
+                          style: theme.textTheme.bodyLarge,
+                        ),
+                        Text(
+                          '가입 ${formatDateTime(m.createdAt)}',
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    );
+                    final rejectButton = TextButton(
+                      onPressed: busy ? null : () => onReject(m),
+                      style: TextButton.styleFrom(
+                        foregroundColor: theme.colorScheme.error,
                       ),
-                    ],
-                  ),
+                      child: Text('거절', semanticsLabel: '${m.name} 거절'),
+                    );
+                    final approveButton = TextButton(
+                      onPressed: busy ? null : () => onApprove({m.id}),
+                      child: Text('승인', semanticsLabel: '${m.name} 승인'),
+                    );
+                    if (constraints.maxWidth < 600) {
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 6),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Row(
+                              children: [
+                                checkbox,
+                                const SizedBox(width: 4),
+                                Expanded(child: info),
+                              ],
+                            ),
+                            Padding(
+                              padding: const EdgeInsets.only(left: 44),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.end,
+                                children: [
+                                  rejectButton,
+                                  const SizedBox(width: 4),
+                                  approveButton,
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    }
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 6),
+                      child: Row(
+                        children: [
+                          checkbox,
+                          const SizedBox(width: 4),
+                          Expanded(child: info),
+                          const SizedBox(width: 8),
+                          rejectButton,
+                          const SizedBox(width: 4),
+                          approveButton,
+                        ],
+                      ),
+                    );
+                  },
                 ),
+              ],
             ],
           ],
         ),

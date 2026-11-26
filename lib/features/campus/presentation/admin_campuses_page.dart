@@ -96,44 +96,50 @@ class AdminCampusesPage extends ConsumerWidget {
             style: TextStyle(fontSize: 13, color: context.colors.textSecondary),
           ),
           const SizedBox(height: 16),
-          Card(
-            clipBehavior: Clip.antiAlias,
-            child: Column(
-              children: [
-                for (final (i, c) in list.indexed) ...[
-                  if (i > 0) const Divider(height: 1),
-                  ListTile(
-                    title: Row(
-                      children: [
-                        Flexible(child: Text(c.name)),
-                        if (c.id == current?.id) ...[
-                          const SizedBox(width: 8),
-                          const AppBadge('관리 중', tone: BadgeTone.accent),
+          if (list.isEmpty)
+            const EmptyView(
+              icon: Icons.school_outlined,
+              message: '등록된 캠퍼스가 없습니다.',
+            )
+          else
+            Card(
+              clipBehavior: Clip.antiAlias,
+              child: Column(
+                children: [
+                  for (final (i, c) in list.indexed) ...[
+                    if (i > 0) const Divider(height: 1),
+                    ListTile(
+                      title: Row(
+                        children: [
+                          Flexible(child: Text(c.name)),
+                          if (c.id == current?.id) ...[
+                            const SizedBox(width: 8),
+                            const AppBadge('관리 중', tone: BadgeTone.accent),
+                          ],
                         ],
-                      ],
+                      ),
+                      subtitle: Text(
+                        '코드 ${c.code} · 로그인 아이디 학번@${c.emailDomain}',
+                      ),
+                      trailing: PopupMenuButton<String>(
+                        tooltip: '더보기',
+                        onSelected: (v) => v == 'manage'
+                            ? _manage(context, ref, c)
+                            : _rename(context, ref, c),
+                        itemBuilder: (_) => const [
+                          PopupMenuItem(
+                            value: 'manage',
+                            child: Text('이 캠퍼스 관리하기'),
+                          ),
+                          PopupMenuItem(value: 'rename', child: Text('이름 변경')),
+                        ],
+                      ),
+                      onTap: () => _manage(context, ref, c),
                     ),
-                    subtitle: Text(
-                      '코드 ${c.code} · 로그인 아이디 학번@${c.emailDomain}',
-                    ),
-                    trailing: PopupMenuButton<String>(
-                      tooltip: '더보기',
-                      onSelected: (v) => v == 'manage'
-                          ? _manage(context, ref, c)
-                          : _rename(context, ref, c),
-                      itemBuilder: (_) => const [
-                        PopupMenuItem(
-                          value: 'manage',
-                          child: Text('이 캠퍼스 관리하기'),
-                        ),
-                        PopupMenuItem(value: 'rename', child: Text('이름 변경')),
-                      ],
-                    ),
-                    onTap: () => _manage(context, ref, c),
-                  ),
+                  ],
                 ],
-              ],
+              ),
             ),
-          ),
         ],
       ),
     );
@@ -170,42 +176,53 @@ class _NewCampusDialogState extends State<_NewCampusDialog> {
   @override
   Widget build(BuildContext context) {
     final code = _code.text.trim().toLowerCase();
+    final availableHeight =
+        MediaQuery.sizeOf(context).height -
+        MediaQuery.viewInsetsOf(context).bottom;
     return AlertDialog(
       title: const Text('캠퍼스 추가'),
-      content: SizedBox(
-        width: 400,
-        child: Form(
-          key: _formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              TextFormField(
-                controller: _name,
-                autofocus: true,
-                decoration: const InputDecoration(labelText: '이름 (예: 서울대)'),
-                validator: (v) {
-                  final t = v?.trim() ?? '';
-                  if (t.isEmpty) return '이름을 입력해 주세요.';
-                  if (t.length > 50) return '이름이 너무 깁니다.';
-                  return null;
-                },
+      content: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: 400,
+          maxHeight: (availableHeight * 0.7).clamp(160.0, 500.0),
+        ),
+        child: SizedBox(
+          width: 400,
+          child: Form(
+            key: _formKey,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  TextFormField(
+                    controller: _name,
+                    autofocus: true,
+                    decoration: const InputDecoration(labelText: '이름 (예: 서울대)'),
+                    validator: (v) {
+                      final t = v?.trim() ?? '';
+                      if (t.isEmpty) return '이름을 입력해 주세요.';
+                      if (t.length > 50) return '이름이 너무 깁니다.';
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  TextFormField(
+                    controller: _code,
+                    decoration: InputDecoration(
+                      labelText: '코드 (예: snu)',
+                      helperText: code.isEmpty || validateCampusCode(code) != null
+                          ? '로그인 아이디에 쓰이며 나중에 바꿀 수 없습니다.'
+                          : '로그인 아이디: 학번@$code.ccc.local (바꿀 수 없음)',
+                      helperMaxLines: 2,
+                    ),
+                    onChanged: (_) => setState(() {}),
+                    onFieldSubmitted: (_) => _submit(),
+                    validator: validateCampusCode,
+                  ),
+                ],
               ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _code,
-                decoration: InputDecoration(
-                  labelText: '코드 (예: snu)',
-                  helperText: code.isEmpty || validateCampusCode(code) != null
-                      ? '로그인 아이디에 쓰이며 나중에 바꿀 수 없습니다.'
-                      : '로그인 아이디: 학번@$code.ccc.local (바꿀 수 없음)',
-                  helperMaxLines: 2,
-                ),
-                onChanged: (_) => setState(() {}),
-                onFieldSubmitted: (_) => _submit(),
-                validator: validateCampusCode,
-              ),
-            ],
+            ),
           ),
         ),
       ),

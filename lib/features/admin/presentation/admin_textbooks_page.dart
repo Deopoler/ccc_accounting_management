@@ -4,6 +4,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../core/utils/formatters.dart';
+import '../../../core/utils/josa.dart';
 import '../../../core/widgets/feedback.dart';
 import '../../../core/widgets/responsive.dart';
 import '../../../core/widgets/state_views.dart';
@@ -211,7 +212,7 @@ class AdminTextbooksPage extends ConsumerWidget {
     final ok = await showConfirmDialog(
       context,
       title: '교재 삭제',
-      message: '"${t.title}"을(를) 삭제하시겠습니까?',
+      message: '${withObject('"${t.title}"')} 삭제하시겠습니까?',
       confirmLabel: '삭제',
       destructive: true,
     );
@@ -287,16 +288,15 @@ class AdminTextbooksPage extends ConsumerWidget {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         IconButton(
-                          tooltip: '위로',
-                          visualDensity: VisualDensity.compact,
+                          tooltip: '${c.name} 위로 이동',
                           onPressed: i == 0
                               ? null
                               : () => _move(context, ref, ordered, i, -1),
                           icon: const Icon(Icons.arrow_upward),
                         ),
+                        const SizedBox(width: 4),
                         IconButton(
-                          tooltip: '아래로',
-                          visualDensity: VisualDensity.compact,
+                          tooltip: '${c.name} 아래로 이동',
                           onPressed: i == ordered.length - 1
                               ? null
                               : () => _move(context, ref, ordered, i, 1),
@@ -430,14 +430,13 @@ class _TextbookRow extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 IconButton(
-                  tooltip: '위로',
-                  visualDensity: VisualDensity.compact,
+                  tooltip: '${t.title} 위로 이동',
                   onPressed: onUp,
                   icon: const Icon(Icons.keyboard_arrow_up),
                 ),
+                const SizedBox(height: 4),
                 IconButton(
-                  tooltip: '아래로',
-                  visualDensity: VisualDensity.compact,
+                  tooltip: '${t.title} 아래로 이동',
                   onPressed: onDown,
                   icon: const Icon(Icons.keyboard_arrow_down),
                 ),
@@ -456,7 +455,12 @@ class _TextbookRow extends StatelessWidget {
             Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Switch(value: t.isActive, onChanged: onToggleActive),
+                MergeSemantics(
+                  child: Semantics(
+                    label: '${t.title} 신청 가능',
+                    child: Switch(value: t.isActive, onChanged: onToggleActive),
+                  ),
+                ),
                 Text(
                   t.isActive ? '신청 가능' : '신청 불가',
                   style: Theme.of(context).textTheme.labelSmall,
@@ -518,23 +522,34 @@ class _NameDialogState extends State<_NameDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final availableHeight =
+        MediaQuery.sizeOf(context).height -
+        MediaQuery.viewInsetsOf(context).bottom;
     return AlertDialog(
       title: Text(widget.title),
-      content: SizedBox(
-        width: 360,
-        child: Form(
-          key: _formKey,
-          child: TextFormField(
-            controller: _name,
-            autofocus: true,
-            decoration: const InputDecoration(labelText: '이름'),
-            validator: (v) {
-              final n = v?.trim() ?? '';
-              if (n.isEmpty) return '이름을 입력해 주세요.';
-              if (n.length > 50) return '50자 이하로 입력해 주세요.';
-              return null;
-            },
-            onFieldSubmitted: (_) => _submit(),
+      content: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: 360,
+          maxHeight: (availableHeight * 0.7).clamp(120.0, 400.0),
+        ),
+        child: SizedBox(
+          width: 360,
+          child: Form(
+            key: _formKey,
+            child: SingleChildScrollView(
+              child: TextFormField(
+                controller: _name,
+                autofocus: true,
+                decoration: const InputDecoration(labelText: '이름'),
+                validator: (v) {
+                  final n = v?.trim() ?? '';
+                  if (n.isEmpty) return '이름을 입력해 주세요.';
+                  if (n.length > 50) return '50자 이하로 입력해 주세요.';
+                  return null;
+                },
+                onFieldSubmitted: (_) => _submit(),
+              ),
+            ),
           ),
         ),
       ),
@@ -619,62 +634,74 @@ class _TextbookFormDialogState extends State<_TextbookFormDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final availableHeight =
+        MediaQuery.sizeOf(context).height -
+        MediaQuery.viewInsetsOf(context).bottom;
     return AlertDialog(
       title: Text(widget.initial == null ? '교재 추가' : '교재 수정'),
-      content: SizedBox(
-        width: 400,
-        child: Form(
-          key: _formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              DropdownButtonFormField<String?>(
-                initialValue: _categoryId,
-                decoration: const InputDecoration(labelText: '카테고리'),
-                items: [
-                  for (final c in widget.categories)
-                    DropdownMenuItem(value: c.id, child: Text(c.name)),
-                  const DropdownMenuItem(
-                    value: null,
-                    child: Text('$uncategorizedName (카테고리 없음)'),
+      content: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: 400,
+          maxHeight: (availableHeight * 0.7).clamp(160.0, 520.0),
+        ),
+        child: SizedBox(
+          width: 400,
+          child: Form(
+            key: _formKey,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  DropdownButtonFormField<String?>(
+                    initialValue: _categoryId,
+                    isExpanded: true,
+                    decoration: const InputDecoration(labelText: '카테고리'),
+                    items: [
+                      for (final c in widget.categories)
+                        DropdownMenuItem(value: c.id, child: Text(c.name)),
+                      const DropdownMenuItem(
+                        value: null,
+                        child: Text('$uncategorizedName (카테고리 없음)'),
+                      ),
+                    ],
+                    onChanged: (v) => setState(() => _categoryId = v),
+                  ),
+                  const SizedBox(height: 16),
+                  TextFormField(
+                    controller: _title,
+                    autofocus: true,
+                    decoration: const InputDecoration(labelText: '교재명'),
+                    validator: (v) =>
+                        (v == null || v.trim().isEmpty) ? '교재명을 입력해 주세요.' : null,
+                  ),
+                  const SizedBox(height: 16),
+                  TextFormField(
+                    controller: _price,
+                    decoration: const InputDecoration(
+                      labelText: '가격',
+                      suffixText: '원',
+                    ),
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    validator: (v) {
+                      final n = int.tryParse(v ?? '');
+                      if (n == null) return '가격을 입력해 주세요.';
+                      if (n > 10000000) return '가격이 너무 큽니다.';
+                      return null;
+                    },
+                    onFieldSubmitted: (_) => _submit(),
+                  ),
+                  const SizedBox(height: 8),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('신청 가능'),
+                    subtitle: const Text('끄면 회원이 이 교재를 신청할 수 없습니다.'),
+                    value: _active,
+                    onChanged: (v) => setState(() => _active = v),
                   ),
                 ],
-                onChanged: (v) => setState(() => _categoryId = v),
               ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _title,
-                autofocus: true,
-                decoration: const InputDecoration(labelText: '교재명'),
-                validator: (v) =>
-                    (v == null || v.trim().isEmpty) ? '교재명을 입력해 주세요.' : null,
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _price,
-                decoration: const InputDecoration(
-                  labelText: '가격',
-                  suffixText: '원',
-                ),
-                keyboardType: TextInputType.number,
-                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                validator: (v) {
-                  final n = int.tryParse(v ?? '');
-                  if (n == null) return '가격을 입력해 주세요.';
-                  if (n > 10000000) return '가격이 너무 큽니다.';
-                  return null;
-                },
-                onFieldSubmitted: (_) => _submit(),
-              ),
-              const SizedBox(height: 8),
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('신청 가능'),
-                subtitle: const Text('끄면 회원이 이 교재를 신청할 수 없습니다.'),
-                value: _active,
-                onChanged: (v) => setState(() => _active = v),
-              ),
-            ],
+            ),
           ),
         ),
       ),

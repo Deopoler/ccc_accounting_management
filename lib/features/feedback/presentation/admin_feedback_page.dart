@@ -150,9 +150,14 @@ class _FeedbackCard extends StatelessWidget {
                   style: TextStyle(fontSize: 13, color: c.textSecondary),
                 ),
                 const SizedBox(width: 8),
-                Switch(
-                  value: entry.isResolved,
-                  onChanged: busy ? null : onToggle,
+                MergeSemantics(
+                  child: Semantics(
+                    label: '${sender.isEmpty ? '피드백' : sender} 확인',
+                    child: Switch(
+                      value: entry.isResolved,
+                      onChanged: busy ? null : onToggle,
+                    ),
+                  ),
                 ),
               ],
             ),

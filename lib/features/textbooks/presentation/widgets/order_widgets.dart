@@ -66,14 +66,15 @@ class QuantityStepper extends StatelessWidget {
       foregroundColor: c.textPrimary,
       disabledBackgroundColor: c.background,
       disabledForegroundColor: c.textTertiary,
-      minimumSize: const Size(36, 36),
-      fixedSize: const Size(36, 36),
+      minimumSize: const Size(44, 44),
       padding: EdgeInsets.zero,
     );
     // 비활성 버튼(0에서 -, 최대에서 +)을 누른 탭이 뒤의 카드 InkWell 로
     // 새어 나가 수량이 토글되지 않도록 스테퍼 영역의 탭을 여기서 삼킨다.
+    // excludeFromSemantics: true 로 스테퍼 래퍼가 클릭 가능한 컨트롤로 노출되지 않게 한다.
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
+      excludeFromSemantics: true,
       onTap: () {},
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -88,6 +89,7 @@ class QuantityStepper extends StatelessWidget {
             width: 36,
             child: Text(
               '$value',
+              semanticsLabel: '수량 $value권',
               textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: 17,
