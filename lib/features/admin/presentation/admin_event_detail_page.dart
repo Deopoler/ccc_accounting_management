@@ -13,6 +13,7 @@ import '../../../core/widgets/feedback.dart';
 import '../../../core/widgets/responsive.dart';
 import '../../../core/widgets/state_views.dart';
 import '../../auth/domain/profile.dart';
+import '../../../core/utils/korean_search.dart';
 import '../../events/domain/event.dart';
 import '../../events/presentation/event_providers.dart';
 import '../../events/presentation/widgets/event_widgets.dart';
@@ -210,7 +211,7 @@ class _AdminEventDetailPageState extends ConsumerState<AdminEventDetailPage> {
       if (q.isEmpty) return true;
       final m = p.member;
       return m != null &&
-          (m.name.toLowerCase().contains(q) ||
+          (matchesKoreanQuery(m.name, q) ||
               m.studentId.toLowerCase().contains(q));
     });
     final visible = sortEventPayments(filtered, _sort);
@@ -542,7 +543,7 @@ class _AddTargetsDialogState extends ConsumerState<_AddTargetsDialog> {
                 .where(
                   (m) =>
                       q.isEmpty ||
-                      m.name.toLowerCase().contains(q) ||
+                      matchesKoreanQuery(m.name, q) ||
                       m.studentId.toLowerCase().contains(q),
                 )
                 .toList();

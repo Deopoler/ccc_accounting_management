@@ -6,6 +6,7 @@ import '../../../core/router/routes.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/app_widgets.dart';
 import '../../../core/utils/formatters.dart';
+import '../../../core/utils/korean_search.dart';
 import '../../../core/widgets/feedback.dart';
 import '../../../core/widgets/responsive.dart';
 import '../../../core/widgets/state_views.dart';
@@ -202,7 +203,7 @@ class _TextbooksPageState extends ConsumerState<TextbooksPage> {
       ];
     } else if (query.isNotEmpty) {
       final hits = visible
-          .where((t) => t.title.toLowerCase().contains(query))
+          .where((t) => matchesKoreanQuery(t.title, query))
           .toList();
       content = [
         _SearchField(controller: _search, onChanged: () => setState(() {})),
