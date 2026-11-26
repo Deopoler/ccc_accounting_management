@@ -65,7 +65,7 @@ class QuantityStepper extends StatelessWidget {
       backgroundColor: c.background,
       foregroundColor: c.textPrimary,
       disabledBackgroundColor: c.background,
-      disabledForegroundColor: c.textTertiary,
+      disabledForegroundColor: c.textDisabled,
       minimumSize: const Size(44, 44),
       padding: EdgeInsets.zero,
     );
