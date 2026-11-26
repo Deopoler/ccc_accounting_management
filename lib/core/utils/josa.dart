@@ -38,12 +38,7 @@ bool? _hasBatchim(String word) {
   };
 }
 
-String _pickJosa(
-  String word,
-  String consonant,
-  String vowel,
-  String fallback,
-) {
+String _pickJosa(String word, String consonant, String vowel, String fallback) {
   return switch (_hasBatchim(word)) {
     true => '$word$consonant',
     false => '$word$vowel',
@@ -53,6 +48,23 @@ String _pickJosa(
 
 /// 목적격 조사(`을`/`를`)를 붙여 반환한다. 판별할 수 없으면 `을(를)`을 붙인다.
 String withObject(String word) => _pickJosa(word, '을', '를', '을(를)');
+
+/// 방향 조사(`으로`/`로`)를 붙여 반환한다. 받침이 없거나 ㄹ 받침이면 `로`.
+String withRo(String word) {
+  final trimmed = _stripTrailingPunctuation(word);
+  if (trimmed.isEmpty) return '$word(으)로';
+  final rune = trimmed.runes.last;
+  if (rune >= 0xAC00 && rune <= 0xD7A3) {
+    final jong = (rune - 0xAC00) % 28;
+    return jong == 0 || jong == 8 ? '$word로' : '$word으로';
+  }
+  // 1(일), 7(칠), 8(팔)은 ㄹ 받침, 2, 4, 5, 9는 받침 없음.
+  return switch (rune) {
+    0x31 || 0x37 || 0x38 || 0x32 || 0x34 || 0x35 || 0x39 => '$word로',
+    0x30 || 0x33 || 0x36 => '$word으로',
+    _ => '$word(으)로',
+  };
+}
 
 /// 접속 조사(`과`/`와`)를 붙여 반환한다. 판별할 수 없으면 `과(와)`를 붙인다.
 String withAnd(String word) => _pickJosa(word, '과', '와', '과(와)');

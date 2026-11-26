@@ -299,7 +299,8 @@ class _AdminMembersPageState extends ConsumerState<AdminMembersPage> {
                                       : '총괄 관리자로 지정',
                                 ),
                               ),
-                            if (iAmCentral || m.role != UserRole.centralAdmin) ...[
+                            if (iAmCentral ||
+                                m.role != UserRole.centralAdmin) ...[
                               const PopupMenuDivider(),
                               PopupMenuItem(
                                 value: 'deactivate',
@@ -363,8 +364,8 @@ class _DeactivatedSection extends StatelessWidget {
                 '${m.studentId} · 비활성화 ${formatDate(m.deactivatedAt!)}',
               ),
               trailing: TextButton(
-                onPressed: busy ||
-                        (m.role == UserRole.centralAdmin && !iAmCentral)
+                onPressed:
+                    busy || (m.role == UserRole.centralAdmin && !iAmCentral)
                     ? null
                     : () => onReactivate(m),
                 child: const Text('복구'),
@@ -452,20 +453,27 @@ class _PendingSection extends StatelessWidget {
                         ),
                       ),
                     );
-                    final info = Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          '${m.name}  ${m.studentId}',
-                          style: theme.textTheme.bodyLarge,
-                        ),
-                        Text(
-                          '가입 ${formatDateTime(m.createdAt)}',
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
+                    final info = GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      excludeFromSemantics: true,
+                      onTap: busy
+                          ? null
+                          : () => onSelect(m.id, !selected.contains(m.id)),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '${m.name}  ${m.studentId}',
+                            style: theme.textTheme.bodyLarge,
                           ),
-                        ),
-                      ],
+                          Text(
+                            '가입 ${formatDateTime(m.createdAt)}',
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ),
                     );
                     final rejectButton = TextButton(
                       onPressed: busy ? null : () => onReject(m),

@@ -48,4 +48,15 @@ void main() {
       expect(withAnd('"Event B"'), '"Event B"과(와)');
     });
   });
+
+  group('withRo (으로/로)', () {
+    test('받침 없음·ㄹ 받침은 로, 그 밖의 받침은 으로', () {
+      expect(withRo('오후 3시'), '오후 3시로');
+      expect(withRo('오후 3시 30분'), '오후 3시 30분으로');
+      expect(withRo('서울'), '서울로');
+      expect(withRo('1'), '1로');
+      expect(withRo('3'), '3으로');
+      expect(withRo('Seoul'), 'Seoul(으)로');
+    });
+  });
 }

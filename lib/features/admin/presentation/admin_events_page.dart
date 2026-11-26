@@ -75,7 +75,6 @@ class AdminEventsPage extends ConsumerWidget {
             clipBehavior: Clip.antiAlias,
             child: Semantics(
               button: true,
-              label: '${e.title} 송금 현황 보기',
               child: InkWell(
                 onTap: () => context.go(AppRoutes.adminEventDetail(e.id)),
                 child: Padding(
@@ -98,7 +97,9 @@ class AdminEventsPage extends ConsumerWidget {
                       const SizedBox(height: 4),
                       EventMetaLine(event: e),
                       const SizedBox(height: 12),
-                      PaymentProgress(summary: sums[e.id] ?? EventSummary.empty),
+                      PaymentProgress(
+                        summary: sums[e.id] ?? EventSummary.empty,
+                      ),
                     ],
                   ),
                 ),
@@ -214,8 +215,9 @@ class _EventFormDialogState extends State<_EventFormDialog> {
                     controller: _title,
                     autofocus: true,
                     decoration: const InputDecoration(labelText: '이벤트명'),
-                    validator: (v) =>
-                        (v == null || v.trim().isEmpty) ? '이벤트명을 입력해 주세요.' : null,
+                    validator: (v) => (v == null || v.trim().isEmpty)
+                        ? '이벤트명을 입력해 주세요.'
+                        : null,
                   ),
                   const SizedBox(height: 16),
                   TextFormField(
@@ -249,7 +251,10 @@ class _EventFormDialogState extends State<_EventFormDialog> {
                             onPressed: () => setState(() => _dueDate = null),
                             icon: const Icon(Icons.clear, size: 18),
                           ),
-                        TextButton(onPressed: _pickDate, child: const Text('선택')),
+                        TextButton(
+                          onPressed: _pickDate,
+                          child: const Text('선택'),
+                        ),
                       ],
                     ),
                   ),
@@ -265,8 +270,9 @@ class _EventFormDialogState extends State<_EventFormDialog> {
                       helperMaxLines: 4,
                     ),
                     onChanged: (_) => setState(() {}),
-                    validator: (v) =>
-                        (v?.trim().length ?? 0) > 50 ? '50자 이하로 입력해 주세요.' : null,
+                    validator: (v) => (v?.trim().length ?? 0) > 50
+                        ? '50자 이하로 입력해 주세요.'
+                        : null,
                   ),
                   const SizedBox(height: 16),
                   TextFormField(

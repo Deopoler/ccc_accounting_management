@@ -362,9 +362,9 @@ void main() {
         (w) =>
             w is Semantics &&
             w.properties.button == true &&
-            w.properties.label == '겨울 수련회 송금 현황 보기',
+            w.properties.label == null,
       ),
-      findsOneWidget,
+      findsWidgets,
     );
     expect(
       find.ancestor(

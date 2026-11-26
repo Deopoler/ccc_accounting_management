@@ -208,7 +208,7 @@ class _RoundDeadlineFormState extends ConsumerState<_RoundDeadlineForm> {
       showSnack(
         context,
         '이번 회차 마감을 ${DateFormat('M/d(E)').format(deadline)} '
-        '${timeLabel(deadline)}(으)로 바꿨습니다.',
+        '${withRo(timeLabel(deadline))} 바꿨습니다.',
       );
     } catch (e) {
       if (mounted) showErrorSnack(context, e);
