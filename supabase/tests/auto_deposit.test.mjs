@@ -468,6 +468,90 @@ describe('중복 방지, 진단 지표, 계좌 별칭 검증, 속도 제한', ()
     assert.equal((await db.query('select count(*)::int as n from public.bank_deposits')).rows[0].n, 3);
   });
 
+  test('possible_duplicate 는 재매칭 · 재해석으로 자동 확인되지 않고, 중복 아님 확인 후에만 재매칭이 자동 확인된다', async () => {
+    const t0 = new Date('2026-11-26T03:00:00Z');
+    const t15 = new Date('2026-11-26T03:00:15Z');
+    const t25 = new Date('2026-11-26T03:00:25Z');
+    const sameRaw = sha256('dup-guard-raw');
+
+    const orig = await ingest(db, {
+      campus: kaist, depositorName: '홍길동', amount: 10000,
+      dedupeKey: sha256('dup-guard-1'), rawHash: sameRaw, depositedAt: t0.toISOString(),
+    });
+    assert.equal(orig.status, 'unmatched');
+
+    // 1) 파싱된 60초 이내 동일 원문 -> possible_duplicate
+    const nearParsed = await ingest(db, {
+      campus: kaist, depositorName: '홍길동', amount: 10000,
+      dedupeKey: sha256('dup-guard-2'), rawHash: sameRaw, depositedAt: t15.toISOString(),
+    });
+    assert.equal(nearParsed.status, 'ambiguous');
+
+    // 일치하는 주문이 생겨도 possible_duplicate 상태에서 admin_rematch_deposit 는 자동 확인하지 않는다.
+    const o1 = await placeOrder(hong, [{ textbook_id: book10k, quantity: 1 }]);
+    const rematchBlocked = (await asUser(
+      db, admin, 'select public.admin_rematch_deposit($1) as s', [nearParsed.deposit_id],
+    )).rows[0].s;
+    assert.equal(rematchBlocked, 'ambiguous');
+    assert.equal((await db.query('select status from public.textbook_orders where id = $1', [o1])).rows[0].status, 'requested');
+
+    // 2) unparsed 상태로 들어온 60초 이내 동일 원문은 재해석해도 duplicate_of_id 와 possible_duplicate 를 유지하며 자동 확인되지 않는다.
+    const nearUnp = await ingest(db, {
+      campus: kaist, kind: 'unparsed',
+      dedupeKey: sha256('dup-guard-3'), rawHash: sameRaw, depositedAt: t25.toISOString(),
+      rawTitle: '토스', rawText: 'KAIST CCC 원문', rawPackage: 'viva.republica.toss', reason: 'no_amount',
+    });
+    assert.equal(nearUnp.status, 'unparsed');
+
+    const { rows: [reparseStillUnp] } = await db.query(
+      `select status from public.apply_deposit_reparse($1, 'unparsed', null, null, 'no_depositor')`,
+      [nearUnp.deposit_id],
+    );
+    assert.equal(reparseStillUnp.status, 'unparsed');
+    const { rows: [unpRow] } = await db.query(
+      'select match_reason, duplicate_of_id from public.bank_deposits where id = $1',
+      [nearUnp.deposit_id],
+    );
+    assert.equal(unpRow.match_reason, 'possible_duplicate');
+    assert.ok(unpRow.duplicate_of_id);
+
+    const { rows: [reparseDep] } = await db.query(
+      `select status from public.apply_deposit_reparse($1, 'deposit', '홍길동', 10000, null)`,
+      [nearUnp.deposit_id],
+    );
+    assert.equal(reparseDep.status, 'ambiguous');
+    const { rows: [depRow] } = await db.query(
+      'select status, match_reason, duplicate_of_id from public.bank_deposits where id = $1',
+      [nearUnp.deposit_id],
+    );
+    assert.equal(depRow.status, 'ambiguous');
+    assert.equal(depRow.match_reason, 'possible_duplicate');
+    assert.ok(depRow.duplicate_of_id);
+    assert.equal((await db.query('select status from public.textbook_orders where id = $1', [o1])).rows[0].status, 'requested');
+
+    // 3) "중복 아님" 해제 후에는 duplicate_cleared_at / duplicate_cleared_by 가 기록되고 재매칭 시 자동 확인된다.
+    await asUser(db, admin, 'select public.admin_clear_possible_duplicate($1)', [nearParsed.deposit_id]);
+    const { rows: [cleared] } = await db.query(
+      'select status, match_reason, duplicate_cleared_at, duplicate_cleared_by from public.bank_deposits where id = $1',
+      [nearParsed.deposit_id],
+    );
+    assert.equal(cleared.status, 'unmatched');
+    assert.equal(cleared.match_reason, 'duplicate_cleared');
+    assert.ok(cleared.duplicate_cleared_at);
+    assert.equal(cleared.duplicate_cleared_by, admin);
+
+    const rematchOk = (await asUser(
+      db, admin, 'select public.admin_rematch_deposit($1) as s', [nearParsed.deposit_id],
+    )).rows[0].s;
+    assert.equal(rematchOk, 'auto_matched');
+    assert.equal((await db.query('select status from public.textbook_orders where id = $1', [o1])).rows[0].status, 'paid');
+
+    // 4) 중복 아님을 누르지 않은 possible_duplicate 도 관리자 수동 연결은 허용된다.
+    const o2 = await placeOrder(hong, [{ textbook_id: book10k, quantity: 1 }]);
+    await asUser(db, admin, 'select public.admin_link_deposit_to_orders($1, $2::uuid[])', [nearUnp.deposit_id, [o2]]);
+    assert.equal((await db.query('select status from public.bank_deposits where id = $1', [nearUnp.deposit_id])).rows[0].status, 'manual_matched');
+  });
+
   test('last_deposit_notification_at 은 ping/duplicate 를 제외한 실제 알림에만 갱신된다', async () => {
     await ingest(db, { campus: kaist, kind: 'ping' });
     let { rows: [s] } = await asUser(
@@ -653,11 +737,16 @@ describe('취소, 부분 미납, 삭제 보존, 수동 연결, 만료 원문 숨
     await assertDenied(asUser(db, admin, 'select raw_title from public.bank_deposits'));
   });
 
-  test('수동 연결(이벤트/복수 주문), 무시 및 되돌리기, unparsed 재해석, 1년 정리가 동작한다', async () => {
+  test('수동 연결 금액 불일치 가드, 무시 및 되돌리기, unparsed 재해석, 1년 정리가 동작한다', async () => {
     const o1 = await placeOrder(hong, [{ textbook_id: book10k, quantity: 1 }]);
     const o2 = await placeOrder(hong, [{ textbook_id: book15k, quantity: 1 }]);
     const under = await ingest(db, { campus: kaist, depositorName: '홍길동', amount: 24000 });
-    await asUser(db, admin, 'select public.admin_link_deposit_to_orders($1, $2::uuid[])', [under.deposit_id, [o1, o2]]);
+    // 금액 불일치(24,000 vs 25,000)는 p_allow_amount_mismatch = true 없이 거부된다.
+    await assertRaises(
+      asUser(db, admin, 'select public.admin_link_deposit_to_orders($1, $2::uuid[])', [under.deposit_id, [o1, o2]]),
+      /합계가 다릅니다/,
+    );
+    await asUser(db, admin, 'select public.admin_link_deposit_to_orders($1, $2::uuid[], true)', [under.deposit_id, [o1, o2]]);
     assert.equal((await db.query('select status, matched_by from public.bank_deposits where id = $1', [under.deposit_id])).rows[0].status, 'manual_matched');
 
     const ev = (await db.query(
@@ -668,11 +757,27 @@ describe('취소, 부분 미납, 삭제 보존, 수동 연결, 만료 원문 숨
       'insert into public.event_payments (event_id, user_id) values ($1, $2) returning id',
       [ev, hong],
     )).rows[0].id;
+    const wrongAmt = await ingest(db, { campus: kaist, depositorName: '다른이름', amount: 29000 });
+    await assertRaises(
+      asUser(db, admin, 'select public.admin_link_deposit_to_event($1, $2)', [wrongAmt.deposit_id, epId]),
+      /금액이 다릅니다/,
+    );
     const extra = await ingest(db, { campus: kaist, depositorName: '다른이름', amount: 30000 });
     await asUser(db, admin, 'select public.admin_ignore_deposit($1, true)', [extra.deposit_id]);
     await asUser(db, admin, 'select public.admin_ignore_deposit($1, false)', [extra.deposit_id]);
     await asUser(db, admin, 'select public.admin_link_deposit_to_event($1, $2)', [extra.deposit_id, epId]);
     assert.equal((await db.query('select confirmed_deposit_id from public.event_payments where id = $1', [epId])).rows[0].confirmed_deposit_id, extra.deposit_id);
+
+    const ev2 = (await db.query(
+      `insert into public.events (campus_id, title, amount) values ($1, '수련회2', 30000) returning id`,
+      [kaist],
+    )).rows[0].id;
+    const ep2Id = (await db.query(
+      'insert into public.event_payments (event_id, user_id) values ($1, $2) returning id',
+      [ev2, hong],
+    )).rows[0].id;
+    await asUser(db, admin, 'select public.admin_link_deposit_to_event($1, $2, true)', [wrongAmt.deposit_id, ep2Id]);
+    assert.equal((await db.query('select confirmed_deposit_id from public.event_payments where id = $1', [ep2Id])).rows[0].confirmed_deposit_id, wrongAmt.deposit_id);
 
     const o3 = await placeOrder(hong, [{ textbook_id: book10k, quantity: 1 }]);
     const unp = await ingest(db, {
@@ -693,6 +798,97 @@ describe('취소, 부분 미납, 삭제 보존, 수동 연결, 만료 원문 숨
     await db.query('select private.purge_old_campus_data($1)', [kaist]);
     assert.equal((await db.query('select 1 from public.bank_deposits where id = $1', [unp.deposit_id])).rows.length, 0);
     assert.equal((await db.query('select confirmed_deposit_id from public.textbook_orders where id = $1', [o3])).rows[0].confirmed_deposit_id, null);
+  });
+
+  test('undo 와 수동 미납 처리를 어느 순서로 실행해도 입금과 주문/송금 상태가 일관된다', async () => {
+    // 1) 수동 미납 먼저 -> 트리거가 입금을 undone 처리 -> 후속 admin_undo_deposit 는 중복 취소하지 않고 거부
+    const o1 = await placeOrder(hong, [{ textbook_id: book10k, quantity: 1 }]);
+    const d1 = await ingest(db, { campus: kaist, depositorName: '홍길동', amount: 10000 });
+    assert.equal(d1.status, 'auto_matched');
+
+    await asUser(db, admin, `update public.textbook_orders set status = 'requested' where id = $1`, [o1]);
+    assert.equal((await db.query('select status from public.bank_deposits where id = $1', [d1.deposit_id])).rows[0].status, 'undone');
+    await assertRaises(
+      asUser(db, admin, 'select public.admin_undo_deposit($1)', [d1.deposit_id]),
+      /확인 완료된 입금만 취소/,
+    );
+
+    // 2) admin_undo_deposit 먼저 -> 입금 undone, 이벤트 송금 미납 -> 후속 수동 미납 UPDATE 도 상태 일관 유지
+    const ev = (await db.query(
+      `insert into public.events (campus_id, title, amount) values ($1, '캠프', 20000) returning id`,
+      [kaist],
+    )).rows[0].id;
+    const epId = (await db.query(
+      'insert into public.event_payments (event_id, user_id) values ($1, $2) returning id',
+      [ev, hong],
+    )).rows[0].id;
+    const d2 = await ingest(db, { campus: kaist, depositorName: '홍길동', amount: 20000 });
+    assert.equal(d2.status, 'auto_matched');
+
+    await asUser(db, admin, 'select public.admin_undo_deposit($1)', [d2.deposit_id]);
+    await asUser(db, admin, 'update public.event_payments set is_paid = false where id = $1', [epId]);
+    const { rows: [epAfter] } = await db.query('select is_paid, confirmed_deposit_id from public.event_payments where id = $1', [epId]);
+    assert.equal(epAfter.is_paid, false);
+    assert.equal(epAfter.confirmed_deposit_id, null);
+    assert.equal((await db.query('select status from public.bank_deposits where id = $1', [d2.deposit_id])).rows[0].status, 'undone');
+  });
+
+  test('서버 상태 필터 · 그룹별 카운트 · 페이지네이션이 페이지 크기를 넘겨도 오래된 검토 필요 행을 빠뜨리지 않는다', async () => {
+    const oldReviewIds = [];
+    for (let i = 0; i < 4; i++) {
+      const r = await ingest(db, {
+        campus: kaist,
+        kind: i === 0 ? 'unparsed' : 'deposit',
+        depositorName: i === 0 ? null : `미매칭${i}`,
+        amount: i === 0 ? null : 10000,
+        rawTitle: i === 0 ? '토스' : null,
+        rawText: i === 0 ? 'KAIST CCC 미해석' : null,
+        rawPackage: i === 0 ? 'viva.republica.toss' : null,
+        reason: i === 0 ? 'no_amount' : null,
+      });
+      oldReviewIds.push(r.deposit_id);
+      await db.query(
+        `update public.bank_deposits set received_at = now() - interval '30 days' + ($2 || ' minutes')::interval where id = $1`,
+        [r.deposit_id, i],
+      );
+    }
+
+    // 페이지 크기(3)를 훨씬 넘는 최신 auto_matched 행 10건을 추가한다.
+    for (let i = 0; i < 10; i++) {
+      const { rows: [row] } = await db.query(
+        `insert into public.bank_deposits (
+           campus_id, dedupe_key, raw_hash, bank_code, status,
+           depositor_name, amount, deposited_at, received_at, match_reason, matched_at
+         ) values (
+           $1, $2, $3, 'toss', 'auto_matched',
+           '홍길동', 10000, now(), now() - ($4 || ' seconds')::interval, 'exact_textbook_single', now()
+         ) returning id`,
+        [kaist, sha256(`pg-dk-${i}`), sha256(`pg-rh-${i}`), i],
+      );
+      assert.ok(row.id);
+    }
+
+    const { rows: [counts] } = await asUser(
+      db, admin, 'select * from public.admin_count_bank_deposits($1)', [kaist],
+    );
+    assert.equal(counts.needs_review, 4);
+    assert.equal(counts.auto_matched, 10);
+    assert.equal(counts.all_count, 14);
+    assert.equal(counts.unparsed_with_raw, 1);
+
+    // 페이지 크기 3으로 needs_review 만 조회해도 30일 전 행 4건이 페이지네이션으로 전부 나온다.
+    const { rows: p1 } = await asUser(
+      db, admin, `select id from public.admin_list_bank_deposits($1, 'needs_review', 3, 0)`, [kaist],
+    );
+    const { rows: p2 } = await asUser(
+      db, admin, `select id from public.admin_list_bank_deposits($1, 'needs_review', 3, 3)`, [kaist],
+    );
+    assert.equal(p1.length, 3);
+    assert.equal(p2.length, 1);
+    assert.deepEqual(
+      new Set([...p1, ...p2].map((r) => r.id)),
+      new Set(oldReviewIds),
+    );
   });
 });
 

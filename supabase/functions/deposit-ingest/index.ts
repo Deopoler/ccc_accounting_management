@@ -5,6 +5,7 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 import { parseDepositNotification } from '../_shared/deposit-parsers/index.ts';
 import {
   computeDedupeHashes,
+  getClientIp,
   normalizeForHash,
   parseIngestTimestamp,
   sha256Hex,
@@ -34,12 +35,6 @@ function json(status: number, body: Record<string, unknown>): Response {
 }
 
 const fail = (status: number, error: string) => json(status, { ok: false, error });
-
-function getClientIp(req: Request): string {
-  const forwarded = req.headers.get('x-forwarded-for');
-  if (forwarded) return forwarded.split(',')[0].trim();
-  return req.headers.get('cf-connecting-ip') ?? 'unknown';
-}
 
 function isAuthRateLimited(ip: string, nowMs: number): boolean {
   const recent = (authFailuresByIp.get(ip) ?? []).filter((t) => nowMs - t < AUTH_FAIL_WINDOW_MS);
@@ -112,7 +107,7 @@ Deno.serve(async (req) => {
   if (req.method !== 'POST') return fail(405, '허용되지 않는 요청입니다.');
 
   const now = new Date();
-  const ip = getClientIp(req);
+  const ip = getClientIp(req.headers);
 
   // Verify the token before reading the request body; valid tokens are never blocked by per-IP auth limits.
   const token = req.headers.get('x-deposit-token')?.trim() ?? '';

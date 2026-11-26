@@ -57,15 +57,35 @@ class DepositRepository {
     params: {'p_campus_id': campusId},
   );
 
-  Future<List<BankDeposit>> fetchDeposits(String campusId) async {
+  Future<List<BankDeposit>> fetchDeposits(
+    String campusId, {
+    DepositFilter filter = DepositFilter.all,
+    int limit = 50,
+    int offset = 0,
+  }) async {
     final rows = await _client.rpc<List<dynamic>>(
       'admin_list_bank_deposits',
-      params: {'p_campus_id': campusId, 'p_limit': 500},
+      params: {
+        'p_campus_id': campusId,
+        'p_status_group': filter.dbGroup,
+        'p_limit': limit,
+        'p_offset': offset,
+      },
     );
     return rows
         .whereType<Map<String, dynamic>>()
         .map(BankDeposit.fromJson)
         .toList();
+  }
+
+  Future<DepositCounts> fetchDepositCounts(String campusId) async {
+    final rows = await _client.rpc<List<dynamic>>(
+      'admin_count_bank_deposits',
+      params: {'p_campus_id': campusId},
+    );
+    final list = rows.whereType<Map<String, dynamic>>().toList();
+    if (list.isEmpty) return DepositCounts.empty;
+    return DepositCounts.fromJson(list.first);
   }
 
   Future<UnpaidLinkTargets> fetchUnpaidLinkTargets(String campusId) async {
@@ -136,23 +156,39 @@ class DepositRepository {
     return UnpaidLinkTargets(orders: orders, eventPayments: payments);
   }
 
-  Future<void> linkToEvent(String depositId, String eventPaymentId) =>
-      _client.rpc<void>(
-        'admin_link_deposit_to_event',
-        params: {
-          'p_deposit_id': depositId,
-          'p_event_payment_id': eventPaymentId,
-        },
-      );
+  Future<void> linkToEvent(
+    String depositId,
+    String eventPaymentId, {
+    bool allowAmountMismatch = false,
+  }) => _client.rpc<void>(
+    'admin_link_deposit_to_event',
+    params: {
+      'p_deposit_id': depositId,
+      'p_event_payment_id': eventPaymentId,
+      'p_allow_amount_mismatch': allowAmountMismatch,
+    },
+  );
 
-  Future<void> linkToOrders(String depositId, List<String> orderIds) =>
-      _client.rpc<void>(
-        'admin_link_deposit_to_orders',
-        params: {'p_deposit_id': depositId, 'p_order_ids': orderIds},
-      );
+  Future<void> linkToOrders(
+    String depositId,
+    List<String> orderIds, {
+    bool allowAmountMismatch = false,
+  }) => _client.rpc<void>(
+    'admin_link_deposit_to_orders',
+    params: {
+      'p_deposit_id': depositId,
+      'p_order_ids': orderIds,
+      'p_allow_amount_mismatch': allowAmountMismatch,
+    },
+  );
 
   Future<void> undoDeposit(String depositId) => _client.rpc<void>(
     'admin_undo_deposit',
+    params: {'p_deposit_id': depositId},
+  );
+
+  Future<void> clearPossibleDuplicate(String depositId) => _client.rpc<void>(
+    'admin_clear_possible_duplicate',
     params: {'p_deposit_id': depositId},
   );
 

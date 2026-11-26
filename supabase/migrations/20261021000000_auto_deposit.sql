@@ -49,10 +49,12 @@ create table public.bank_deposits (
   undone_by           uuid references public.profiles (id) on delete set null,
   ignored_at          timestamptz,
   ignored_by          uuid references public.profiles (id) on delete set null,
-  duplicate_count     integer not null default 0 check (duplicate_count >= 0),
-  last_duplicate_at   timestamptz,
-  duplicate_of_id     uuid references public.bank_deposits (id) on delete set null,
-  created_at          timestamptz not null default now(),
+  duplicate_count       integer not null default 0 check (duplicate_count >= 0),
+  last_duplicate_at     timestamptz,
+  duplicate_of_id       uuid references public.bank_deposits (id) on delete set null,
+  duplicate_cleared_at  timestamptz,
+  duplicate_cleared_by  uuid references public.profiles (id) on delete set null,
+  created_at            timestamptz not null default now(),
   updated_at          timestamptz not null default now(),
   constraint bank_deposits_campus_dedupe_key unique (campus_id, dedupe_key),
   constraint bank_deposits_parsed_fields check (
@@ -212,7 +214,7 @@ exception when others then
 end;
 $$;
 
--- 잠금 순서: deposit 행 -> 캠퍼스 매칭 advisory lock -> textbook_orders(id순) -> event_payments(id순).
+-- 잠금 순서: 캠퍼스 매칭 advisory lock -> textbook_orders(id순) -> event_payments(id순) -> deposit 행.
 create function private.match_and_confirm_deposit(p_deposit_id uuid)
 returns text
 language plpgsql
@@ -220,6 +222,7 @@ security definer
 set search_path = ''
 as $$
 declare
+  v_campus_id uuid;
   v_deposit public.bank_deposits;
   v_dep_norm text;
   v_count int;
@@ -231,6 +234,24 @@ declare
   v_has_homonym boolean := false;
   v_updated int := 0;
 begin
+  select campus_id into v_campus_id from public.bank_deposits where id = p_deposit_id;
+  if not found then
+    raise exception '입금 내역을 찾을 수 없습니다.';
+  end if;
+
+  perform pg_advisory_xact_lock(hashtextextended('deposit_match:' || v_campus_id::text, 0));
+
+  perform 1 from public.textbook_orders o
+  where o.campus_id = v_campus_id and o.status = 'requested'
+  order by o.id
+  for update of o;
+
+  perform 1 from public.event_payments ep
+  join public.events e on e.id = ep.event_id
+  where e.campus_id = v_campus_id and not ep.is_paid
+  order by ep.id
+  for update of ep;
+
   select * into v_deposit from public.bank_deposits where id = p_deposit_id for update;
   if not found then
     raise exception '입금 내역을 찾을 수 없습니다.';
@@ -238,8 +259,20 @@ begin
   if v_deposit.depositor_name is null or v_deposit.amount is null then
     raise exception '해석되지 않은 입금은 자동 매칭할 수 없습니다.';
   end if;
+  if v_deposit.status not in ('unmatched', 'ambiguous', 'undone') then
+    raise exception '다시 매칭할 수 없는 상태입니다.';
+  end if;
 
-  perform pg_advisory_xact_lock(hashtextextended('deposit_match:' || v_deposit.campus_id::text, 0));
+  if v_deposit.duplicate_of_id is not null and v_deposit.duplicate_cleared_at is null then
+    update public.bank_deposits
+    set status = 'ambiguous',
+        match_reason = 'possible_duplicate',
+        candidate_snapshot = null,
+        matched_at = null,
+        matched_by = null
+    where id = v_deposit.id;
+    return 'ambiguous';
+  end if;
 
   v_dep_norm := private.normalize_depositor_name(v_deposit.depositor_name);
   if v_dep_norm = '' then
@@ -252,17 +285,6 @@ begin
     where id = v_deposit.id;
     return 'unmatched';
   end if;
-
-  perform 1 from public.textbook_orders o
-  where o.campus_id = v_deposit.campus_id and o.status = 'requested'
-  order by o.id
-  for update of o;
-
-  perform 1 from public.event_payments ep
-  join public.events e on e.id = ep.event_id
-  where e.campus_id = v_deposit.campus_id and not ep.is_paid
-  order by ep.id
-  for update of ep;
 
   with candidates as (
     select
@@ -848,9 +870,31 @@ begin
 
   if p_parse_kind = 'unparsed' then
     update public.bank_deposits
-    set match_reason = left(coalesce(nullif(btrim(p_reason), ''), 'parse_failed'), 100)
+    set match_reason = case
+      when v_deposit.duplicate_of_id is not null and v_deposit.duplicate_cleared_at is null
+        then 'possible_duplicate'
+      else left(coalesce(nullif(btrim(p_reason), ''), 'parse_failed'), 100)
+    end
     where id = p_deposit_id;
     return query select 'unparsed'::text, p_deposit_id;
+    return;
+  end if;
+
+  if v_deposit.duplicate_of_id is not null and v_deposit.duplicate_cleared_at is null then
+    update public.bank_deposits
+    set status = 'ambiguous',
+        depositor_name = left(btrim(coalesce(p_depositor_name, '')), 100),
+        amount = p_amount,
+        raw_title = null,
+        raw_text = null,
+        raw_package = null,
+        raw_expires_at = null,
+        match_reason = 'possible_duplicate',
+        candidate_snapshot = null,
+        matched_at = null,
+        matched_by = null
+    where id = p_deposit_id;
+    return query select 'ambiguous'::text, p_deposit_id;
     return;
   end if;
 
@@ -886,8 +930,13 @@ begin
 end;
 $$;
 
--- 관리자 조회 RPC: raw_expires_at 이 지난 원문은 정리가 돌기 전이라도 노출하지 않는다.
-create function public.admin_list_bank_deposits(p_campus_id uuid, p_limit integer default 500)
+-- 관리자 조회 RPC: 상태 그룹 필터와 페이지네이션을 서버에서 처리하고, 만료 원문은 정리가 돌기 전이라도 숨긴다.
+create function public.admin_list_bank_deposits(
+  p_campus_id uuid,
+  p_status_group text default 'all',
+  p_limit integer default 50,
+  p_offset integer default 0
+)
 returns table (
   id uuid,
   campus_id uuid,
@@ -911,7 +960,9 @@ returns table (
   ignored_by uuid,
   duplicate_count integer,
   last_duplicate_at timestamptz,
-  duplicate_of_id uuid
+  duplicate_of_id uuid,
+  duplicate_cleared_at timestamptz,
+  duplicate_cleared_by uuid
 )
 language plpgsql
 stable
@@ -919,10 +970,15 @@ security definer
 set search_path = ''
 as $$
 declare
-  v_limit int := greatest(1, least(coalesce(p_limit, 500), 1000));
+  v_group text := coalesce(nullif(btrim(p_status_group), ''), 'all');
+  v_limit int := greatest(1, least(coalesce(p_limit, 50), 200));
+  v_offset int := greatest(0, coalesce(p_offset, 0));
 begin
   if private.can_admin_campus(p_campus_id) is not true then
     raise exception '입금 내역을 조회할 권한이 없습니다.';
+  end if;
+  if v_group not in ('needs_review', 'auto_matched', 'manual_matched', 'ignored', 'undone', 'all') then
+    raise exception '올바르지 않은 상태 필터입니다.';
   end if;
 
   return query
@@ -952,11 +1008,58 @@ begin
     d.ignored_by,
     d.duplicate_count,
     d.last_duplicate_at,
-    d.duplicate_of_id
+    d.duplicate_of_id,
+    d.duplicate_cleared_at,
+    d.duplicate_cleared_by
   from public.bank_deposits d
   where d.campus_id = p_campus_id
-  order by d.received_at desc
-  limit v_limit;
+    and (
+      v_group = 'all'
+      or (v_group = 'needs_review' and d.status in ('unparsed', 'unmatched', 'ambiguous'))
+      or d.status = v_group
+    )
+  order by d.received_at desc, d.id desc
+  limit v_limit
+  offset v_offset;
+end;
+$$;
+
+create function public.admin_count_bank_deposits(p_campus_id uuid)
+returns table (
+  needs_review integer,
+  auto_matched integer,
+  manual_matched integer,
+  ignored integer,
+  undone integer,
+  all_count integer,
+  unparsed_with_raw integer
+)
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+begin
+  if private.can_admin_campus(p_campus_id) is not true then
+    raise exception '입금 내역을 조회할 권한이 없습니다.';
+  end if;
+
+  return query
+  select
+    count(*) filter (where status in ('unparsed', 'unmatched', 'ambiguous'))::integer,
+    count(*) filter (where status = 'auto_matched')::integer,
+    count(*) filter (where status = 'manual_matched')::integer,
+    count(*) filter (where status = 'ignored')::integer,
+    count(*) filter (where status = 'undone')::integer,
+    count(*)::integer,
+    count(*) filter (
+      where status = 'unparsed'
+        and raw_expires_at is not null
+        and raw_expires_at > now()
+        and (nullif(raw_text, '') is not null or nullif(raw_title, '') is not null)
+    )::integer
+  from public.bank_deposits
+  where campus_id = p_campus_id;
 end;
 $$;
 
@@ -1031,17 +1134,38 @@ begin
 end;
 $$;
 
-create function public.admin_link_deposit_to_event(p_deposit_id uuid, p_event_payment_id uuid)
+create function public.admin_link_deposit_to_event(
+  p_deposit_id uuid,
+  p_event_payment_id uuid,
+  p_allow_amount_mismatch boolean default false
+)
 returns void
 language plpgsql
 security definer
 set search_path = ''
 as $$
 declare
+  v_campus_id uuid;
   v_deposit public.bank_deposits;
   v_payment_is_paid boolean;
+  v_expected_amount integer;
   v_event_campus uuid;
+  v_event_found boolean := false;
 begin
+  select campus_id into v_campus_id from public.bank_deposits where id = p_deposit_id;
+  if not found or private.can_admin_campus(v_campus_id) is not true then
+    raise exception '입금 내역을 찾을 수 없습니다.';
+  end if;
+
+  -- 잠금 순서 통일: event_payments 먼저 잠근 뒤 bank_deposits 를 잠근다.
+  select ep.is_paid, coalesce(ep.amount_override, e.amount), e.campus_id
+  into v_payment_is_paid, v_expected_amount, v_event_campus
+  from public.event_payments ep
+  join public.events e on e.id = ep.event_id
+  where ep.id = p_event_payment_id
+  for update of ep;
+  v_event_found := found;
+
   select * into v_deposit from public.bank_deposits where id = p_deposit_id for update;
   if not found or private.can_admin_campus(v_deposit.campus_id) is not true then
     raise exception '입금 내역을 찾을 수 없습니다.';
@@ -1051,19 +1175,14 @@ begin
      or v_deposit.amount is null then
     raise exception '연결할 수 없는 입금 상태입니다.';
   end if;
-
-  select ep.is_paid, e.campus_id
-  into v_payment_is_paid, v_event_campus
-  from public.event_payments ep
-  join public.events e on e.id = ep.event_id
-  where ep.id = p_event_payment_id
-  for update of ep;
-
-  if not found or v_event_campus <> v_deposit.campus_id then
+  if not v_event_found or v_event_campus <> v_deposit.campus_id then
     raise exception '이벤트 송금 대상을 찾을 수 없습니다.';
   end if;
   if v_payment_is_paid then
     raise exception '이미 송금 확인된 대상입니다.';
+  end if;
+  if v_expected_amount <> v_deposit.amount and coalesce(p_allow_amount_mismatch, false) is not true then
+    raise exception '입금 금액과 선택한 이벤트 금액이 다릅니다. 금액 불일치를 확인한 뒤 다시 연결해 주세요.';
   end if;
 
   update public.event_payments
@@ -1083,16 +1202,22 @@ begin
 end;
 $$;
 
-create function public.admin_link_deposit_to_orders(p_deposit_id uuid, p_order_ids uuid[])
+create function public.admin_link_deposit_to_orders(
+  p_deposit_id uuid,
+  p_order_ids uuid[],
+  p_allow_amount_mismatch boolean default false
+)
 returns void
 language plpgsql
 security definer
 set search_path = ''
 as $$
 declare
+  v_campus_id uuid;
   v_deposit public.bank_deposits;
   v_order public.textbook_orders;
   v_count int := 0;
+  v_sum int := 0;
 begin
   if p_order_ids is null or cardinality(p_order_ids) = 0 then
     raise exception '연결할 신청을 선택해 주세요.';
@@ -1101,33 +1226,45 @@ begin
     raise exception '한 번에 연결할 수 있는 신청 수를 초과했습니다.';
   end if;
 
-  select * into v_deposit from public.bank_deposits where id = p_deposit_id for update;
-  if not found or private.can_admin_campus(v_deposit.campus_id) is not true then
+  select campus_id into v_campus_id from public.bank_deposits where id = p_deposit_id;
+  if not found or private.can_admin_campus(v_campus_id) is not true then
     raise exception '입금 내역을 찾을 수 없습니다.';
   end if;
-  if v_deposit.status not in ('unmatched', 'ambiguous', 'undone', 'ignored')
-     or v_deposit.depositor_name is null
-     or v_deposit.amount is null then
-    raise exception '연결할 수 없는 입금 상태입니다.';
-  end if;
 
+  -- 잠금 순서 통일: textbook_orders 를 id 순으로 먼저 잠근 뒤 bank_deposits 를 잠근다.
   for v_order in
     select * from public.textbook_orders
     where id = any (p_order_ids)
     order by id
     for update
   loop
-    if v_order.campus_id <> v_deposit.campus_id then
+    if v_order.campus_id <> v_campus_id then
       raise exception '같은 캠퍼스의 신청만 연결할 수 있습니다.';
     end if;
     if v_order.status <> 'requested' then
       raise exception '입금 대기 상태인 신청만 연결할 수 있습니다.';
     end if;
     v_count := v_count + 1;
+    v_sum := v_sum + v_order.total_price;
   end loop;
 
+  select * into v_deposit from public.bank_deposits where id = p_deposit_id for update;
+  if not found or private.can_admin_campus(v_deposit.campus_id) is not true then
+    raise exception '입금 내역을 찾을 수 없습니다.';
+  end if;
+  if v_deposit.campus_id <> v_campus_id then
+    raise exception '같은 캠퍼스의 신청만 연결할 수 있습니다.';
+  end if;
+  if v_deposit.status not in ('unmatched', 'ambiguous', 'undone', 'ignored')
+     or v_deposit.depositor_name is null
+     or v_deposit.amount is null then
+    raise exception '연결할 수 없는 입금 상태입니다.';
+  end if;
   if v_count <> (select count(distinct x) from unnest(p_order_ids) as x) then
     raise exception '신청 내역을 찾을 수 없습니다.';
+  end if;
+  if v_sum <> v_deposit.amount and coalesce(p_allow_amount_mismatch, false) is not true then
+    raise exception '입금 금액과 선택한 교재 신청 합계가 다릅니다. 금액 불일치를 확인한 뒤 다시 연결해 주세요.';
   end if;
 
   update public.textbook_orders
@@ -1154,8 +1291,39 @@ security definer
 set search_path = ''
 as $$
 declare
+  v_campus_id uuid;
+  v_order_ids uuid[];
+  v_payment_ids uuid[];
   v_deposit public.bank_deposits;
 begin
+  select campus_id into v_campus_id from public.bank_deposits where id = p_deposit_id;
+  if not found or private.can_admin_campus(v_campus_id) is not true then
+    raise exception '입금 내역을 찾을 수 없습니다.';
+  end if;
+
+  -- 잠금 순서 통일: 연결된 주문/송금 id 를 잠금 없이 읽고 id 순으로 먼저 잠근 뒤 bank_deposits 를 잠근다.
+  select coalesce(array_agg(id order by id), '{}'::uuid[]) into v_order_ids
+  from public.textbook_orders
+  where confirmed_deposit_id = p_deposit_id;
+
+  select coalesce(array_agg(id order by id), '{}'::uuid[]) into v_payment_ids
+  from public.event_payments
+  where confirmed_deposit_id = p_deposit_id;
+
+  if cardinality(v_order_ids) > 0 then
+    perform 1 from public.textbook_orders
+    where id = any (v_order_ids)
+    order by id
+    for update;
+  end if;
+
+  if cardinality(v_payment_ids) > 0 then
+    perform 1 from public.event_payments
+    where id = any (v_payment_ids)
+    order by id
+    for update;
+  end if;
+
   select * into v_deposit from public.bank_deposits where id = p_deposit_id for update;
   if not found or private.can_admin_campus(v_deposit.campus_id) is not true then
     raise exception '입금 내역을 찾을 수 없습니다.';
@@ -1173,25 +1341,57 @@ begin
       matched_by = null
   where id = p_deposit_id;
 
-  perform 1 from public.textbook_orders
-  where confirmed_deposit_id = p_deposit_id
-  order by id
-  for update;
+  if cardinality(v_order_ids) > 0 then
+    update public.textbook_orders
+    set status = case when status = 'paid' then 'requested' else status end,
+        confirmed_deposit_id = null
+    where id = any (v_order_ids)
+      and confirmed_deposit_id = p_deposit_id;
+  end if;
 
-  update public.textbook_orders
-  set status = case when status = 'paid' then 'requested' else status end,
-      confirmed_deposit_id = null
-  where confirmed_deposit_id = p_deposit_id;
+  if cardinality(v_payment_ids) > 0 then
+    update public.event_payments
+    set is_paid = false,
+        confirmed_deposit_id = null
+    where id = any (v_payment_ids)
+      and confirmed_deposit_id = p_deposit_id;
+  end if;
+end;
+$$;
 
-  perform 1 from public.event_payments
-  where confirmed_deposit_id = p_deposit_id
-  order by id
-  for update;
+create function public.admin_clear_possible_duplicate(p_deposit_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_deposit public.bank_deposits;
+begin
+  select * into v_deposit from public.bank_deposits where id = p_deposit_id for update;
+  if not found or private.can_admin_campus(v_deposit.campus_id) is not true then
+    raise exception '입금 내역을 찾을 수 없습니다.';
+  end if;
+  if v_deposit.duplicate_of_id is null or v_deposit.duplicate_cleared_at is not null then
+    raise exception '중복 확인이 필요한 입금이 아닙니다.';
+  end if;
+  if v_deposit.status not in ('unparsed', 'unmatched', 'ambiguous', 'undone') then
+    raise exception '이미 처리된 입금은 중복 표시를 해제할 수 없습니다.';
+  end if;
 
-  update public.event_payments
-  set is_paid = false,
-      confirmed_deposit_id = null
-  where confirmed_deposit_id = p_deposit_id;
+  update public.bank_deposits
+  set duplicate_cleared_at = now(),
+      duplicate_cleared_by = auth.uid(),
+      status = case
+        when status = 'ambiguous' and match_reason = 'possible_duplicate' then 'unmatched'
+        else status
+      end,
+      match_reason = case
+        when status = 'unparsed' and match_reason = 'possible_duplicate' then 'parse_failed'
+        when match_reason = 'possible_duplicate' then 'duplicate_cleared'
+        else match_reason
+      end
+  where id = p_deposit_id;
 end;
 $$;
 
@@ -1254,7 +1454,7 @@ declare
   v_deposit public.bank_deposits;
   v_status text;
 begin
-  select * into v_deposit from public.bank_deposits where id = p_deposit_id for update;
+  select * into v_deposit from public.bank_deposits where id = p_deposit_id;
   if not found or private.can_admin_campus(v_deposit.campus_id) is not true then
     raise exception '입금 내역을 찾을 수 없습니다.';
   end if;
@@ -1330,6 +1530,8 @@ grant select (
   duplicate_count,
   last_duplicate_at,
   duplicate_of_id,
+  duplicate_cleared_at,
+  duplicate_cleared_by,
   created_at,
   updated_at
 ) on public.bank_deposits to authenticated;
@@ -1357,23 +1559,27 @@ grant execute on function
 to service_role;
 
 revoke execute on function
-  public.admin_list_bank_deposits(uuid, integer),
+  public.admin_list_bank_deposits(uuid, text, integer, integer),
+  public.admin_count_bank_deposits(uuid),
   public.admin_update_deposit_settings(uuid, boolean, text, text),
   public.admin_rotate_deposit_token(uuid),
-  public.admin_link_deposit_to_event(uuid, uuid),
-  public.admin_link_deposit_to_orders(uuid, uuid[]),
+  public.admin_link_deposit_to_event(uuid, uuid, boolean),
+  public.admin_link_deposit_to_orders(uuid, uuid[], boolean),
   public.admin_undo_deposit(uuid),
+  public.admin_clear_possible_duplicate(uuid),
   public.admin_ignore_deposit(uuid, boolean),
   public.admin_rematch_deposit(uuid)
 from public, anon;
 
 grant execute on function
-  public.admin_list_bank_deposits(uuid, integer),
+  public.admin_list_bank_deposits(uuid, text, integer, integer),
+  public.admin_count_bank_deposits(uuid),
   public.admin_update_deposit_settings(uuid, boolean, text, text),
   public.admin_rotate_deposit_token(uuid),
-  public.admin_link_deposit_to_event(uuid, uuid),
-  public.admin_link_deposit_to_orders(uuid, uuid[]),
+  public.admin_link_deposit_to_event(uuid, uuid, boolean),
+  public.admin_link_deposit_to_orders(uuid, uuid[], boolean),
   public.admin_undo_deposit(uuid),
+  public.admin_clear_possible_duplicate(uuid),
   public.admin_ignore_deposit(uuid, boolean),
   public.admin_rematch_deposit(uuid)
 to authenticated;

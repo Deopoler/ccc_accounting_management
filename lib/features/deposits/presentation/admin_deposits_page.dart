@@ -28,6 +28,9 @@ class _AdminDepositsPageState extends ConsumerState<AdminDepositsPage> {
   final _search = TextEditingController();
   final Set<String> _busy = {};
   bool _bulkReparsing = false;
+  List<BankDeposit> _extraItems = [];
+  bool _loadingMore = false;
+  bool _reachedEnd = false;
 
   @override
   void dispose() {
@@ -35,13 +38,59 @@ class _AdminDepositsPageState extends ConsumerState<AdminDepositsPage> {
     super.dispose();
   }
 
+  void _selectFilter(DepositFilter next) {
+    if (_filter == next) return;
+    setState(() {
+      _filter = next;
+      _extraItems = [];
+      _reachedEnd = false;
+      _loadingMore = false;
+    });
+  }
+
   void _refreshAll() {
+    setState(() {
+      _extraItems = [];
+      _reachedEnd = false;
+      _loadingMore = false;
+    });
     ref
       ..invalidate(bankDepositsProvider)
+      ..invalidate(depositCountsProvider)
       ..invalidate(unpaidLinkTargetsProvider)
       ..invalidate(adminOrdersProvider)
       ..invalidate(eventPaymentsProvider)
       ..invalidate(eventSummariesProvider);
+  }
+
+  Future<void> _loadMore(List<BankDeposit> loaded) async {
+    if (_loadingMore || _reachedEnd) return;
+    final filter = _filter;
+    setState(() => _loadingMore = true);
+    try {
+      final campusId = await ref.requireAdminCampusId();
+      final next = await ref
+          .read(depositRepositoryProvider)
+          .fetchDeposits(
+            campusId,
+            filter: filter,
+            limit: depositPageSize,
+            offset: loaded.length,
+          );
+      if (!mounted || _filter != filter) return;
+      final seen = {for (final d in loaded) d.id};
+      final added = next.where((d) => seen.add(d.id)).toList();
+      setState(() {
+        _extraItems = [..._extraItems, ...added];
+        if (next.length < depositPageSize || added.isEmpty) {
+          _reachedEnd = true;
+        }
+      });
+    } catch (e) {
+      if (mounted) showErrorSnack(context, e);
+    } finally {
+      if (mounted) setState(() => _loadingMore = false);
+    }
   }
 
   Future<void> _runFor(
@@ -81,6 +130,28 @@ class _AdminDepositsPageState extends ConsumerState<AdminDepositsPage> {
       deposit.id,
       () => ref.read(depositRepositoryProvider).undoDeposit(deposit.id),
       successMessage: '입금 확인을 취소했습니다.',
+    );
+  }
+
+  Future<void> _clearDuplicate(BankDeposit deposit) async {
+    final who = deposit.depositorName ?? '이 입금';
+    final amountText =
+        deposit.amount == null ? '' : ' (${formatWon(deposit.amount!)})';
+    final ok = await showConfirmDialog(
+      context,
+      title: '중복 아님 확인',
+      message:
+          '$who$amountText 입금을 중복이 아닌 별도 입금으로 표시할까요?\n'
+          '확인 후 다시 매칭을 실행하면 자동 확인될 수 있습니다.',
+      confirmLabel: '중복 아님',
+    );
+    if (!ok || !mounted) return;
+    await _runFor(
+      deposit.id,
+      () => ref
+          .read(depositRepositoryProvider)
+          .clearPossibleDuplicate(deposit.id),
+      successMessage: '중복 의심 표시를 해제했습니다. 필요하면 다시 매칭을 눌러 주세요.',
     );
   }
 
@@ -174,15 +245,36 @@ class _AdminDepositsPageState extends ConsumerState<AdminDepositsPage> {
       builder: (_) => _LinkDepositDialog(deposit: deposit),
     );
     if (result == null || !mounted) return;
+    final mismatch =
+        deposit.amount != null && result.targetAmount != deposit.amount;
+    if (mismatch) {
+      final ok = await showConfirmDialog(
+        context,
+        title: '금액 불일치 확인',
+        message:
+            '입금 금액(${formatWon(deposit.amount!)})과 선택한 대상 합계(${formatWon(result.targetAmount)})가 다릅니다.\n'
+            '그래도 연결할까요?',
+        confirmLabel: '금액 달라도 연결',
+      );
+      if (!ok || !mounted) return;
+    }
     await _runFor(
       deposit.id,
       () => switch (result) {
         _EventLinkSelection(:final eventPaymentId) => ref
             .read(depositRepositoryProvider)
-            .linkToEvent(deposit.id, eventPaymentId),
+            .linkToEvent(
+              deposit.id,
+              eventPaymentId,
+              allowAmountMismatch: mismatch,
+            ),
         _OrdersLinkSelection(:final orderIds) => ref
             .read(depositRepositoryProvider)
-            .linkToOrders(deposit.id, orderIds),
+            .linkToOrders(
+              deposit.id,
+              orderIds,
+              allowAmountMismatch: mismatch,
+            ),
       },
       successMessage: '입금 대상을 연결했습니다.',
     );
@@ -204,25 +296,35 @@ class _AdminDepositsPageState extends ConsumerState<AdminDepositsPage> {
 
   @override
   Widget build(BuildContext context) {
-    final depositsAsync = ref.watch(bankDepositsProvider);
+    ref.listen<AsyncValue<String?>>(adminCampusIdProvider, (prev, next) {
+      if (prev?.asData?.value != next.asData?.value) {
+        setState(() {
+          _extraItems = [];
+          _reachedEnd = false;
+          _loadingMore = false;
+        });
+      }
+    });
+
+    final depositsAsync = ref.watch(bankDepositsProvider(_filter));
+    final countsAsync = ref.watch(depositCountsProvider);
+    final counts = countsAsync.asData?.value ?? DepositCounts.empty;
 
     return AsyncValueView<List<BankDeposit>>(
       value: depositsAsync,
-      onRetry: () => ref.invalidate(bankDepositsProvider),
-      data: (all) {
-        final counts = {
-          for (final f in DepositFilter.values)
-            f: all.where((d) => f.matches(d.status)).length,
-        };
-        final unparsedWithRawCount = all
-            .where((d) => d.status == DepositStatus.unparsed && d.hasRawText)
-            .length;
-        final visible = all
-            .where(
-              (d) =>
-                  _filter.matches(d.status) && _matchesSearch(d, _search.text),
-            )
+      onRetry: _refreshAll,
+      data: (firstPage) {
+        final loaded = [...firstPage, ..._extraItems];
+        final totalInFilter = counts.countFor(_filter);
+        final hasMore =
+            !_reachedEnd &&
+            firstPage.length >= depositPageSize &&
+            loaded.length < totalInFilter;
+        final visible = loaded
+            .where((d) => _matchesSearch(d, _search.text))
             .toList();
+        final unparsedWithRawCount = counts.unparsedWithRaw;
+        final isEmptyCampus = counts.all == 0 && loaded.isEmpty;
 
         return ListView(
           children: [
@@ -237,9 +339,9 @@ class _AdminDepositsPageState extends ConsumerState<AdminDepositsPage> {
                     children: [
                       for (final f in DepositFilter.values)
                         ChoiceChip(
-                          label: Text('${f.label} ${counts[f] ?? 0}'),
+                          label: Text('${f.label} ${counts.countFor(f)}'),
                           selected: _filter == f,
-                          onSelected: (_) => setState(() => _filter = f),
+                          onSelected: (_) => _selectFilter(f),
                         ),
                     ],
                   ),
@@ -295,7 +397,7 @@ class _AdminDepositsPageState extends ConsumerState<AdminDepositsPage> {
                     },
                   ),
                   const SizedBox(height: 16),
-                  if (all.isEmpty)
+                  if (isEmptyCampus)
                     EmptyView(
                       icon: Icons.account_balance_wallet_outlined,
                       message:
@@ -318,19 +420,40 @@ class _AdminDepositsPageState extends ConsumerState<AdminDepositsPage> {
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        SectionTitle('입금 ${visible.length}건'),
+                        SectionTitle(
+                          _search.text.trim().isEmpty &&
+                                  totalInFilter > loaded.length
+                              ? '입금 ${visible.length} / $totalInFilter건'
+                              : '입금 ${visible.length}건',
+                        ),
                         for (final d in visible) ...[
                           _DepositCard(
                             deposit: d,
                             busy: _busy.contains(d.id),
                             onLink: () => _openLinkDialog(d),
                             onUndo: () => _undo(d),
+                            onClearDuplicate: () => _clearDuplicate(d),
                             onIgnore: () => _ignore(d, ignore: true),
                             onUnignore: () => _ignore(d, ignore: false),
                             onRematch: () => _rematch(d),
                             onReparse: () => _reparseOne(d),
                           ),
                           const SizedBox(height: 10),
+                        ],
+                        if (hasMore) ...[
+                          const SizedBox(height: 4),
+                          Center(
+                            child: OutlinedButton(
+                              onPressed: _loadingMore
+                                  ? null
+                                  : () => _loadMore(loaded),
+                              child: Text(
+                                _loadingMore
+                                    ? '불러오는 중...'
+                                    : '더 보기 (${loaded.length} / $totalInFilter)',
+                              ),
+                            ),
+                          ),
                         ],
                       ],
                     ),
@@ -350,6 +473,7 @@ class _DepositCard extends StatelessWidget {
     required this.busy,
     required this.onLink,
     required this.onUndo,
+    required this.onClearDuplicate,
     required this.onIgnore,
     required this.onUnignore,
     required this.onRematch,
@@ -360,6 +484,7 @@ class _DepositCard extends StatelessWidget {
   final bool busy;
   final VoidCallback onLink;
   final VoidCallback onUndo;
+  final VoidCallback onClearDuplicate;
   final VoidCallback onIgnore;
   final VoidCallback onUnignore;
   final VoidCallback onRematch;
@@ -511,12 +636,17 @@ class _DepositCard extends StatelessWidget {
                     onPressed: busy ? null : onReparse,
                     child: const Text('다시 해석'),
                   ),
+                if (d.isPossibleDuplicate && d.status.canIgnore)
+                  OutlinedButton(
+                    onPressed: busy ? null : onClearDuplicate,
+                    child: const Text('중복 아님'),
+                  ),
                 if (d.isParsed && d.status.canLink)
                   OutlinedButton(
                     onPressed: busy ? null : onLink,
                     child: const Text('대상 연결'),
                   ),
-                if (d.isParsed && d.status.canRematch)
+                if (d.isParsed && d.status.canRematch && !d.isPossibleDuplicate)
                   OutlinedButton(
                     onPressed: busy ? null : onRematch,
                     child: const Text('다시 매칭'),
@@ -547,17 +677,19 @@ class _DepositCard extends StatelessWidget {
 }
 
 sealed class _LinkSelection {
-  const _LinkSelection();
+  const _LinkSelection({required this.targetAmount});
+
+  final int targetAmount;
 }
 
 class _EventLinkSelection extends _LinkSelection {
-  const _EventLinkSelection(this.eventPaymentId);
+  const _EventLinkSelection(this.eventPaymentId, {required super.targetAmount});
 
   final String eventPaymentId;
 }
 
 class _OrdersLinkSelection extends _LinkSelection {
-  const _OrdersLinkSelection(this.orderIds);
+  const _OrdersLinkSelection(this.orderIds, {required super.targetAmount});
 
   final List<String> orderIds;
 }
@@ -591,20 +723,46 @@ class _LinkDepositDialogState extends ConsumerState<_LinkDepositDialog> {
   void _pickCandidate(DepositCandidate cand) {
     if (!cand.isLinkable) return;
     if (cand.isEvent) {
-      Navigator.pop(context, _EventLinkSelection(cand.eventPaymentId!));
+      Navigator.pop(
+        context,
+        _EventLinkSelection(cand.eventPaymentId!, targetAmount: cand.amount),
+      );
     } else {
-      Navigator.pop(context, _OrdersLinkSelection(cand.orderIds));
+      Navigator.pop(
+        context,
+        _OrdersLinkSelection(cand.orderIds, targetAmount: cand.amount),
+      );
     }
   }
 
-  void _submitManual() {
+  void _submitManual(UnpaidLinkTargets targets) {
     if (_tab == _LinkTab.events) {
       final id = _selectedEventPaymentId;
       if (id == null) return;
-      Navigator.pop(context, _EventLinkSelection(id));
+      UnpaidEventTarget? payment;
+      for (final p in targets.eventPayments) {
+        if (p.paymentId == id) {
+          payment = p;
+          break;
+        }
+      }
+      if (payment == null) return;
+      Navigator.pop(
+        context,
+        _EventLinkSelection(payment.paymentId, targetAmount: payment.amount),
+      );
     } else {
       if (_selectedOrderIds.isEmpty) return;
-      Navigator.pop(context, _OrdersLinkSelection(_selectedOrderIds.toList()));
+      final selectedSum = targets.orders
+          .where((o) => _selectedOrderIds.contains(o.orderId))
+          .fold<int>(0, (sum, o) => sum + o.amount);
+      Navigator.pop(
+        context,
+        _OrdersLinkSelection(
+          _selectedOrderIds.toList(),
+          targetAmount: selectedSum,
+        ),
+      );
     }
   }
 
@@ -613,14 +771,17 @@ class _LinkDepositDialogState extends ConsumerState<_LinkDepositDialog> {
     final c = context.colors;
     final theme = Theme.of(context);
     final targetsAsync = ref.watch(unpaidLinkTargetsProvider);
+    final loadedTargets = targetsAsync.asData?.value;
     final availableHeight =
         MediaQuery.sizeOf(context).height -
         MediaQuery.viewInsetsOf(context).bottom;
     final d = widget.deposit;
     final linkableCandidates = d.candidates.where((x) => x.isLinkable).toList();
-    final canSubmit = _tab == _LinkTab.events
-        ? _selectedEventPaymentId != null
-        : _selectedOrderIds.isNotEmpty;
+    final canSubmit =
+        loadedTargets != null &&
+        (_tab == _LinkTab.events
+            ? _selectedEventPaymentId != null
+            : _selectedOrderIds.isNotEmpty);
 
     return AlertDialog(
       title: const Text('입금 대상 연결'),
@@ -827,7 +988,9 @@ class _LinkDepositDialogState extends ConsumerState<_LinkDepositDialog> {
           child: const Text('취소'),
         ),
         FilledButton(
-          onPressed: canSubmit ? _submitManual : null,
+          onPressed: loadedTargets == null || !canSubmit
+              ? null
+              : () => _submitManual(loadedTargets),
           child: const Text('연결'),
         ),
       ],

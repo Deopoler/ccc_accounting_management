@@ -70,6 +70,8 @@ describe('스키마 회귀 검사', () => {
       'private.is_approved_user',
       'private.is_central_admin',
       'private.my_campus_id',
+      'public.admin_clear_possible_duplicate',
+      'public.admin_count_bank_deposits',
       'public.admin_create_next_order_round',
       'public.admin_ignore_deposit',
       'public.admin_link_deposit_to_event',

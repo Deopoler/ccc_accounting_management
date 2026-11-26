@@ -377,45 +377,64 @@ class _FakeDeposits implements DepositRepository {
       );
 
   @override
-  Future<List<BankDeposit>> fetchDeposits(String campusId) async => [
-    BankDeposit(
-      id: 'd1',
-      campusId: campusId,
-      bankCode: 'toss',
-      status: DepositStatus.ambiguous,
-      depositorName: _longName,
-      amount: 25000,
-      depositedAt: DateTime(2026, 11, 26, 12),
-      receivedAt: DateTime(2026, 11, 26, 12, 1),
-      matchReason: 'same_name_members',
-      candidates: const [
-        DepositCandidate(
-          kind: 'textbook_single',
-          userId: 'u1',
-          orderIds: ['o1'],
-          label: '$_longName 교재 신청',
-          amount: 25000,
-        ),
-      ],
-    ),
-    BankDeposit(
-      id: 'd2',
-      campusId: campusId,
-      bankCode: 'toss',
-      status: DepositStatus.unparsed,
-      depositedAt: DateTime(2026, 11, 26, 11),
-      receivedAt: DateTime(2026, 11, 26, 11, 1),
-      rawTitle: '토스뱅크',
-      rawText: 'KAIST CCC 알 수 없는 알림 형식 테스트 문자열입니다',
-      rawPackage: 'viva.republica.toss',
-      rawExpiresAt: DateTime(2026, 12, 10),
-      matchReason: 'no_amount',
-    ),
-  ];
+  Future<List<BankDeposit>> fetchDeposits(
+    String campusId, {
+    DepositFilter filter = DepositFilter.all,
+    int limit = 50,
+    int offset = 0,
+  }) async {
+    final items = [
+      BankDeposit(
+        id: 'd1',
+        campusId: campusId,
+        bankCode: 'toss',
+        status: DepositStatus.ambiguous,
+        depositorName: _longName,
+        amount: 25000,
+        depositedAt: DateTime(2026, 11, 26, 12),
+        receivedAt: DateTime(2026, 11, 26, 12, 1),
+        matchReason: 'same_name_members',
+        candidates: const [
+          DepositCandidate(
+            kind: 'textbook_single',
+            userId: 'u1',
+            orderIds: ['o1'],
+            label: '$_longName 교재 신청',
+            amount: 25000,
+          ),
+        ],
+      ),
+      BankDeposit(
+        id: 'd2',
+        campusId: campusId,
+        bankCode: 'toss',
+        status: DepositStatus.unparsed,
+        depositedAt: DateTime(2026, 11, 26, 11),
+        receivedAt: DateTime(2026, 11, 26, 11, 1),
+        rawTitle: '토스뱅크',
+        rawText: 'KAIST CCC 알 수 없는 알림 형식 테스트 문자열입니다',
+        rawPackage: 'viva.republica.toss',
+        rawExpiresAt: DateTime(2026, 12, 10),
+        matchReason: 'no_amount',
+      ),
+    ];
+    return items
+        .where((d) => filter.matches(d.status))
+        .skip(offset)
+        .take(limit)
+        .toList();
+  }
+
+  @override
+  Future<DepositCounts> fetchDepositCounts(String campusId) async =>
+      const DepositCounts(needsReview: 2, all: 2, unparsedWithRaw: 1);
 
   @override
   Future<UnpaidLinkTargets> fetchUnpaidLinkTargets(String campusId) async =>
       UnpaidLinkTargets.empty;
+
+  @override
+  Future<void> clearPossibleDuplicate(String depositId) async {}
 
   @override
   dynamic noSuchMethod(Invocation i) => super.noSuchMethod(i);

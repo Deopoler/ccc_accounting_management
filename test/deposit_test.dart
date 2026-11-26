@@ -169,9 +169,41 @@ class _FakeDepositRepo implements DepositRepository {
   }
 
   @override
-  Future<List<BankDeposit>> fetchDeposits(String campusId) async {
+  Future<List<BankDeposit>> fetchDeposits(
+    String campusId, {
+    DepositFilter filter = DepositFilter.all,
+    int limit = 50,
+    int offset = 0,
+  }) async {
     if (fetchError != null) throw fetchError!;
-    return deposits;
+    calls.add('fetchDeposits ${filter.dbGroup} limit=$limit offset=$offset');
+    return deposits
+        .where((d) => filter.matches(d.status))
+        .skip(offset)
+        .take(limit)
+        .toList();
+  }
+
+  @override
+  Future<DepositCounts> fetchDepositCounts(String campusId) async {
+    if (fetchError != null) throw fetchError!;
+    return DepositCounts(
+      needsReview: deposits
+          .where((d) => DepositFilter.needsReview.matches(d.status))
+          .length,
+      autoMatched: deposits
+          .where((d) => d.status == DepositStatus.autoMatched)
+          .length,
+      manualMatched: deposits
+          .where((d) => d.status == DepositStatus.manualMatched)
+          .length,
+      ignored: deposits.where((d) => d.status == DepositStatus.ignored).length,
+      undone: deposits.where((d) => d.status == DepositStatus.undone).length,
+      all: deposits.length,
+      unparsedWithRaw: deposits
+          .where((d) => d.status == DepositStatus.unparsed && d.hasRawText)
+          .length,
+    );
   }
 
   @override
@@ -179,16 +211,30 @@ class _FakeDepositRepo implements DepositRepository {
       targets;
 
   @override
-  Future<void> linkToEvent(String depositId, String eventPaymentId) async =>
-      calls.add('linkEvent $depositId $eventPaymentId');
+  Future<void> linkToEvent(
+    String depositId,
+    String eventPaymentId, {
+    bool allowAmountMismatch = false,
+  }) async => calls.add(
+    'linkEvent $depositId $eventPaymentId mismatch=$allowAmountMismatch',
+  );
 
   @override
-  Future<void> linkToOrders(String depositId, List<String> orderIds) async =>
-      calls.add('linkOrders $depositId ${orderIds.join(',')}');
+  Future<void> linkToOrders(
+    String depositId,
+    List<String> orderIds, {
+    bool allowAmountMismatch = false,
+  }) async => calls.add(
+    'linkOrders $depositId ${orderIds.join(',')} mismatch=$allowAmountMismatch',
+  );
 
   @override
   Future<void> undoDeposit(String depositId) async =>
       calls.add('undo $depositId');
+
+  @override
+  Future<void> clearPossibleDuplicate(String depositId) async =>
+      calls.add('clearDuplicate $depositId');
 
   @override
   Future<void> ignoreDeposit(String depositId, {required bool ignore}) async =>
@@ -416,6 +462,85 @@ void main() {
       expect(depositIngestUrl(''), isEmpty);
     });
 
+    test('DepositStatus 와 사유 라벨이 모든 SQL 상태 · 사유 코드를 빠짐없이 덮는다', () {
+      const sqlStatuses = [
+        'unparsed',
+        'unmatched',
+        'ambiguous',
+        'auto_matched',
+        'manual_matched',
+        'ignored',
+        'undone',
+      ];
+      expect(
+        DepositStatus.values.map((s) => s.dbValue).toSet(),
+        sqlStatuses.toSet(),
+      );
+      for (final code in sqlStatuses) {
+        final parsed = DepositStatus.parse(code);
+        expect(parsed.dbValue, code);
+        expect(parsed.label, isNotEmpty);
+        expect(parsed.label, isNot(code));
+      }
+
+      const sqlMatchReasons = [
+        'exact_event',
+        'prefix_event',
+        'exact_textbook_single',
+        'prefix_textbook_single',
+        'exact_textbook_round_sum',
+        'prefix_textbook_round_sum',
+        'no_candidate',
+        'multiple_candidates',
+        'cross_type_conflict',
+        'same_name_members',
+        'possible_duplicate',
+        'duplicate_cleared',
+        'match_error',
+        'empty_depositor_name',
+        'manual_link_event',
+        'manual_link_orders',
+        'no_amount',
+        'multiple_amounts',
+        'invalid_amount',
+        'no_depositor',
+        'parse_failed',
+        'raw_expired',
+        'unsupported_bank',
+        'no_account_label',
+        'config_missing_label',
+        'withdrawal',
+        'outgoing_transfer',
+        'ad',
+        'empty',
+        'ignored',
+      ];
+      for (final reason in sqlMatchReasons) {
+        final label = depositReasonLabel(reason);
+        expect(label, isNotEmpty, reason: 'empty label for $reason');
+        expect(label, isNot(reason), reason: 'unmapped match_reason: $reason');
+      }
+
+      const sqlIgnoredReasons = [
+        'no_account_label',
+        'config_missing_label',
+        'withdrawal',
+        'outgoing_transfer',
+        'ad',
+        'empty',
+        'ignored',
+      ];
+      for (final reason in sqlIgnoredReasons) {
+        final label = ignoredReasonLabel(reason);
+        expect(label, isNotEmpty, reason: 'empty label for $reason');
+        expect(
+          label,
+          isNot(reason),
+          reason: 'unmapped ignored_reason: $reason',
+        );
+      }
+    });
+
     test('TextbookOrder 와 EventPayment 의 isAutoConfirmed 판별', () {
       final autoOrder = TextbookOrder.fromJson({
         'id': 'o1',
@@ -517,7 +642,7 @@ void main() {
       expect(find.text('추천 후보'), findsOneWidget);
       await tester.tap(find.widgetWithText(OutlinedButton, '연결').first);
       await tester.pumpAndSettle();
-      expect(repo.calls, contains('linkOrders d-amb o1'));
+      expect(repo.calls, contains('linkOrders d-amb o1 mismatch=false'));
 
       // 자동 확인 탭 -> 확인 취소 다이얼로그 확인 -> undoDeposit 호출
       final autoTab = find.text('자동 확인 1');
@@ -535,6 +660,111 @@ void main() {
       await tester.tap(find.widgetWithText(FilledButton, '확인 취소'));
       await tester.pumpAndSettle();
       expect(repo.calls, contains('undo d-auto'));
+    });
+
+    testWidgets('중복 의심 입금의 중복 아님 확인과 금액 불일치 수동 연결 확인 다이얼로그가 동작한다', (
+      tester,
+    ) async {
+      final repo = _FakeDepositRepo()
+        ..deposits = [
+          BankDeposit(
+            id: 'd-dup',
+            campusId: 'k',
+            bankCode: 'toss',
+            status: DepositStatus.ambiguous,
+            depositorName: '홍길동',
+            amount: 10000,
+            depositedAt: DateTime(2026, 11, 26, 12),
+            receivedAt: DateTime(2026, 11, 26, 12, 1),
+            matchReason: 'possible_duplicate',
+            duplicateOfId: 'd-orig',
+          ),
+        ];
+      await _pump(tester, const AdminDepositsPage(), depositRepo: repo);
+
+      // 중복 의심 상태에서는 다시 매칭 대신 중복 아님 버튼이 보인다.
+      expect(find.widgetWithText(OutlinedButton, '다시 매칭'), findsNothing);
+      final clearBtn = find.widgetWithText(OutlinedButton, '중복 아님');
+      expect(clearBtn, findsOneWidget);
+
+      await tester.tap(clearBtn);
+      await tester.pumpAndSettle();
+      expect(find.text('중복 아님 확인'), findsOneWidget);
+      await tester.tap(find.widgetWithText(FilledButton, '중복 아님'));
+      await tester.pumpAndSettle();
+      expect(repo.calls, contains('clearDuplicate d-dup'));
+
+      // 10,000원 입금을 30,000원 이벤트에 수동 연결 -> 금액 불일치 확인 다이얼로그 표시
+      await tester.tap(find.widgetWithText(OutlinedButton, '대상 연결'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('미납 이벤트'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.textContaining('겨울 수련회'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, '연결'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('금액 불일치 확인'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.textContaining('10,000원'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.textContaining('30,000원'),
+        ),
+        findsOneWidget,
+      );
+      await tester.tap(find.widgetWithText(FilledButton, '금액 달라도 연결'));
+      await tester.pumpAndSettle();
+      expect(repo.calls, contains('linkEvent d-dup ep1 mismatch=true'));
+    });
+
+    testWidgets('50건을 초과하는 목록은 더 보기로 다음 페이지를 불러온다', (tester) async {
+      final repo = _FakeDepositRepo()
+        ..deposits = [
+          for (var i = 0; i < 55; i++)
+            BankDeposit(
+              id: 'd-$i',
+              campusId: 'k',
+              bankCode: 'toss',
+              status: DepositStatus.unmatched,
+              depositorName: '입금자$i',
+              amount: 10000,
+              depositedAt: DateTime(2026, 11, 26, 12).subtract(
+                Duration(minutes: i),
+              ),
+              receivedAt: DateTime(2026, 11, 26, 12).subtract(
+                Duration(minutes: i),
+              ),
+              matchReason: 'no_candidate',
+            ),
+        ];
+      await _pump(tester, const AdminDepositsPage(), depositRepo: repo);
+
+      expect(find.text('검토 필요 55'), findsOneWidget);
+      expect(find.text('입금 50 / 55건'), findsOneWidget);
+      final loadMoreBtn = find.widgetWithText(OutlinedButton, '더 보기 (50 / 55)');
+      await tester.scrollUntilVisible(
+        loadMoreBtn,
+        600,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.ensureVisible(loadMoreBtn);
+      await tester.pumpAndSettle();
+      await tester.tap(loadMoreBtn);
+      await tester.pumpAndSettle();
+
+      expect(
+        repo.calls,
+        contains('fetchDeposits needs_review limit=50 offset=50'),
+      );
+      expect(find.text('입금자54'), findsOneWidget);
+      expect(find.textContaining('더 보기'), findsNothing);
     });
 
     testWidgets('빈 상태와 오류 상태를 표시한다', (tester) async {

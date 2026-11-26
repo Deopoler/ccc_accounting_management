@@ -1,5 +1,5 @@
 import { parseDepositNotification } from './index.ts';
-import { computeDedupeHashes, parseIngestTimestamp } from './ingest_utils.ts';
+import { computeDedupeHashes, getClientIp, parseIngestTimestamp } from './ingest_utils.ts';
 
 function assertDeepEqual(actual: unknown, expected: unknown): void {
   const a = JSON.stringify(actual);
@@ -164,19 +164,59 @@ Deno.test('registry: unsupported bank code returns unparsed', () => {
   );
 });
 
-Deno.test('ingest_utils: offset-less timestamp strings are interpreted as Asia/Seoul (+09:00)', () => {
+Deno.test('ingest_utils: offset-less timestamp strings are interpreted as Asia/Seoul (+09:00) and unknown formats fall back to server time', () => {
   const now = new Date('2026-11-26T06:00:00Z');
-  const a = parseIngestTimestamp('2026-11-26 14:30:05', now);
-  assert.deepEqual(a.supplied, true);
-  assert.deepEqual(a.date.toISOString(), '2026-11-26T05:30:05.000Z');
 
-  const b = parseIngestTimestamp('2026-11-26T14:30', now);
-  assert.deepEqual(b.supplied, true);
-  assert.deepEqual(b.date.toISOString(), '2026-11-26T05:30:00.000Z');
+  for (const [input, expectedIso] of [
+    ['2026-11-26 14:30:05', '2026-11-26T05:30:05.000Z'],
+    ['2026-11-26T14:30', '2026-11-26T05:30:00.000Z'],
+    ['2026/11/26 14:30:05', '2026-11-26T05:30:05.000Z'],
+    ['2026/11/26 14:30', '2026-11-26T05:30:00.000Z'],
+    ['2026.11.26 14:30:05', '2026-11-26T05:30:05.000Z'],
+    ['2026.11.26 9:05', '2026-11-26T00:05:00.000Z'],
+    ['2026-11-26T05:30:05Z', '2026-11-26T05:30:05.000Z'],
+    ['2026-11-26T14:30:05+09:00', '2026-11-26T05:30:05.000Z'],
+  ] as const) {
+    const res = parseIngestTimestamp(input, now);
+    assert.deepEqual(res.supplied, true);
+    assert.deepEqual(res.date.toISOString(), expectedIso);
+  }
 
-  const missing = parseIngestTimestamp(undefined, now);
-  assert.deepEqual(missing.supplied, false);
-  assert.deepEqual(missing.date.toISOString(), now.toISOString());
+  for (const unknown of [
+    undefined,
+    '',
+    'Nov 26 2026 14:30:00',
+    'Thu, 26 Nov 2026 05:30:00 GMT',
+    '26/11/2026 14:30',
+    '2026-11-26',
+    '2026-02-30 10:00:00',
+    'yesterday',
+  ]) {
+    const res = parseIngestTimestamp(unknown, now);
+    assert.deepEqual(res.supplied, false);
+    assert.deepEqual(res.date.toISOString(), now.toISOString());
+  }
+});
+
+Deno.test('ingest_utils: getClientIp prefers cf-connecting-ip, else last x-forwarded-for entry', () => {
+  assert.deepEqual(
+    getClientIp(new Headers({
+      'cf-connecting-ip': '203.0.113.10',
+      'x-forwarded-for': '198.51.100.1, 198.51.100.2',
+    })),
+    '203.0.113.10',
+  );
+  assert.deepEqual(
+    getClientIp(new Headers({
+      'x-forwarded-for': '1.2.3.4, 5.6.7.8, 198.51.100.9 ',
+    })),
+    '198.51.100.9',
+  );
+  assert.deepEqual(
+    getClientIp(new Headers({ 'x-forwarded-for': '  , 198.51.100.7 , ' })),
+    '198.51.100.7',
+  );
+  assert.deepEqual(getClientIp(new Headers()), 'unknown');
 });
 
 Deno.test('ingest_utils: external_id reuse with different notification produces a distinct dedupe_key', async () => {

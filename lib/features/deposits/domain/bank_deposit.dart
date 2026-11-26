@@ -39,16 +39,17 @@ enum DepositStatus {
 }
 
 enum DepositFilter {
-  needsReview('검토 필요'),
-  autoMatched('자동 확인'),
-  manualMatched('수동 연결'),
-  ignored('무시'),
-  undone('취소됨'),
-  all('전체');
+  needsReview('검토 필요', 'needs_review'),
+  autoMatched('자동 확인', 'auto_matched'),
+  manualMatched('수동 연결', 'manual_matched'),
+  ignored('무시', 'ignored'),
+  undone('취소됨', 'undone'),
+  all('전체', 'all');
 
-  const DepositFilter(this.label);
+  const DepositFilter(this.label, this.dbGroup);
 
   final String label;
+  final String dbGroup;
 
   bool matches(DepositStatus status) => switch (this) {
     DepositFilter.needsReview => status.needsReview,
@@ -57,6 +58,47 @@ enum DepositFilter {
     DepositFilter.ignored => status == DepositStatus.ignored,
     DepositFilter.undone => status == DepositStatus.undone,
     DepositFilter.all => true,
+  };
+}
+
+class DepositCounts {
+  const DepositCounts({
+    this.needsReview = 0,
+    this.autoMatched = 0,
+    this.manualMatched = 0,
+    this.ignored = 0,
+    this.undone = 0,
+    this.all = 0,
+    this.unparsedWithRaw = 0,
+  });
+
+  factory DepositCounts.fromJson(Map<String, dynamic> json) => DepositCounts(
+    needsReview: (json['needs_review'] as num? ?? 0).toInt(),
+    autoMatched: (json['auto_matched'] as num? ?? 0).toInt(),
+    manualMatched: (json['manual_matched'] as num? ?? 0).toInt(),
+    ignored: (json['ignored'] as num? ?? 0).toInt(),
+    undone: (json['undone'] as num? ?? 0).toInt(),
+    all: (json['all_count'] as num? ?? 0).toInt(),
+    unparsedWithRaw: (json['unparsed_with_raw'] as num? ?? 0).toInt(),
+  );
+
+  static const empty = DepositCounts();
+
+  final int needsReview;
+  final int autoMatched;
+  final int manualMatched;
+  final int ignored;
+  final int undone;
+  final int all;
+  final int unparsedWithRaw;
+
+  int countFor(DepositFilter filter) => switch (filter) {
+    DepositFilter.needsReview => needsReview,
+    DepositFilter.autoMatched => autoMatched,
+    DepositFilter.manualMatched => manualMatched,
+    DepositFilter.ignored => ignored,
+    DepositFilter.undone => undone,
+    DepositFilter.all => all,
   };
 }
 
@@ -130,6 +172,8 @@ class BankDeposit {
     this.duplicateCount = 0,
     this.lastDuplicateAt,
     this.duplicateOfId,
+    this.duplicateClearedAt,
+    this.duplicateClearedBy,
   });
 
   factory BankDeposit.fromJson(Map<String, dynamic> json) {
@@ -164,6 +208,8 @@ class BankDeposit {
       duplicateCount: (json['duplicate_count'] as num? ?? 0).toInt(),
       lastDuplicateAt: _parseOptionalTime(json['last_duplicate_at']),
       duplicateOfId: json['duplicate_of_id'] as String?,
+      duplicateClearedAt: _parseOptionalTime(json['duplicate_cleared_at']),
+      duplicateClearedBy: json['duplicate_cleared_by'] as String?,
     );
   }
 
@@ -190,8 +236,13 @@ class BankDeposit {
   final int duplicateCount;
   final DateTime? lastDuplicateAt;
   final String? duplicateOfId;
+  final DateTime? duplicateClearedAt;
+  final String? duplicateClearedBy;
 
   bool get isParsed => depositorName != null && amount != null;
+
+  bool get isPossibleDuplicate =>
+      duplicateOfId != null && duplicateClearedAt == null;
 
   bool get hasRawText =>
       (rawTitle != null && rawTitle!.isNotEmpty) ||
@@ -328,6 +379,7 @@ String depositReasonLabel(String? reason, {DepositStatus? status}) {
     'cross_type_conflict' => '교재 신청과 이벤트 모두 일치해 자동 확인하지 않았습니다.',
     'same_name_members' => '같은 이름의 회원이 여러 명 있어 확인이 필요합니다.',
     'possible_duplicate' => '60초 안에 같은 내용의 입금 알림이 있어 중복 여부를 확인해야 합니다.',
+    'duplicate_cleared' => '관리자가 중복 아님으로 확인했습니다.',
     'match_error' => '자동 매칭 중 오류가 발생해 수동 확인이 필요합니다.',
     'empty_depositor_name' => '입금자명이 비어 있어 자동 확인하지 않았습니다.',
     'manual_link_event' => '관리자가 이벤트 송금과 연결했습니다.',
@@ -339,6 +391,13 @@ String depositReasonLabel(String? reason, {DepositStatus? status}) {
     'parse_failed' => '알림 형식을 해석하지 못했습니다.',
     'raw_expired' => '원문 보관 기간(14일)이 지나 내용이 삭제되었습니다.',
     'unsupported_bank' => '지원하지 않는 은행 형식입니다.',
+    'no_account_label' ||
+    'config_missing_label' ||
+    'withdrawal' ||
+    'outgoing_transfer' ||
+    'ad' ||
+    'empty' ||
+    'ignored' => ignoredReasonLabel(reason),
     null || '' => switch (status) {
       DepositStatus.undone => '관리자가 입금 확인을 취소했습니다.',
       DepositStatus.ignored => '관리자가 무시 처리했습니다.',
