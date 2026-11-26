@@ -4,6 +4,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
+import '../../../core/utils/josa.dart';
 import '../../../core/widgets/feedback.dart';
 import '../../../core/widgets/state_views.dart';
 import 'settings_providers.dart';
@@ -74,7 +75,7 @@ class BankAccountCard extends ConsumerWidget {
                   value: a.accountNumber,
                   copyText: '${a.bankName} ${a.accountNumber}',
                   copiedMessage:
-                      '"${a.bankName} ${a.accountNumber}"을(를) 복사했습니다.',
+                      '${withObject('"${a.bankName} ${a.accountNumber}"')} 복사했습니다.',
                 ),
                 if (a.holder.isNotEmpty)
                   _CopyRow(label: '예금주', value: a.holder),
@@ -137,12 +138,10 @@ class _CopyRow extends StatelessWidget {
             ),
           ),
           if (copyText != null)
-            // 값 칸을 넓게 쓰도록 작은 글자 버튼으로 둔다.
             TextButton(
               style: TextButton.styleFrom(
-                minimumSize: const Size(0, 36),
+                minimumSize: const Size(44, 44),
                 padding: const EdgeInsets.symmetric(horizontal: 10),
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 textStyle: const TextStyle(
                   fontFamily: AppTheme.fontFamily,
                   fontSize: 14,
@@ -158,7 +157,7 @@ class _CopyRow extends StatelessWidget {
               child: const Text('복사'),
             )
           else
-            const SizedBox(height: 36),
+            const SizedBox(height: 44),
         ],
       ),
     );

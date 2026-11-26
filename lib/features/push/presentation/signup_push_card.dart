@@ -116,9 +116,14 @@ class _PushCardState extends ConsumerState<_PushCard> {
                 Expanded(child: SectionTitle(widget.title)),
                 Padding(
                   padding: const EdgeInsets.only(bottom: 12),
-                  child: Switch(
-                    value: isOn,
-                    onChanged: canToggle ? _toggle : null,
+                  child: MergeSemantics(
+                    child: Semantics(
+                      label: widget.title,
+                      child: Switch(
+                        value: isOn,
+                        onChanged: canToggle ? _toggle : null,
+                      ),
+                    ),
                   ),
                 ),
               ],

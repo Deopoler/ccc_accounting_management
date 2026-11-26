@@ -121,7 +121,10 @@ class _LoginPageState extends ConsumerState<LoginPage>
                 child: _submitting
                     ? const SizedBox.square(
                         dimension: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          semanticsLabel: '로그인 중',
+                        ),
                       )
                     : const Text('로그인'),
               ),

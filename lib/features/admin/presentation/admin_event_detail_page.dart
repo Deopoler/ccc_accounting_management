@@ -6,8 +6,9 @@ import 'package:material_ui/material_ui.dart';
 import '../../../core/router/routes.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/download/download.dart';
-import '../../../core/widgets/app_widgets.dart';
 import '../../../core/utils/formatters.dart';
+import '../../../core/utils/josa.dart';
+import '../../../core/widgets/app_widgets.dart';
 import '../../../core/widgets/feedback.dart';
 import '../../../core/widgets/responsive.dart';
 import '../../../core/widgets/state_views.dart';
@@ -97,7 +98,7 @@ class _AdminEventDetailPageState extends ConsumerState<AdminEventDetailPage> {
     final ok = await showConfirmDialog(
       context,
       title: '대상에서 제외',
-      message: '${p.member?.name ?? '이 회원'}을(를) 이 이벤트의 송금 대상에서 제외하시겠습니까?',
+      message: '${withObject(p.member?.name ?? '이 회원')} 이 이벤트의 송금 대상에서 제외하시겠습니까?',
       confirmLabel: '제외',
       destructive: true,
     );
@@ -142,7 +143,7 @@ class _AdminEventDetailPageState extends ConsumerState<AdminEventDetailPage> {
     final ok = await showConfirmDialog(
       context,
       title: '이벤트 삭제',
-      message: '"${event.title}"과(와) 모든 송금 기록을 삭제합니다. 되돌릴 수 없습니다.',
+      message: '${withAnd('"${event.title}"')} 모든 송금 기록을 삭제합니다. 되돌릴 수 없습니다.',
       confirmLabel: '삭제',
       destructive: true,
     );
@@ -347,75 +348,139 @@ class _AdminEventDetailPageState extends ConsumerState<AdminEventDetailPage> {
         else
           Card(
             clipBehavior: Clip.antiAlias,
-            child: Column(
-              children: [
-                for (final (i, p) in visible.indexed) ...[
-                  if (i > 0) const Divider(height: 1),
-                  ListTile(
-                    title: Text(p.member?.name ?? '-'),
-                    subtitle: Text.rich(
-                      TextSpan(
-                        children: [
-                          TextSpan(text: '${p.member?.studentId ?? '-'} · '),
-                          TextSpan(
-                            text: p.hasCustomAmount
-                                ? '${formatWon(p.amountFor(e))} (조정됨)'
-                                : formatWon(p.amountFor(e)),
-                            style: p.hasCustomAmount
-                                ? TextStyle(
-                                    color: context.colors.textPrimary,
-                                    fontWeight: FontWeight.w700,
-                                  )
-                                : null,
-                          ),
-                          if (e.depositName.isNotEmpty && p.member != null)
-                            TextSpan(
-                              text:
-                                  ' · 입금자명 ${e.depositNameFor(name: p.member!.name, studentId: p.member!.studentId)}',
-                            ),
-                          if (p.paidAt != null)
-                            TextSpan(
-                              text: ' · 확인 ${formatDateTime(p.paidAt!)}',
-                            ),
-                        ],
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final compact = constraints.maxWidth < 600;
+                return Column(
+                  children: [
+                    for (final (i, p) in visible.indexed) ...[
+                      if (i > 0) const Divider(height: 1),
+                      _PaymentTargetRow(
+                        event: e,
+                        payment: p,
+                        compact: compact,
+                        busy: _busy.contains(p.id),
+                        onToggle: (v) => _toggle(p, v),
+                        onEditAmount: () => _editAmount(e, p),
+                        onRemove: () => _removeTarget(p),
                       ),
-                    ),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        PaymentBadge(payment: p),
-                        const SizedBox(width: 4),
-                        Switch(
-                          value: p.isPaid,
-                          onChanged: _busy.contains(p.id)
-                              ? null
-                              : (v) => _toggle(p, v),
-                        ),
-                        PopupMenuButton<String>(
-                          tooltip: '더보기',
-                          enabled: !_busy.contains(p.id),
-                          onSelected: (v) => v == 'amount'
-                              ? _editAmount(e, p)
-                              : _removeTarget(p),
-                          itemBuilder: (_) => const [
-                            PopupMenuItem(
-                              value: 'amount',
-                              child: Text('금액 변경'),
-                            ),
-                            PopupMenuItem(
-                              value: 'remove',
-                              child: Text('대상에서 제외'),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ],
+                    ],
+                  ],
+                );
+              },
             ),
           ),
       ],
+    );
+  }
+}
+
+class _PaymentTargetRow extends StatelessWidget {
+  const _PaymentTargetRow({
+    required this.event,
+    required this.payment,
+    required this.compact,
+    required this.busy,
+    required this.onToggle,
+    required this.onEditAmount,
+    required this.onRemove,
+  });
+
+  final Event event;
+  final EventPayment payment;
+  final bool compact;
+  final bool busy;
+  final ValueChanged<bool> onToggle;
+  final VoidCallback onEditAmount;
+  final VoidCallback onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final p = payment;
+    final e = event;
+    final name = p.member?.name ?? '-';
+    final subtitle = Text.rich(
+      TextSpan(
+        children: [
+          TextSpan(text: '${p.member?.studentId ?? '-'} · '),
+          TextSpan(
+            text: p.hasCustomAmount
+                ? '${formatWon(p.amountFor(e))} (조정됨)'
+                : formatWon(p.amountFor(e)),
+            style: p.hasCustomAmount
+                ? TextStyle(
+                    color: context.colors.textPrimary,
+                    fontWeight: FontWeight.w700,
+                  )
+                : null,
+          ),
+          if (e.depositName.isNotEmpty && p.member != null)
+            TextSpan(
+              text:
+                  ' · 입금자명 ${e.depositNameFor(name: p.member!.name, studentId: p.member!.studentId)}',
+            ),
+          if (p.paidAt != null)
+            TextSpan(text: ' · 확인 ${formatDateTime(p.paidAt!)}'),
+        ],
+      ),
+      style: compact
+          ? theme.textTheme.bodyMedium?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            )
+          : null,
+    );
+    final paidSwitch = MergeSemantics(
+      child: Semantics(
+        label: '$name 납부 완료',
+        child: Switch(value: p.isPaid, onChanged: busy ? null : onToggle),
+      ),
+    );
+    final moreMenu = PopupMenuButton<String>(
+      tooltip: '더보기',
+      enabled: !busy,
+      onSelected: (v) => v == 'amount' ? onEditAmount() : onRemove(),
+      itemBuilder: (_) => const [
+        PopupMenuItem(value: 'amount', child: Text('금액 변경')),
+        PopupMenuItem(value: 'remove', child: Text('대상에서 제외')),
+      ],
+    );
+
+    if (compact) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 8, 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(name, style: theme.textTheme.bodyLarge),
+            const SizedBox(height: 2),
+            subtitle,
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                PaymentBadge(payment: p),
+                const Spacer(),
+                paidSwitch,
+                moreMenu,
+              ],
+            ),
+          ],
+        ),
+      );
+    }
+
+    return ListTile(
+      title: Text(name),
+      subtitle: subtitle,
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          PaymentBadge(payment: p),
+          const SizedBox(width: 4),
+          paidSwitch,
+          moreMenu,
+        ],
+      ),
     );
   }
 }
@@ -437,11 +502,14 @@ class _AddTargetsDialogState extends ConsumerState<_AddTargetsDialog> {
   @override
   Widget build(BuildContext context) {
     final members = ref.watch(membersProvider);
+    final availableHeight =
+        MediaQuery.sizeOf(context).height -
+        MediaQuery.viewInsetsOf(context).bottom;
     return AlertDialog(
       title: const Text('송금 대상 추가'),
       content: SizedBox(
         width: 420,
-        height: 420,
+        height: (availableHeight * 0.55).clamp(160.0, 420.0),
         child: AsyncValueView<List<Profile>>(
           value: members,
           onRetry: () => ref.invalidate(membersProvider),
@@ -577,40 +645,51 @@ class _AmountDialogState extends State<_AmountDialog> {
   @override
   Widget build(BuildContext context) {
     final m = widget.payment.member;
+    final availableHeight =
+        MediaQuery.sizeOf(context).height -
+        MediaQuery.viewInsetsOf(context).bottom;
     return AlertDialog(
       title: const Text('금액 변경'),
-      content: SizedBox(
-        width: 360,
-        child: Form(
-          key: _formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                '${m?.name ?? '-'}(${m?.studentId ?? '-'})에게만 적용됩니다. '
-                '기본 금액: ${formatWon(widget.event.amount)}',
-                style: Theme.of(context).textTheme.bodySmall,
+      content: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: 360,
+          maxHeight: (availableHeight * 0.7).clamp(140.0, 400.0),
+        ),
+        child: SizedBox(
+          width: 360,
+          child: Form(
+            key: _formKey,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    '${m?.name ?? '-'}(${m?.studentId ?? '-'})에게만 적용됩니다. '
+                    '기본 금액: ${formatWon(widget.event.amount)}',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  const SizedBox(height: 16),
+                  TextFormField(
+                    controller: _amount,
+                    autofocus: true,
+                    decoration: const InputDecoration(
+                      labelText: '금액',
+                      suffixText: '원',
+                    ),
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    validator: (v) {
+                      final n = int.tryParse(v ?? '');
+                      if (n == null) return '금액을 입력해 주세요.';
+                      if (n > 100000000) return '금액이 너무 큽니다.';
+                      return null;
+                    },
+                    onFieldSubmitted: (_) => _submit(),
+                  ),
+                ],
               ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _amount,
-                autofocus: true,
-                decoration: const InputDecoration(
-                  labelText: '금액',
-                  suffixText: '원',
-                ),
-                keyboardType: TextInputType.number,
-                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                validator: (v) {
-                  final n = int.tryParse(v ?? '');
-                  if (n == null) return '금액을 입력해 주세요.';
-                  if (n > 100000000) return '금액이 너무 큽니다.';
-                  return null;
-                },
-                onFieldSubmitted: (_) => _submit(),
-              ),
-            ],
+            ),
           ),
         ),
       ),

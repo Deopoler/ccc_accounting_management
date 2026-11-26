@@ -459,7 +459,7 @@ class _SearchField extends StatelessWidget {
       controller: controller,
       onChanged: (_) => onChanged(),
       decoration: InputDecoration(
-        hintText: '교재명으로 찾기',
+        labelText: '교재명으로 찾기',
         prefixIcon: const Icon(Icons.search),
         suffixIcon: controller.text.isEmpty
             ? null

@@ -894,10 +894,15 @@ class _SelectionBar extends StatelessWidget {
       mainAxisSize: showPickAll ? MainAxisSize.max : MainAxisSize.min,
       children: [
         if (showPickAll)
-          Checkbox(
-            tristate: true,
-            value: count == 0 ? false : (all ? true : null),
-            onChanged: enabled ? (_) => onPickAll(!all) : null,
+          MergeSemantics(
+            child: Semantics(
+              label: '전체 선택',
+              child: Checkbox(
+                tristate: true,
+                value: count == 0 ? false : (all ? true : null),
+                onChanged: enabled ? (_) => onPickAll(!all) : null,
+              ),
+            ),
           ),
         Flexible(
           child: Text(
@@ -1227,11 +1232,16 @@ class _OrderCard extends StatelessWidget {
           children: [
             Row(
               children: [
-                Checkbox(
-                  value: picked,
-                  onChanged: onPick == null
-                      ? null
-                      : (v) => onPick!(order, v ?? false),
+                MergeSemantics(
+                  child: Semantics(
+                    label: '${order.member?.name ?? '신청'} 선택',
+                    child: Checkbox(
+                      value: picked,
+                      onChanged: onPick == null
+                          ? null
+                          : (v) => onPick!(order, v ?? false),
+                    ),
+                  ),
                 ),
                 Expanded(
                   child: Text(
@@ -1317,14 +1327,20 @@ class _PaidCheckbox extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cancelled = order.status == OrderStatus.cancelled;
-    return Checkbox(
-      value: order.status == OrderStatus.paid,
-      onChanged: !enabled || cancelled
-          ? null
-          : (v) => onStatus(
-              order,
-              v == true ? OrderStatus.paid : OrderStatus.requested,
-            ),
+    final who = order.member?.name ?? '신청';
+    return MergeSemantics(
+      child: Semantics(
+        label: '$who 입금확인',
+        child: Checkbox(
+          value: order.status == OrderStatus.paid,
+          onChanged: !enabled || cancelled
+              ? null
+              : (v) => onStatus(
+                  order,
+                  v == true ? OrderStatus.paid : OrderStatus.requested,
+                ),
+        ),
+      ),
     );
   }
 }
@@ -1344,11 +1360,17 @@ class _ShippedCheckbox extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cancelled = order.status == OrderStatus.cancelled;
-    final box = Checkbox(
-      value: order.isShipped,
-      onChanged: !enabled || cancelled
-          ? null
-          : (v) => onShipped(order, v == true),
+    final who = order.member?.name ?? '신청';
+    final box = MergeSemantics(
+      child: Semantics(
+        label: '$who 배송',
+        child: Checkbox(
+          value: order.isShipped,
+          onChanged: !enabled || cancelled
+              ? null
+              : (v) => onShipped(order, v == true),
+        ),
+      ),
     );
     final at = order.shippedAt;
     return at == null
@@ -1372,11 +1394,17 @@ class _ReceivedCheckbox extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cancelled = order.status == OrderStatus.cancelled;
-    return Checkbox(
-      value: order.receivedAt != null,
-      onChanged: !enabled || cancelled || !order.isShipped
-          ? null
-          : (v) => onReceived(order, v == true),
+    final who = order.member?.name ?? '신청';
+    return MergeSemantics(
+      child: Semantics(
+        label: '$who 수령',
+        child: Checkbox(
+          value: order.receivedAt != null,
+          onChanged: !enabled || cancelled || !order.isShipped
+              ? null
+              : (v) => onReceived(order, v == true),
+        ),
+      ),
     );
   }
 }
@@ -1447,12 +1475,16 @@ class _StatusMenu extends StatelessWidget {
         for (final s in OrderStatus.values)
           PopupMenuItem(value: s, child: Text(s.label)),
       ],
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          OrderStatusChip(order.status),
-          const Icon(Icons.arrow_drop_down, size: 20),
-        ],
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            OrderStatusChip(order.status),
+            const Icon(Icons.arrow_drop_down, size: 20),
+          ],
+        ),
       ),
     );
   }

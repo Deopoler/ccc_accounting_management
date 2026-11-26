@@ -4,6 +4,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/app_exception.dart';
+import '../../../core/utils/josa.dart';
 import '../../../core/widgets/feedback.dart';
 import '../../../core/widgets/responsive.dart';
 import '../../../core/widgets/state_views.dart';
@@ -91,7 +92,7 @@ class _BankAccountFormState extends ConsumerState<_BankAccountForm> {
   @override
   Widget build(BuildContext context) {
     String? required(String? v, String label) =>
-        (v == null || v.trim().isEmpty) ? '$label을(를) 입력해 주세요.' : null;
+        (v == null || v.trim().isEmpty) ? '${withObject(label)} 입력해 주세요.' : null;
 
     // 입력칸이 회색 면이라 카드 없이 흰 배경에 둔다.
     return Padding(
