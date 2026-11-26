@@ -149,6 +149,9 @@ Deno.serve(async (req) => {
     if (parsed.kind === 'deposit') {
       params.p_depositor_name = parsed.depositorName;
       params.p_amount = parsed.amount;
+    } else if (parsed.kind === 'masked_deposit') {
+      params.p_amount = parsed.amount;
+      params.p_reason = parsed.reason;
     } else {
       params.p_reason = parsed.reason;
     }

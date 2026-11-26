@@ -572,7 +572,7 @@ class _DepositCard extends StatelessWidget {
                         crossAxisAlignment: WrapCrossAlignment.center,
                         children: [
                           Text(
-                            d.depositorName ?? '입금자 미확인',
+                            d.displayDepositorName,
                             style: theme.textTheme.titleMedium,
                           ),
                           AppBadge(d.status.label, tone: _tone(d.status)),
@@ -612,7 +612,7 @@ class _DepositCard extends StatelessWidget {
                 style: TextStyle(fontSize: 13, color: c.textSecondary),
               ),
             ],
-            if (d.status == DepositStatus.unparsed) ...[
+            if (d.status == DepositStatus.unparsed || d.hasRawText) ...[
               const SizedBox(height: 10),
               Container(
                 padding: const EdgeInsets.all(12),
@@ -689,7 +689,7 @@ class _DepositCard extends StatelessWidget {
                     onPressed: busy ? null : onClearDuplicate,
                     child: const Text('중복 아님'),
                   ),
-                if (d.isParsed && d.status.canLink)
+                if (d.hasAmount && d.status.canLink)
                   OutlinedButton(
                     onPressed: busy ? null : onLink,
                     child: const Text('대상 연결'),
@@ -710,7 +710,7 @@ class _DepositCard extends StatelessWidget {
                     onPressed: busy ? null : onIgnore,
                     child: const Text('무시'),
                   ),
-                if (d.status == DepositStatus.ignored && d.isParsed)
+                if (d.status == DepositStatus.ignored && d.hasAmount)
                   TextButton(
                     onPressed: busy ? null : onUnignore,
                     child: const Text('무시 해제'),
@@ -864,7 +864,7 @@ class _LinkDepositDialogState extends ConsumerState<_LinkDepositDialog> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Text(
-                '${d.depositorName ?? '-'} · ${d.amount == null ? '-' : formatWon(d.amount!)}',
+                '${d.displayDepositorName} · ${d.amount == null ? '-' : formatWon(d.amount!)}',
                 style: theme.textTheme.titleSmall,
               ),
               const SizedBox(height: 10),

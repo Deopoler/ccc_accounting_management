@@ -214,7 +214,11 @@ export const tossParser: BankParser = {
 
     const depositorName = extractDepositorName(combined, label);
     if (!depositorName) {
-      return { kind: 'unparsed', reason: 'no_depositor' };
+      return {
+        kind: 'masked_deposit',
+        amount: amountResult.amount,
+        reason: 'masked_depositor',
+      };
     }
 
     return {

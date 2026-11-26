@@ -128,21 +128,48 @@ Deno.test('toss: keywords inside depositor name or memo are NOT dropped on label
     parseDepositNotification('toss', raw('입금 10,000원', '이출금 -> 내 KAIST CCC'), KAIST_CONFIG),
     { kind: 'deposit', depositorName: '이출금', amount: 10000 },
   );
-  // Unrecognized format with keyword + campus label becomes unparsed (not silently ignored).
+  // Unrecognized format with keyword + campus label + parsed amount becomes masked_deposit (not silently ignored).
   assert.deepEqual(
     parseDepositNotification('toss', raw('토스뱅크', 'KAIST CCC 환불 안내 10,000원'), KAIST_CONFIG),
-    { kind: 'unparsed', reason: 'no_depositor' },
+    { kind: 'masked_deposit', amount: 10000, reason: 'masked_depositor' },
   );
 });
 
-Deno.test('toss: returns unparsed when campus label matches but layout is unknown', () => {
+Deno.test('toss: real Toss format with normal name and masked/missing depositor name', () => {
+  assert.deepEqual(
+    parseDepositNotification(
+      'toss',
+      raw('15,000원 입금', '홍길동 → 내 KAIST CCC 모임통장'),
+      KAIST_CONFIG,
+    ),
+    { kind: 'deposit', depositorName: '홍길동', amount: 15000 },
+  );
+  assert.deepEqual(
+    parseDepositNotification(
+      'toss',
+      raw('1원 입금', '**** → 내 KAIST CCC 모임통장'),
+      KAIST_CONFIG,
+    ),
+    { kind: 'masked_deposit', amount: 1, reason: 'masked_depositor' },
+  );
+  assert.deepEqual(
+    parseDepositNotification(
+      'toss',
+      raw('1,000원 입금', ' → 내 KAIST CCC 모임통장'),
+      KAIST_CONFIG,
+    ),
+    { kind: 'masked_deposit', amount: 1000, reason: 'masked_depositor' },
+  );
+});
+
+Deno.test('toss: returns unparsed when amount cannot be read and masked_deposit when only depositor is missing', () => {
   assert.deepEqual(
     parseDepositNotification('toss', raw('토스뱅크', 'KAIST CCC 계좌에 새 알림이 도착했습니다'), KAIST_CONFIG),
     { kind: 'unparsed', reason: 'no_amount' },
   );
   assert.deepEqual(
     parseDepositNotification('toss', raw('KAIST CCC', '10,000원이 도착했어요'), KAIST_CONFIG),
-    { kind: 'unparsed', reason: 'no_depositor' },
+    { kind: 'masked_deposit', amount: 10000, reason: 'masked_depositor' },
   );
   assert.deepEqual(
     parseDepositNotification('toss', raw('입금 10,000원', '홍길동 -> 내 KAIST CCC 수수료 500원'), KAIST_CONFIG),
@@ -260,13 +287,13 @@ Deno.test('toss: real 모임통장 deposit notification', () => {
   assert.deepEqual(res, { kind: 'deposit', depositorName: '김철수', amount: 15000 });
 });
 
-Deno.test('toss: real format with masked name (self transfer) is unparsed', () => {
+Deno.test('toss: real format with masked name (self transfer) returns masked_deposit with amount', () => {
   const res = parseDepositNotification(
     'toss',
     raw('1원 입금', '**** → 내 KAIST CCC 모임통장'),
     KAIST_CONFIG,
   );
-  assert.deepEqual(res, { kind: 'unparsed', reason: 'no_depositor' });
+  assert.deepEqual(res, { kind: 'masked_deposit', amount: 1, reason: 'masked_depositor' });
 });
 
 Deno.test('toss: title only (empty text variable) is ignored as no_account_label', () => {

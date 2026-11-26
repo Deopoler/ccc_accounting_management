@@ -211,6 +211,12 @@ Deno.serve(async (req) => {
   if (parsed.kind === 'deposit') {
     rpcParams.p_depositor_name = parsed.depositorName;
     rpcParams.p_amount = parsed.amount;
+  } else if (parsed.kind === 'masked_deposit') {
+    rpcParams.p_amount = parsed.amount;
+    rpcParams.p_raw_title = normalizeForHash(title);
+    rpcParams.p_raw_text = normalizeForHash(text);
+    rpcParams.p_raw_package = appPackage;
+    rpcParams.p_reason = parsed.reason;
   } else if (parsed.kind === 'unparsed') {
     rpcParams.p_raw_title = normalizeForHash(title);
     rpcParams.p_raw_text = normalizeForHash(text);

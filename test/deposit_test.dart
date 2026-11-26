@@ -496,6 +496,7 @@ void main() {
         'possible_duplicate',
         'duplicate_cleared',
         'match_error',
+        'masked_depositor',
         'empty_depositor_name',
         'manual_link_event',
         'manual_link_orders',
@@ -946,6 +947,38 @@ void main() {
       await tester.tap(find.widgetWithText(FilledButton, '금액 달라도 연결'));
       await tester.pumpAndSettle();
       expect(repo.calls, contains('linkOrders d-amb o1 mismatch=true'));
+    });
+
+    testWidgets('입금자 이름이 가려진 입금은 금액 · 원문과 함께 수동 연결/무시 버튼이 보인다', (
+      tester,
+    ) async {
+      final repo = _FakeDepositRepo()
+        ..deposits = [
+          BankDeposit(
+            id: 'd-masked',
+            campusId: 'k',
+            bankCode: 'toss',
+            status: DepositStatus.unmatched,
+            amount: 1,
+            depositedAt: DateTime(2026, 11, 27, 0, 10),
+            receivedAt: DateTime(2026, 11, 27, 0, 10),
+            rawTitle: '1원 입금',
+            rawText: '**** → 내 KAIST CCC 모임통장',
+            rawPackage: 'viva.republica.toss',
+            rawExpiresAt: DateTime(2026, 12, 11),
+            matchReason: 'masked_depositor',
+          ),
+        ];
+      await _pump(tester, const AdminDepositsPage(), depositRepo: repo);
+
+      expect(find.text('입금자 미확인 (이름 가려짐)'), findsOneWidget);
+      expect(find.text('1원'), findsOneWidget);
+      expect(find.text('내용: **** → 내 KAIST CCC 모임통장'), findsOneWidget);
+      expect(find.widgetWithText(OutlinedButton, '대상 연결'), findsOneWidget);
+      expect(find.widgetWithText(TextButton, '무시'), findsOneWidget);
+      expect(find.widgetWithText(OutlinedButton, '다시 매칭'), findsNothing);
+      expect(find.widgetWithText(OutlinedButton, '다시 해석'), findsNothing);
+      expect(tester.takeException(), isNull);
     });
 
     testWidgets('빈 상태와 오류 상태를 표시한다', (tester) async {

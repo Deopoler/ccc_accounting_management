@@ -241,6 +241,13 @@ class BankDeposit {
 
   bool get isParsed => depositorName != null && amount != null;
 
+  bool get hasAmount => amount != null;
+
+  bool get isMaskedDepositor => depositorName == null && amount != null;
+
+  String get displayDepositorName =>
+      depositorName ?? (isMaskedDepositor ? '입금자 미확인 (이름 가려짐)' : '입금자 미확인');
+
   bool get isPossibleDuplicate =>
       duplicateOfId != null && duplicateClearedAt == null;
 
@@ -381,6 +388,7 @@ String depositReasonLabel(String? reason, {DepositStatus? status}) {
     'possible_duplicate' => '60초 안에 같은 내용의 입금 알림이 있어 중복 여부를 확인해야 합니다.',
     'duplicate_cleared' => '관리자가 중복 아님으로 확인했습니다.',
     'match_error' => '자동 매칭 중 오류가 발생해 수동 확인이 필요합니다.',
+    'masked_depositor' => '입금자 이름이 가려져 있어 자동 확인하지 않았습니다. 직접 대상을 연결해 주세요.',
     'empty_depositor_name' => '입금자명이 비어 있어 자동 확인하지 않았습니다.',
     'manual_link_event' => '관리자가 이벤트 송금과 연결했습니다.',
     'manual_link_orders' => '관리자가 교재 신청과 연결했습니다.',

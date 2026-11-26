@@ -11,6 +11,7 @@ export interface ParserConfig {
 
 export type ParseResult =
   | { kind: 'deposit'; depositorName: string; amount: number }
+  | { kind: 'masked_deposit'; amount: number; reason: 'masked_depositor' }
   | { kind: 'ignored'; reason: string }
   | { kind: 'unparsed'; reason: string };
 

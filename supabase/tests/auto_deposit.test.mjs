@@ -324,6 +324,109 @@ describe('자동 매칭 및 예외 처리', () => {
     assert.equal(rematch, 'auto_matched');
   });
 
+  test('입금자명이 가려진 입금(masked_deposit)은 금액과 14일 원문을 보관한 unmatched 로 저장되고 절대 자동 확인되지 않으며 수동 연결할 수 있다', async () => {
+    await db.query(`
+      insert into vault.decrypted_secrets (name, decrypted_secret) values
+        ('push_function_url', 'https://ref.supabase.co/functions/v1/push'),
+        ('push_webhook_secret', 's3cret')`);
+
+    const book1 = (await db.query(
+      `insert into public.textbooks (campus_id, title, price) values ($1, '테스트교재', 1) returning id`,
+      [kaist],
+    )).rows[0].id;
+    const o1 = await placeOrder(hong, [{ textbook_id: book1, quantity: 1 }]);
+
+    const res = await ingest(db, {
+      campus: kaist,
+      kind: 'masked_deposit',
+      amount: 1,
+      rawTitle: '1원 입금',
+      rawText: '**** → 내 KAIST CCC 모임통장',
+      rawPackage: 'viva.republica.toss',
+      reason: 'masked_depositor',
+    });
+    assert.equal(res.status, 'unmatched');
+
+    // 단일 1원 후보가 있어도 자동 확인되지 않고 관리자 검토 푸시가 발송된다.
+    assert.equal(
+      (await db.query('select status from public.textbook_orders where id = $1', [o1])).rows[0].status,
+      'requested',
+    );
+    const { rows: reqs } = await db.query('select body from net.requests');
+    assert.deepEqual(reqs.map((r) => r.body), [
+      { type: 'deposit_review', deposit_id: res.deposit_id },
+    ]);
+
+    // admin_list_bank_deposits 로 금액과 14일 원문이 조회된다.
+    const { rows: [listed] } = await asUser(
+      db,
+      admin,
+      'select status, depositor_name, amount, match_reason, raw_title, raw_text, raw_expires_at from public.admin_list_bank_deposits($1) where id = $2',
+      [kaist, res.deposit_id],
+    );
+    assert.equal(listed.status, 'unmatched');
+    assert.equal(listed.depositor_name, null);
+    assert.equal(listed.amount, 1);
+    assert.equal(listed.match_reason, 'masked_depositor');
+    assert.equal(listed.raw_title, '1원 입금');
+    assert.equal(listed.raw_text, '**** → 내 KAIST CCC 모임통장');
+    assert.ok(listed.raw_expires_at);
+
+    // 재매칭해도 자동 확인되지 않고 unmatched(masked_depositor)를 유지한다.
+    const rematch = (await asUser(
+      db, admin, 'select public.admin_rematch_deposit($1) as s', [res.deposit_id],
+    )).rows[0].s;
+    assert.equal(rematch, 'unmatched');
+    assert.equal(
+      (await db.query('select status from public.textbook_orders where id = $1', [o1])).rows[0].status,
+      'requested',
+    );
+
+    // 금액이 다른 주문은 mismatch 가드에 막히고, 일치하는 1원 주문은 수동 연결이 성공하며 원문이 지워진다.
+    const o10k = await placeOrder(hong, [{ textbook_id: book10k, quantity: 1 }]);
+    await assertRaises(
+      asUser(db, admin, 'select public.admin_link_deposit_to_orders($1, $2::uuid[])', [res.deposit_id, [o10k]]),
+      /합계가 다릅니다/,
+    );
+    await asUser(db, admin, 'select public.admin_link_deposit_to_orders($1, $2::uuid[])', [res.deposit_id, [o1]]);
+    assert.equal(
+      (await db.query('select status, confirmed_deposit_id from public.textbook_orders where id = $1', [o1])).rows[0].status,
+      'paid',
+    );
+    const { rows: [linked] } = await db.query(
+      'select status, raw_title, raw_text, raw_expires_at from public.bank_deposits where id = $1',
+      [res.deposit_id],
+    );
+    assert.equal(linked.status, 'manual_matched');
+    assert.equal(linked.raw_title, null);
+    assert.equal(linked.raw_text, null);
+    assert.equal(linked.raw_expires_at, null);
+
+    // 기존 unparsed 행을 masked_deposit 으로 재해석해도 금액과 원문을 유지한 unmatched 로 바뀐다.
+    const oldUnp = await ingest(db, {
+      campus: kaist,
+      kind: 'unparsed',
+      rawTitle: '1원 입금',
+      rawText: '**** → 내 KAIST CCC 모임통장',
+      rawPackage: 'viva.republica.toss',
+      reason: 'no_depositor',
+    });
+    const { rows: [rep] } = await db.query(
+      `select status from public.apply_deposit_reparse($1, 'masked_deposit', null, 1, 'masked_depositor')`,
+      [oldUnp.deposit_id],
+    );
+    assert.equal(rep.status, 'unmatched');
+    const { rows: [repRow] } = await db.query(
+      'select status, depositor_name, amount, match_reason, raw_text from public.bank_deposits where id = $1',
+      [oldUnp.deposit_id],
+    );
+    assert.equal(repRow.status, 'unmatched');
+    assert.equal(repRow.depositor_name, null);
+    assert.equal(repRow.amount, 1);
+    assert.equal(repRow.match_reason, 'masked_depositor');
+    assert.equal(repRow.raw_text, '**** → 내 KAIST CCC 모임통장');
+  });
+
   test('매칭 중 예외가 발생해도 입금 행은 unmatched(match_error)로 보존되고 검토 푸시를 보낸다', async () => {
     await db.query(`
       insert into vault.decrypted_secrets (name, decrypted_secret) values
