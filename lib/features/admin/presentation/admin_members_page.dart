@@ -7,6 +7,7 @@ import '../../../core/utils/korean_search.dart';
 import '../../../core/widgets/app_widgets.dart';
 import '../../../core/widgets/feedback.dart';
 import '../../../core/widgets/responsive.dart';
+import '../../../core/widgets/skeleton.dart';
 import '../../../core/widgets/state_views.dart';
 import '../../auth/domain/profile.dart';
 import '../../auth/presentation/auth_providers.dart';
@@ -183,6 +184,7 @@ class _AdminMembersPageState extends ConsumerState<AdminMembersPage> {
 
     return AsyncValueView(
       value: members,
+      loading: const _MembersLoadingView(),
       onRetry: () => ref.invalidate(membersProvider),
       data: (all) {
         final pending = all.where((m) => !m.isApproved).toList();
@@ -535,6 +537,67 @@ class _PendingSection extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _MembersLoadingView extends StatelessWidget {
+  const _MembersLoadingView();
+
+  @override
+  Widget build(BuildContext context) {
+    return ScrollPageBody(
+      maxWidth: 900,
+      children: [
+        const Card(
+          child: Padding(
+            padding: EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                SectionTitle('가입 승인 대기'),
+                SkeletonRegion(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      SkeletonText(maxWidth: 160, fontSize: 15, announce: false),
+                      SizedBox(height: 6),
+                      SkeletonText(maxWidth: 120, fontSize: 13, announce: false),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 24),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final searchField = TextField(
+              enabled: false,
+              decoration: const InputDecoration(
+                labelText: '학번 / 이름 검색',
+                prefixIcon: Icon(Icons.search),
+              ),
+            );
+            if (constraints.maxWidth < 600) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const SectionTitle('회원'),
+                  searchField,
+                  const SizedBox(height: 12),
+                ],
+              );
+            }
+            return SectionTitle(
+              '회원',
+              trailing: SizedBox(width: 220, child: searchField),
+            );
+          },
+        ),
+        const SkeletonList.tiles(count: 4, hasTrailing: true),
+      ],
     );
   }
 }

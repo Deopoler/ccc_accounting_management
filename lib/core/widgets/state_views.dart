@@ -139,6 +139,7 @@ class AsyncValueView<T> extends StatelessWidget {
     super.key,
     required this.value,
     required this.data,
+    this.loading,
     this.onRetry,
     this.isEmpty,
     this.empty,
@@ -148,6 +149,7 @@ class AsyncValueView<T> extends StatelessWidget {
 
   final AsyncValue<T> value;
   final Widget Function(T data) data;
+  final Widget? loading;
   final VoidCallback? onRetry;
   final bool Function(T data)? isEmpty;
   final Widget? empty;
@@ -162,7 +164,7 @@ class AsyncValueView<T> extends StatelessWidget {
         (value.isRefreshing || (skipLoadingOnReload && value.isReloading));
     final Widget content;
     if (value.isLoading && !keepingData) {
-      content = const LoadingView();
+      content = loading ?? const LoadingView();
     } else if (value.hasError && !keepingData) {
       content = ErrorView(error: value.error!, onRetry: onRetry);
     } else if (value.hasValue) {
@@ -171,7 +173,7 @@ class AsyncValueView<T> extends StatelessWidget {
           ? (empty ?? const EmptyView())
           : data(d);
     } else {
-      content = const LoadingView();
+      content = loading ?? const LoadingView();
     }
     if (!showRefreshIndicator) return content;
     return RefreshOverlay(

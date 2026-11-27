@@ -7,6 +7,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/app_widgets.dart';
 import '../../../core/widgets/feedback.dart';
 import '../../../core/widgets/responsive.dart';
+import '../../../core/widgets/skeleton.dart';
 import '../../../core/widgets/state_views.dart';
 import '../../admin/presentation/admin_textbooks_page.dart' show showNameDialog;
 import '../data/campus_repository.dart';
@@ -75,34 +76,62 @@ class AdminCampusesPage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final campuses = ref.watch(campusesProvider);
     final current = ref.watch(adminCampusProvider).value;
+    final ready = campuses.hasUsableValue;
 
-    return AsyncValueView(
-      value: campuses,
-      onRetry: () => ref.invalidate(campusesProvider),
-      data: (list) => ScrollPageBody(
+    return RefreshOverlay(
+      refreshing: campuses.isBackgroundRefreshing,
+      child: ScrollPageBody(
         maxWidth: 800,
         children: [
-          SectionTitle(
-            '캠퍼스 ${list.length}곳',
-            trailing: FilledButton.icon(
-              onPressed: () => _create(context, ref),
-              icon: const Icon(Icons.add),
-              label: const Text('캠퍼스 추가'),
+          if (ready)
+            SectionTitle(
+              '캠퍼스 ${campuses.requireValue.length}곳',
+              trailing: FilledButton.icon(
+                onPressed: () => _create(context, ref),
+                icon: const Icon(Icons.add),
+                label: const Text('캠퍼스 추가'),
+              ),
+            )
+          else
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Row(
+                children: [
+                  Text(
+                    '캠퍼스',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  if (!campuses.hasError)
+                    const SkeletonBox(width: 28, height: 18),
+                  const Spacer(),
+                  FilledButton.icon(
+                    onPressed: null,
+                    icon: const Icon(Icons.add),
+                    label: const Text('캠퍼스 추가'),
+                  ),
+                ],
+              ),
             ),
-          ),
           Text(
             '캠퍼스를 고르면 관리자 화면(회원 / 교재 / 신청 / 이벤트 / 설정)이 그 캠퍼스로 바뀝니다. '
             '캠퍼스 관리자는 회원 관리에서 지정합니다.',
             style: TextStyle(fontSize: 13, color: context.colors.textSecondary),
           ),
           const SizedBox(height: 16),
-          if (list.isEmpty)
-            const EmptyView(
+          AsyncValueView(
+            value: campuses,
+            showRefreshIndicator: false,
+            loading: const SkeletonList.tiles(count: 3, hasTrailing: true),
+            onRetry: () => ref.invalidate(campusesProvider),
+            isEmpty: (list) => list.isEmpty,
+            empty: const EmptyView(
               icon: Icons.school_outlined,
               message: '등록된 캠퍼스가 없습니다.',
-            )
-          else
-            Card(
+            ),
+            data: (list) => Card(
               clipBehavior: Clip.antiAlias,
               child: Column(
                 children: [
@@ -140,6 +169,7 @@ class AdminCampusesPage extends ConsumerWidget {
                 ],
               ),
             ),
+          ),
         ],
       ),
     );

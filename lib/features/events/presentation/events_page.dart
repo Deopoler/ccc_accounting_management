@@ -3,6 +3,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../../../core/utils/formatters.dart';
 import '../../../core/widgets/responsive.dart';
+import '../../../core/widgets/skeleton.dart';
 import '../../../core/widgets/state_views.dart';
 import '../../settings/presentation/bank_account_card.dart';
 import '../../../core/theme/app_theme.dart';
@@ -20,28 +21,40 @@ class EventsPage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final events = ref.watch(eventsProvider(CampusScope.member));
     final payments = ref.watch(myEventPaymentsProvider);
-
-    if ((events.isLoading && !events.hasUsableValue) ||
-        (payments.isLoading && !payments.hasUsableValue)) {
-      return const LoadingView();
-    }
-    if (events.hasError || payments.hasError) {
-      return ErrorView(
-        error: (events.error ?? payments.error)!,
-        onRetry: () {
-          ref.invalidate(eventsProvider);
-          ref.invalidate(myEventPaymentsProvider);
-        },
-      );
-    }
-    if (!events.hasUsableValue || !payments.hasUsableValue) {
-      return const LoadingView();
-    }
-
     final refreshing =
         events.isBackgroundRefreshing || payments.isBackgroundRefreshing;
+
+    if ((events.hasError && !events.isLoading) ||
+        (payments.hasError && !payments.isLoading)) {
+      return RefreshOverlay(
+        refreshing: refreshing,
+        child: ErrorView(
+          error: (events.error ?? payments.error)!,
+          onRetry: () {
+            ref.invalidate(eventsProvider);
+            ref.invalidate(myEventPaymentsProvider);
+          },
+        ),
+      );
+    }
+
+    if (!events.hasUsableValue) {
+      return RefreshOverlay(
+        refreshing: refreshing,
+        child: ScrollPageBody(
+          maxWidth: 800,
+          children: [
+            SkeletonList.cards(
+              count: 3,
+              spacing: 12,
+              itemBuilder: (_, _) => const _EventCardPlaceholder(),
+            ),
+          ],
+        ),
+      );
+    }
+
     final list = events.requireValue;
-    final mine = payments.requireValue;
     if (list.isEmpty) {
       return RefreshOverlay(
         refreshing: refreshing,
@@ -52,6 +65,22 @@ class EventsPage extends ConsumerWidget {
       );
     }
 
+    if (!payments.hasUsableValue) {
+      return RefreshOverlay(
+        refreshing: refreshing,
+        child: ScrollPageBody(
+          maxWidth: 800,
+          children: [
+            for (final e in list) ...[
+              _EventCard(event: e, payment: null, paymentLoading: true),
+              const SizedBox(height: 12),
+            ],
+          ],
+        ),
+      );
+    }
+
+    final mine = payments.requireValue;
     final unpaidCount = list.where((e) => mine[e.id]?.isPaid == false).length;
 
     return RefreshOverlay(
@@ -79,10 +108,15 @@ class EventsPage extends ConsumerWidget {
 }
 
 class _EventCard extends ConsumerWidget {
-  const _EventCard({required this.event, required this.payment});
+  const _EventCard({
+    required this.event,
+    required this.payment,
+    this.paymentLoading = false,
+  });
 
   final Event event;
   final EventPayment? payment;
+  final bool paymentLoading;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -90,7 +124,7 @@ class _EventCard extends ConsumerWidget {
     final paidAt = payment?.paidAt;
     final profile = ref.watch(currentProfileProvider).value;
     final p = payment;
-    final needsPayment = p != null && !p.isPaid;
+    final needsPayment = !paymentLoading && p != null && !p.isPaid;
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(20),
@@ -107,11 +141,26 @@ class _EventCard extends ConsumerWidget {
                     ),
                   ),
                 ),
-                PaymentBadge(payment: payment),
+                if (paymentLoading)
+                  const SkeletonBox(width: 52, height: 22)
+                else
+                  PaymentBadge(payment: payment),
               ],
             ),
             const SizedBox(height: 6),
-            EventMetaLine(event: event, payment: payment),
+            if (paymentLoading)
+              const SkeletonRegion(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SkeletonText(maxWidth: 96, fontSize: 22, announce: false),
+                    SizedBox(height: 2),
+                    SkeletonText(maxWidth: 140, fontSize: 14, announce: false),
+                  ],
+                ),
+              )
+            else
+              EventMetaLine(event: event, payment: payment),
             if (event.description.isNotEmpty) ...[
               const SizedBox(height: 10),
               Text(event.description, style: theme.textTheme.bodyMedium),
@@ -139,6 +188,43 @@ class _EventCard extends ConsumerWidget {
                 ),
               ),
             ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _EventCardPlaceholder extends StatelessWidget {
+  const _EventCardPlaceholder();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Card(
+      child: Padding(
+        padding: EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: SkeletonText(
+                    maxWidth: 180,
+                    fontSize: 16,
+                    announce: false,
+                  ),
+                ),
+                SizedBox(width: 12),
+                SkeletonBox(width: 52, height: 22, announce: false),
+              ],
+            ),
+            SizedBox(height: 6),
+            SkeletonText(maxWidth: 96, fontSize: 22, announce: false),
+            SizedBox(height: 4),
+            SkeletonText(maxWidth: 140, fontSize: 14, announce: false),
+            SizedBox(height: 10),
+            SkeletonText(maxWidth: 260, fontSize: 14, announce: false),
           ],
         ),
       ),

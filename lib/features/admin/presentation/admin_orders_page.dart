@@ -7,6 +7,7 @@ import '../../../core/utils/formatters.dart';
 import '../../../core/widgets/app_widgets.dart';
 import '../../../core/widgets/feedback.dart';
 import '../../../core/widgets/responsive.dart';
+import '../../../core/widgets/skeleton.dart';
 import '../../../core/widgets/state_views.dart';
 import '../../textbooks/domain/order_filter.dart';
 import '../../textbooks/domain/order_round.dart';
@@ -261,40 +262,47 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
     final roundList = ref.watch(adminRoundsProvider);
     final textbooks = ref.watch(textbooksProvider(CampusScope.admin));
 
-    if ((currentRoundAsync.isLoading && !currentRoundAsync.hasUsableValue) ||
-        (roundList.isLoading && roundList.hasError)) {
-      return const LoadingView();
-    }
-    if (currentRoundAsync.hasError || roundList.hasError) {
-      return ErrorView(
-        error: (currentRoundAsync.error ?? roundList.error)!,
-        onRetry: () {
-          ref.invalidate(adminCurrentRoundProvider);
-          ref.invalidate(adminRoundsProvider);
-        },
-      );
-    }
-    if (!currentRoundAsync.hasUsableValue) return const LoadingView();
+    final roundError = (currentRoundAsync.hasError && !currentRoundAsync.isLoading)
+        ? currentRoundAsync.error
+        : (roundList.hasError && !roundList.isLoading)
+        ? roundList.error
+        : null;
+    final roundReady =
+        currentRoundAsync.hasUsableValue &&
+        currentRoundAsync.requireValue != null &&
+        activeCampusId != null;
 
-    final currentRound = currentRoundAsync.requireValue;
-    if (currentRound == null || activeCampusId == null) {
-      return const EmptyView(message: '신청 회차가 없습니다.');
+    if (currentRoundAsync.hasUsableValue &&
+        (currentRoundAsync.requireValue == null || activeCampusId == null)) {
+      return RefreshOverlay(
+        refreshing: currentRoundAsync.isBackgroundRefreshing,
+        child: const EmptyView(message: '신청 회차가 없습니다.'),
+      );
     }
 
     // Start fetching orders for the current round concurrently with fetchRounds.
-    final rounds =
-        roundList.hasValue &&
-            !roundList.hasError &&
-            roundList.requireValue?.campusId == activeCampusId
-        ? roundList.requireValue!
-        : RoundList(
-            campusId: activeCampusId,
-            current: currentRound,
-            all: [currentRound],
-          );
-    final selected = _selected(rounds);
+    final RoundList? rounds;
+    if (roundReady) {
+      final currentRound = currentRoundAsync.requireValue!;
+      rounds =
+          roundList.hasValue &&
+              !roundList.hasError &&
+              roundList.requireValue?.campusId == activeCampusId
+          ? roundList.requireValue!
+          : RoundList(
+              campusId: activeCampusId,
+              current: currentRound,
+              all: [currentRound],
+            );
+    } else {
+      rounds = null;
+    }
+
+    final selected = rounds == null ? null : _selected(rounds);
     final roundId = selected?.id;
-    final orders = ref.watch(adminOrdersProvider(roundId));
+    final AsyncValue<List<TextbookOrder>>? orders = roundReady
+        ? ref.watch(adminOrdersProvider(roundId))
+        : null;
     final books = textbooks.hasUsableValue
         ? textbooks.requireValue
         : const <Textbook>[];
@@ -305,7 +313,9 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
       query: _search.text,
     );
     // 배송 칩의 건수는 배송 조건을 뺀 나머지 필터 기준으로 센다.
-    final loaded = orders.hasUsableValue ? orders.requireValue : null;
+    final loaded = orders != null && orders.hasUsableValue
+        ? orders.requireValue
+        : null;
     final deliveryCounts = loaded == null
         ? null
         : countByDelivery(filter.withDelivery(null).apply(loaded));
@@ -316,7 +326,69 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
             !roundList.hasError &&
             roundList.value?.campusId == activeCampusId) ||
         textbooks.isBackgroundRefreshing ||
-        orders.isBackgroundRefreshing;
+        (orders?.isBackgroundRefreshing ?? false);
+
+    final Widget bodySection;
+    if (roundError != null) {
+      bodySection = ErrorView(
+        error: roundError,
+        onRetry: () {
+          ref.invalidate(adminCurrentRoundProvider);
+          ref.invalidate(adminRoundsProvider);
+        },
+      );
+    } else if (orders == null) {
+      bodySection = const _OrdersLoadingSection();
+    } else {
+      bodySection = AsyncValueView(
+        value: orders,
+        showRefreshIndicator: false,
+        loading: const _OrdersLoadingSection(),
+        onRetry: () => ref.invalidate(adminOrdersProvider(roundId)),
+        data: (all) {
+          final filtered = filter.apply(all);
+          // 필터에 가려진 신청은 처리하지 않는다.
+          final picked = filtered
+              .where((o) => _picked.contains(o.id))
+              .toList();
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _Summary(orders: filtered, textbookId: _textbookId),
+              const SizedBox(height: 16),
+              SectionTitle(
+                '신청 ${filtered.length}건',
+                trailing: _ExportMenu(
+                  enabled: filtered.isNotEmpty,
+                  onExport: (tally) =>
+                      _export(filtered, selected, tally: tally),
+                ),
+              ),
+              if (filtered.isEmpty)
+                const EmptyView(message: '조건에 맞는 신청이 없습니다.')
+              else
+                _OrdersList(
+                  orders: filtered,
+                  busy: _busy,
+                  picked: _picked,
+                  onPick: (o, v) => setState(
+                    () => v ? _picked.add(o.id) : _picked.remove(o.id),
+                  ),
+                  onPickAll: (v) => setState(() {
+                    final ids = filtered.map((o) => o.id);
+                    v ? _picked.addAll(ids) : _picked.removeAll(ids);
+                  }),
+                  onStatus: (o, s) => _setStatus(roundId, o, s),
+                  onShipped: (o, v) => _setShipped(roundId, o, v),
+                  onReceived: (o, v) => _setReceived(roundId, o, v),
+                  onBulk: (f, v) => _bulk(roundId, picked, f, v),
+                  onShift: (offset) => _shift(picked, offset),
+                ),
+            ],
+          );
+        },
+      );
+    }
 
     return RefreshOverlay(
       refreshing: refreshing,
@@ -336,6 +408,7 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
                     _picked.clear();
                   }),
                   textbooks: books,
+                  textbooksLoaded: textbooks.hasUsableValue,
                   textbookId: _textbookId,
                   onTextbookChanged: (v) => setState(() => _textbookId = v),
                   status: _status,
@@ -347,54 +420,7 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
                   onSearchChanged: () => setState(() {}),
                 ),
                 const SizedBox(height: 16),
-                AsyncValueView(
-                  value: orders,
-                  showRefreshIndicator: false,
-                  onRetry: () => ref.invalidate(adminOrdersProvider(roundId)),
-                  data: (all) {
-                    final filtered = filter.apply(all);
-                    // 필터에 가려진 신청은 처리하지 않는다.
-                    final picked = filtered
-                        .where((o) => _picked.contains(o.id))
-                        .toList();
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        _Summary(orders: filtered, textbookId: _textbookId),
-                        const SizedBox(height: 16),
-                        SectionTitle(
-                          '신청 ${filtered.length}건',
-                          trailing: _ExportMenu(
-                            enabled: filtered.isNotEmpty,
-                            onExport: (tally) =>
-                                _export(filtered, selected, tally: tally),
-                          ),
-                        ),
-                        if (filtered.isEmpty)
-                          const EmptyView(message: '조건에 맞는 신청이 없습니다.')
-                        else
-                          _OrdersList(
-                            orders: filtered,
-                            busy: _busy,
-                            picked: _picked,
-                            onPick: (o, v) => setState(
-                              () =>
-                                  v ? _picked.add(o.id) : _picked.remove(o.id),
-                            ),
-                            onPickAll: (v) => setState(() {
-                              final ids = filtered.map((o) => o.id);
-                              v ? _picked.addAll(ids) : _picked.removeAll(ids);
-                            }),
-                            onStatus: (o, s) => _setStatus(roundId, o, s),
-                            onShipped: (o, v) => _setShipped(roundId, o, v),
-                            onReceived: (o, v) => _setReceived(roundId, o, v),
-                            onBulk: (f, v) => _bulk(roundId, picked, f, v),
-                            onShift: (offset) => _shift(picked, offset),
-                          ),
-                      ],
-                    );
-                  },
-                ),
+                bodySection,
               ],
             ),
           ),
@@ -414,6 +440,7 @@ class _Filters extends StatelessWidget {
     required this.selected,
     required this.onRoundChanged,
     required this.textbooks,
+    required this.textbooksLoaded,
     required this.textbookId,
     required this.onTextbookChanged,
     required this.status,
@@ -425,10 +452,11 @@ class _Filters extends StatelessWidget {
     required this.onSearchChanged,
   });
 
-  final RoundList rounds;
+  final RoundList? rounds;
   final OrderRound? selected;
   final ValueChanged<OrderRound?> onRoundChanged;
   final List<Textbook> textbooks;
+  final bool textbooksLoaded;
   final String? textbookId;
   final ValueChanged<String?> onTextbookChanged;
   final OrderStatus? status;
@@ -465,6 +493,7 @@ class _Filters extends StatelessWidget {
               children: [
                 DropdownMenu<String?>(
                   width: w(240),
+                  enabled: textbooksLoaded,
                   label: const Text('교재'),
                   // 교재가 많으므로 입력해서 찾을 수 있게 한다.
                   enableFilter: true,
@@ -555,7 +584,7 @@ class _RoundNavigator extends StatelessWidget {
     required this.onChanged,
   });
 
-  final RoundList rounds;
+  final RoundList? rounds;
 
   /// null 이면 전체 회차.
   final OrderRound? selected;
@@ -563,15 +592,17 @@ class _RoundNavigator extends StatelessWidget {
   /// null 이면 전체 회차.
   final ValueChanged<OrderRound?> onChanged;
 
-  bool get _all => selected == null;
+  bool get _all => rounds != null && selected == null;
 
   /// 최신순 목록에서 고른 회차의 위치
   int get _index =>
-      _all ? 0 : rounds.all.indexWhere((r) => r.id == selected!.id);
+      rounds == null || _all ? 0 : rounds!.all.indexWhere((r) => r.id == selected!.id);
 
   Future<void> _pickDate(BuildContext context) async {
+    final r = rounds;
+    if (r == null) return;
     final today = DateUtils.dateOnly(DateTime.now());
-    final first = DateUtils.dateOnly(rounds.all.last.start);
+    final first = DateUtils.dateOnly(r.all.last.start);
     final initial = _all ? today : DateUtils.dateOnly(selected!.start);
     final picked = await showDatePicker(
       context: context,
@@ -589,8 +620,8 @@ class _RoundNavigator extends StatelessWidget {
     // 오늘을 고르면 (오늘 시작하는 다음 회차가 있어도) 이번 회차로 간다.
     onChanged(
       DateUtils.isSameDay(picked, today)
-          ? rounds.current
-          : roundOnDate(rounds.all, picked),
+          ? r.current
+          : roundOnDate(r.all, picked),
     );
   }
 
@@ -598,14 +629,9 @@ class _RoundNavigator extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.colors;
     final theme = Theme.of(context);
+    final r = rounds;
     final index = _index;
-    final title = _all ? '전체 회차' : selected!.label;
-    final isCurrent = !_all && selected!.id == rounds.current.id;
-    final sub = _all
-        ? '모든 회차의 신청'
-        : isCurrent
-        ? '이번 회차 · ${selected!.deadlineLabel} 마감'
-        : rounds.describe(selected!);
+    final isCurrent = r != null && !_all && selected!.id == r.current.id;
 
     return Column(
       // stretch 면 아래 최대 너비가 무시된다.
@@ -618,61 +644,90 @@ class _RoundNavigator extends StatelessWidget {
               IconButton(
                 tooltip: '이전 회차',
                 icon: const Icon(Icons.chevron_left),
-                onPressed: _all || index >= rounds.all.length - 1
+                onPressed: r == null || _all || index >= r.all.length - 1
                     ? null
-                    : () => onChanged(rounds.all[index + 1]),
+                    : () => onChanged(r.all[index + 1]),
               ),
               Expanded(
-                child: Tooltip(
-                  message: '달력에서 회차 찾기',
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(12),
-                    onTap: () => _pickDate(context),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 6),
-                      child: Column(
-                        children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
+                child: r == null
+                    ? const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 6),
+                        child: SkeletonRegion(
+                          child: Column(
                             children: [
-                              Flexible(
-                                child: FittedBox(
-                                  fit: BoxFit.scaleDown,
-                                  child: Text(
-                                    title,
-                                    style: theme.textTheme.titleMedium
-                                        ?.copyWith(fontWeight: FontWeight.w700),
-                                  ),
-                                ),
+                              SkeletonText(
+                                maxWidth: 140,
+                                fontSize: 16,
+                                alignment: Alignment.center,
+                                announce: false,
                               ),
-                              const SizedBox(width: 6),
-                              Icon(
-                                Icons.calendar_month_outlined,
-                                size: 18,
-                                color: c.textSecondary,
+                              SizedBox(height: 2),
+                              SkeletonText(
+                                maxWidth: 180,
+                                fontSize: 13,
+                                alignment: Alignment.center,
+                                announce: false,
                               ),
                             ],
                           ),
-                          Text(
-                            sub,
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: c.textSecondary,
+                        ),
+                      )
+                    : Tooltip(
+                        message: '달력에서 회차 찾기',
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(12),
+                          onTap: () => _pickDate(context),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 6),
+                            child: Column(
+                              children: [
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Flexible(
+                                      child: FittedBox(
+                                        fit: BoxFit.scaleDown,
+                                        child: Text(
+                                          _all ? '전체 회차' : selected!.label,
+                                          style: theme.textTheme.titleMedium
+                                              ?.copyWith(
+                                                fontWeight: FontWeight.w700,
+                                              ),
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Icon(
+                                      Icons.calendar_month_outlined,
+                                      size: 18,
+                                      color: c.textSecondary,
+                                    ),
+                                  ],
+                                ),
+                                Text(
+                                  _all
+                                      ? '모든 회차의 신청'
+                                      : isCurrent
+                                      ? '이번 회차 · ${selected!.deadlineLabel} 마감'
+                                      : r.describe(selected!),
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    color: c.textSecondary,
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
-                        ],
+                        ),
                       ),
-                    ),
-                  ),
-                ),
               ),
               IconButton(
                 tooltip: '다음 회차',
                 icon: const Icon(Icons.chevron_right),
                 // 미리 만든 다음 회차까지만 있다.
-                onPressed: _all || index == 0
+                onPressed: r == null || _all || index == 0
                     ? null
-                    : () => onChanged(rounds.all[index - 1]),
+                    : () => onChanged(r.all[index - 1]),
               ),
             ],
           ),
@@ -682,16 +737,18 @@ class _RoundNavigator extends StatelessWidget {
           spacing: 8,
           runSpacing: 8,
           children: [
-            if (!isCurrent)
+            if (r != null && !isCurrent)
               ActionChip(
                 avatar: const Icon(Icons.today, size: 18),
                 label: const Text('이번 회차로'),
-                onPressed: () => onChanged(rounds.current),
+                onPressed: () => onChanged(r.current),
               ),
             FilterChip(
               label: const Text('전체 회차'),
               selected: _all,
-              onSelected: (v) => onChanged(v ? null : rounds.current),
+              onSelected: r == null
+                  ? null
+                  : (v) => onChanged(v ? null : r.current),
             ),
           ],
         ),
@@ -932,7 +989,7 @@ class _SelectionBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.colors;
     final count = orders.where((o) => picked.contains(o.id)).length;
-    final all = count == orders.length;
+    final all = orders.isNotEmpty && count == orders.length;
     final active = enabled && count > 0;
     // 모바일에서는 버튼이 한 줄에 나눠 담기도록 좌우 여백을 줄이고, 좁으면 글자를 줄인다.
     final compactStyle = OutlinedButton.styleFrom(
@@ -1581,6 +1638,371 @@ class _ExportMenu extends StatelessWidget {
         MenuItemButton(
           onPressed: () => onExport(true),
           child: const Text('교재별 집계 (필터 적용)'),
+        ),
+      ],
+    );
+  }
+}
+
+class _OrdersLoadingSection extends StatelessWidget {
+  const _OrdersLoadingSection();
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final theme = Theme.of(context);
+
+    Widget statPlaceholder(OrderStatus s, {required bool compact}) => Card(
+      child: Padding(
+        padding: EdgeInsets.all(compact ? 14 : 20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(s.label, style: TextStyle(fontSize: 13, color: c.textSecondary)),
+            const SizedBox(height: 6),
+            const SkeletonText(maxWidth: 48, fontSize: 22, lineHeight: 1.3),
+            const SizedBox(height: 2),
+            const SkeletonText(maxWidth: 84, fontSize: 14),
+          ],
+        ),
+      ),
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final compact = constraints.maxWidth < _compactWidth;
+            final cards = [
+              for (final s in OrderStatus.values)
+                statPlaceholder(s, compact: compact),
+            ];
+            if (compact) {
+              return Row(
+                children: [
+                  for (var i = 0; i < cards.length; i++) ...[
+                    if (i > 0) const SizedBox(width: 8),
+                    Expanded(child: cards[i]),
+                  ],
+                ],
+              );
+            }
+            return Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                for (final card in cards) SizedBox(width: 180, child: card),
+              ],
+            );
+          },
+        ),
+        const SizedBox(height: 12),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const SectionTitle('교재별 집계 (취소 제외)'),
+                SkeletonRegion(
+                  child: Table(
+                    columnWidths: const {
+                      0: FlexColumnWidth(),
+                      1: IntrinsicColumnWidth(),
+                      2: IntrinsicColumnWidth(),
+                    },
+                    defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+                    children: [
+                      TableRow(
+                        decoration: BoxDecoration(
+                          border: Border(
+                            bottom: BorderSide(color: c.surfaceStrong),
+                          ),
+                        ),
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.symmetric(
+                              vertical: 6,
+                              horizontal: 8,
+                            ),
+                            child: Text(
+                              '교재',
+                              style: theme.textTheme.labelLarge?.copyWith(
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(
+                              vertical: 6,
+                              horizontal: 8,
+                            ),
+                            child: Text(
+                              '수량',
+                              style: theme.textTheme.labelLarge?.copyWith(
+                                fontWeight: FontWeight.w700,
+                              ),
+                              textAlign: TextAlign.right,
+                            ),
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(
+                              vertical: 6,
+                              horizontal: 8,
+                            ),
+                            child: Text(
+                              '금액',
+                              style: theme.textTheme.labelLarge?.copyWith(
+                                fontWeight: FontWeight.w700,
+                              ),
+                              textAlign: TextAlign.right,
+                            ),
+                          ),
+                        ],
+                      ),
+                      for (var i = 0; i < 3; i++)
+                        TableRow(
+                          children: [
+                            Padding(
+                              padding: const EdgeInsets.symmetric(
+                                vertical: 6,
+                                horizontal: 8,
+                              ),
+                              child: SkeletonText(
+                                maxWidth: i.isEven ? 160 : 120,
+                                fontSize: 14,
+                                announce: false,
+                              ),
+                            ),
+                            const Padding(
+                              padding: EdgeInsets.symmetric(
+                                vertical: 6,
+                                horizontal: 8,
+                              ),
+                              child: SkeletonText(
+                                width: 32,
+                                fontSize: 14,
+                                alignment: Alignment.centerRight,
+                                announce: false,
+                              ),
+                            ),
+                            const Padding(
+                              padding: EdgeInsets.symmetric(
+                                vertical: 6,
+                                horizontal: 8,
+                              ),
+                              child: SkeletonText(
+                                width: 64,
+                                fontSize: 14,
+                                alignment: Alignment.centerRight,
+                                announce: false,
+                              ),
+                            ),
+                          ],
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
+        Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: Row(
+            children: [
+              Text(
+                '신청',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(width: 8),
+              const SkeletonBox(width: 32, height: 18),
+              const Spacer(),
+              _ExportMenu(enabled: false, onExport: (_) {}),
+            ],
+          ),
+        ),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final table = constraints.maxWidth >= 760;
+            final bar = _SelectionBar(
+              orders: const [],
+              picked: const {},
+              enabled: false,
+              showPickAll: !table,
+              onPickAll: (_) {},
+              onBulk: (_, _) {},
+              onShift: (_) {},
+            );
+            if (table) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  bar,
+                  SkeletonRegion(
+                    child: Card(
+                      clipBehavior: Clip.antiAlias,
+                      child: SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(
+                            minWidth: constraints.maxWidth,
+                          ),
+                          child: DataTable(
+                            columnSpacing: 12,
+                            horizontalMargin: 16,
+                            columns: [
+                              const DataColumn(label: Text('회원')),
+                              const DataColumn(label: Text('교재')),
+                              const DataColumn(label: Text('금액'), numeric: true),
+                              const DataColumn(label: Text('상태')),
+                              const DataColumn(label: Text('신청일')),
+                              for (final f in _BulkField.values)
+                                DataColumn(label: Text(f.label)),
+                            ],
+                            rows: [
+                              for (var i = 0; i < 4; i++)
+                                DataRow(
+                                  cells: [
+                                    const DataCell(
+                                      Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          SkeletonBox(
+                                            width: 56,
+                                            height: 14,
+                                            announce: false,
+                                          ),
+                                          SizedBox(height: 4),
+                                          SkeletonBox(
+                                            width: 68,
+                                            height: 12,
+                                            announce: false,
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    DataCell(
+                                      SkeletonBox(
+                                        width: i.isEven ? 140 : 110,
+                                        height: 14,
+                                        announce: false,
+                                      ),
+                                    ),
+                                    const DataCell(
+                                      SkeletonBox(
+                                        width: 64,
+                                        height: 14,
+                                        announce: false,
+                                      ),
+                                    ),
+                                    const DataCell(
+                                      SkeletonBox(
+                                        width: 56,
+                                        height: 22,
+                                        announce: false,
+                                      ),
+                                    ),
+                                    const DataCell(
+                                      SkeletonBox(
+                                        width: 72,
+                                        height: 14,
+                                        announce: false,
+                                      ),
+                                    ),
+                                    const DataCell(
+                                      SkeletonBox(
+                                        width: 20,
+                                        height: 20,
+                                        announce: false,
+                                      ),
+                                    ),
+                                    const DataCell(
+                                      SkeletonBox(
+                                        width: 20,
+                                        height: 20,
+                                        announce: false,
+                                      ),
+                                    ),
+                                    const DataCell(
+                                      SkeletonBox(
+                                        width: 20,
+                                        height: 20,
+                                        announce: false,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            }
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                bar,
+                SkeletonList.cards(
+                  count: 3,
+                  spacing: 8,
+                  itemBuilder: (_, _) => const Card(
+                    child: Padding(
+                      padding: EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Row(
+                            children: [
+                              Expanded(
+                                child: SkeletonText(
+                                  maxWidth: 140,
+                                  fontSize: 16,
+                                  announce: false,
+                                ),
+                              ),
+                              SkeletonBox(
+                                width: 56,
+                                height: 22,
+                                announce: false,
+                              ),
+                            ],
+                          ),
+                          SizedBox(height: 8),
+                          SkeletonText(
+                            maxWidth: 200,
+                            fontSize: 14,
+                            announce: false,
+                          ),
+                          SizedBox(height: 4),
+                          SkeletonText(
+                            maxWidth: 120,
+                            fontSize: 13,
+                            announce: false,
+                          ),
+                          SizedBox(height: 6),
+                          SkeletonText(
+                            maxWidth: 160,
+                            fontSize: 13,
+                            announce: false,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            );
+          },
         ),
       ],
     );

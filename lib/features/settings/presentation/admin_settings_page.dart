@@ -7,6 +7,7 @@ import '../../../core/utils/app_exception.dart';
 import '../../../core/utils/josa.dart';
 import '../../../core/widgets/feedback.dart';
 import '../../../core/widgets/responsive.dart';
+import '../../../core/widgets/skeleton.dart';
 import '../../../core/widgets/state_views.dart';
 import '../../campus/presentation/campus_providers.dart';
 import '../../deposits/presentation/deposit_settings_card.dart';
@@ -22,13 +23,22 @@ class AdminSettingsPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final account = ref.watch(bankAccountProvider(CampusScope.admin));
-    return AsyncValueView(
-      value: account,
-      onRetry: () => ref.invalidate(bankAccountProvider),
-      data: (a) => ScrollPageBody(
+    final currentRound = ref.watch(adminCurrentRoundProvider);
+    final refreshing =
+        account.isBackgroundRefreshing || currentRound.isBackgroundRefreshing;
+
+    return RefreshOverlay(
+      refreshing: refreshing,
+      child: ScrollPageBody(
         maxWidth: 640,
         children: [
-          _BankAccountForm(initial: a),
+          AsyncValueView<BankAccount>(
+            value: account,
+            showRefreshIndicator: false,
+            loading: const _BankAccountFormPlaceholder(),
+            onRetry: () => ref.invalidate(bankAccountProvider),
+            data: (a) => _BankAccountForm(initial: a),
+          ),
           const SizedBox(height: 24),
           const _RoundDeadlineForm(),
           const SizedBox(height: 16),
@@ -37,6 +47,45 @@ class AdminSettingsPage extends ConsumerWidget {
           const SignupPushCard(),
           const SizedBox(height: 16),
           const _DefaultPasswordInfo(),
+        ],
+      ),
+    );
+  }
+}
+
+class _BankAccountFormPlaceholder extends StatelessWidget {
+  const _BankAccountFormPlaceholder();
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const SectionTitle('송금 계좌'),
+          Text(
+            '교재 신청 완료 화면과 이벤트 화면에서 회원에게 안내됩니다.',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          const SizedBox(height: 16),
+          const SkeletonRegion(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                SkeletonBox(height: 48, radius: 12, announce: false),
+                SizedBox(height: 16),
+                SkeletonBox(height: 48, radius: 12, announce: false),
+                SizedBox(height: 16),
+                SkeletonBox(height: 48, radius: 12, announce: false),
+              ],
+            ),
+          ),
+          const SizedBox(height: 24),
+          Align(
+            alignment: Alignment.centerRight,
+            child: FilledButton(onPressed: null, child: const Text('저장')),
+          ),
         ],
       ),
     );
@@ -257,6 +306,7 @@ class _RoundDeadlineFormState extends ConsumerState<_RoundDeadlineForm> {
           AsyncValueView(
             value: currentRound,
             showRefreshIndicator: false,
+            loading: const _RoundDeadlinePlaceholder(),
             onRetry: () => ref.invalidate(adminCurrentRoundProvider),
             isEmpty: (round) => round == null,
             empty: const EmptyView(message: '신청 회차가 없습니다.'),
@@ -315,6 +365,42 @@ class _RoundDeadlineFormState extends ConsumerState<_RoundDeadlineForm> {
               child: const Text('마감 저장'),
             ),
           ],
+        ),
+      ],
+    );
+  }
+}
+
+class _RoundDeadlinePlaceholder extends StatelessWidget {
+  const _RoundDeadlinePlaceholder();
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const SkeletonText(maxWidth: 220, fontSize: 14),
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            OutlinedButton.icon(
+              onPressed: null,
+              icon: const Icon(Icons.event, size: 18),
+              label: const SkeletonBox(width: 96, height: 14, announce: false),
+            ),
+            OutlinedButton.icon(
+              onPressed: null,
+              icon: const Icon(Icons.schedule, size: 18),
+              label: const SkeletonBox(width: 64, height: 14, announce: false),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        Align(
+          alignment: Alignment.centerRight,
+          child: FilledButton(onPressed: null, child: const Text('마감 저장')),
         ),
       ],
     );

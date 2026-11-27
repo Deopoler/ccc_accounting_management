@@ -31,6 +31,50 @@ class OrderCompletePage extends ConsumerWidget {
       onRetry: () => ref.invalidate(orderProvider(orderId)),
       isEmpty: (o) => o == null,
       empty: const EmptyView(message: '신청 내역을 찾을 수 없습니다.'),
+      loading: ScrollPageBody(
+        maxWidth: 640,
+        children: [
+          const SizedBox(height: 8),
+          Icon(Icons.check_circle, size: 56, color: theme.colorScheme.primary),
+          const SizedBox(height: 12),
+          Text(
+            edited ? '신청이 수정되었습니다' : '교재 신청이 완료되었습니다',
+            textAlign: TextAlign.center,
+            style: theme.textTheme.headlineSmall?.copyWith(
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '아래 계좌로 합계 금액을 송금해 주세요.\n회계 담당자가 입금을 확인하면 상태가 "입금확인"으로 바뀝니다.',
+            textAlign: TextAlign.center,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 24),
+          const Card(
+            child: Padding(
+              padding: EdgeInsets.all(20),
+              child: OrderItemsSummaryPlaceholder(emphasizeTotal: true),
+            ),
+          ),
+          const SizedBox(height: 12),
+          const BankAccountCard(),
+          const SizedBox(height: 12),
+          const OrderPushCard(),
+          const SizedBox(height: 24),
+          FilledButton(
+            onPressed: () => context.go(AppRoutes.myOrders),
+            child: const Text('내 신청 내역 보기'),
+          ),
+          const SizedBox(height: 8),
+          TextButton(
+            onPressed: () => context.go(AppRoutes.home),
+            child: const Text('홈으로'),
+          ),
+        ],
+      ),
       data: (o) => ScrollPageBody(
         maxWidth: 640,
         children: [

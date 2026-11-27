@@ -7,6 +7,7 @@ import '../../../core/router/routes.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../core/widgets/feedback.dart';
 import '../../../core/widgets/responsive.dart';
+import '../../../core/widgets/skeleton.dart';
 import '../../../core/widgets/state_views.dart';
 import '../../campus/presentation/campus_providers.dart';
 import '../../events/domain/event.dart';
@@ -39,86 +40,185 @@ class AdminEventsPage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final events = ref.watch(eventsProvider(CampusScope.admin));
     final summaries = ref.watch(eventSummariesProvider);
-
-    if ((events.isLoading && !events.hasUsableValue) ||
-        (summaries.isLoading && !summaries.hasUsableValue)) {
-      return const LoadingView();
-    }
-    if (events.hasError || summaries.hasError) {
-      return ErrorView(
-        error: (events.error ?? summaries.error)!,
-        onRetry: () {
-          ref.invalidate(eventsProvider);
-          ref.invalidate(eventSummariesProvider);
-        },
-      );
-    }
-    if (!events.hasUsableValue || !summaries.hasUsableValue) {
-      return const LoadingView();
-    }
-
     final refreshing =
         events.isBackgroundRefreshing || summaries.isBackgroundRefreshing;
-    final list = events.requireValue;
-    final sums = summaries.requireValue;
+    final eventsReady = events.hasUsableValue;
+    final list = eventsReady ? events.requireValue : const <Event>[];
+    final sums = summaries.hasUsableValue
+        ? summaries.requireValue
+        : const <String, EventSummary>{};
 
     return RefreshOverlay(
       refreshing: refreshing,
       child: ScrollPageBody(
         maxWidth: 900,
         children: [
-          SectionTitle(
-            '이벤트 ${list.length}개',
-            trailing: FilledButton.icon(
-              onPressed: () => _create(context, ref),
-              icon: const Icon(Icons.add),
-              label: const Text('이벤트 추가'),
+          if (eventsReady)
+            SectionTitle(
+              '이벤트 ${list.length}개',
+              trailing: FilledButton.icon(
+                onPressed: () => _create(context, ref),
+                icon: const Icon(Icons.add),
+                label: const Text('이벤트 추가'),
+              ),
+            )
+          else
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Row(
+                children: [
+                  Text(
+                    '이벤트',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  if (!events.hasError)
+                    const SkeletonBox(width: 28, height: 18),
+                  const Spacer(),
+                  FilledButton.icon(
+                    onPressed: null,
+                    icon: const Icon(Icons.add),
+                    label: const Text('이벤트 추가'),
+                  ),
+                ],
+              ),
             ),
-          ),
-          if (list.isEmpty)
+          if (events.hasError && !events.isLoading)
+            ErrorView(
+              error: events.error!,
+              onRetry: () {
+                ref.invalidate(eventsProvider);
+                ref.invalidate(eventSummariesProvider);
+              },
+            )
+          else if (!eventsReady)
+            SkeletonList.cards(
+              count: 3,
+              spacing: 12,
+              itemBuilder: (_, _) => const _AdminEventCardPlaceholder(),
+            )
+          else if (list.isEmpty)
             const EmptyView(
               icon: Icons.event_note_outlined,
               message: '등록된 이벤트가 없습니다.',
-            ),
-          for (final e in list) ...[
-            Card(
-              clipBehavior: Clip.antiAlias,
-              child: Semantics(
-                button: true,
-                child: InkWell(
-                  onTap: () => context.go(AppRoutes.adminEventDetail(e.id)),
-                  child: Padding(
-                    padding: const EdgeInsets.all(20),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                e.title,
-                                style: Theme.of(context).textTheme.titleMedium
-                                    ?.copyWith(fontWeight: FontWeight.w600),
+            )
+          else ...[
+            if (summaries.hasError && !summaries.isLoading) ...[
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.error_outline,
+                        size: 18,
+                        color: Theme.of(context).colorScheme.error,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          '송금 현황을 불러오지 못했습니다.',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Theme.of(context).colorScheme.error,
+                          ),
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: () => ref.invalidate(eventSummariesProvider),
+                        child: const Text('다시 시도'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+            ],
+            for (final e in list) ...[
+              Card(
+                clipBehavior: Clip.antiAlias,
+                child: Semantics(
+                  button: true,
+                  child: InkWell(
+                    onTap: () => context.go(AppRoutes.adminEventDetail(e.id)),
+                    child: Padding(
+                      padding: const EdgeInsets.all(20),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  e.title,
+                                  style: Theme.of(context).textTheme.titleMedium
+                                      ?.copyWith(fontWeight: FontWeight.w600),
+                                ),
                               ),
-                            ),
-                            const Icon(Icons.chevron_right),
-                          ],
-                        ),
-                        const SizedBox(height: 4),
-                        EventMetaLine(event: e),
-                        const SizedBox(height: 12),
-                        PaymentProgress(
-                          summary: sums[e.id] ?? EventSummary.empty,
-                        ),
-                      ],
+                              const Icon(Icons.chevron_right),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          EventMetaLine(event: e),
+                          const SizedBox(height: 12),
+                          if (summaries.hasUsableValue)
+                            PaymentProgress(
+                              summary: sums[e.id] ?? EventSummary.empty,
+                            )
+                          else
+                            const PaymentProgressPlaceholder(),
+                        ],
+                      ),
                     ),
                   ),
                 ),
               ),
-            ),
-            const SizedBox(height: 12),
+              const SizedBox(height: 12),
+            ],
           ],
         ],
+      ),
+    );
+  }
+}
+
+class _AdminEventCardPlaceholder extends StatelessWidget {
+  const _AdminEventCardPlaceholder();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Card(
+      child: Padding(
+        padding: EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: SkeletonText(
+                    maxWidth: 180,
+                    fontSize: 16,
+                    announce: false,
+                  ),
+                ),
+                SizedBox(width: 12),
+                SkeletonBox(width: 20, height: 20, announce: false),
+              ],
+            ),
+            SizedBox(height: 6),
+            SkeletonText(maxWidth: 96, fontSize: 22, announce: false),
+            SizedBox(height: 4),
+            SkeletonText(maxWidth: 140, fontSize: 14, announce: false),
+            SizedBox(height: 12),
+            PaymentProgressPlaceholder(),
+          ],
+        ),
       ),
     );
   }

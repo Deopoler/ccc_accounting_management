@@ -6,6 +6,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../core/utils/josa.dart';
 import '../../../core/widgets/feedback.dart';
+import '../../../core/widgets/skeleton.dart';
 import '../../../core/widgets/state_views.dart';
 import 'settings_providers.dart';
 import '../../campus/presentation/campus_providers.dart';
@@ -46,6 +47,21 @@ class BankAccountCard extends ConsumerWidget {
           value: account,
           showRefreshIndicator: false,
           onRetry: () => ref.invalidate(bankAccountProvider),
+          loading: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SectionTitle(title),
+              if (amount != null)
+                _CopyRow(
+                  label: '송금 금액',
+                  value: formatWon(amount!),
+                  emphasize: true,
+                ),
+              const _SkeletonInfoRow(label: '은행', width: 90),
+              const _SkeletonInfoRow(label: '계좌번호', width: 150),
+              const _SkeletonInfoRow(label: '예금주', width: 80),
+            ],
+          ),
           data: (a) {
             if (!a.isConfigured) {
               return Row(
@@ -161,6 +177,40 @@ class _CopyRow extends StatelessWidget {
           else
             const SizedBox(height: 44),
         ],
+      ),
+    );
+  }
+}
+
+class _SkeletonInfoRow extends StatelessWidget {
+  const _SkeletonInfoRow({required this.label, required this.width});
+
+  final String label;
+  final double width;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: SizedBox(
+        height: 44,
+        child: Row(
+          children: [
+            SizedBox(
+              width: 64,
+              child: Text(
+                label,
+                style: TextStyle(
+                  fontSize: 14,
+                  color: context.colors.textSecondary,
+                ),
+              ),
+            ),
+            Expanded(
+              child: SkeletonText(maxWidth: width, fontSize: 16),
+            ),
+          ],
+        ),
       ),
     );
   }

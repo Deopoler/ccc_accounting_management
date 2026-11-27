@@ -7,6 +7,7 @@ import '../../../core/utils/formatters.dart';
 import '../../../core/utils/josa.dart';
 import '../../../core/widgets/feedback.dart';
 import '../../../core/widgets/responsive.dart';
+import '../../../core/widgets/skeleton.dart';
 import '../../../core/widgets/state_views.dart';
 import '../../campus/presentation/campus_providers.dart';
 import '../../textbooks/domain/textbook.dart';
@@ -230,179 +231,238 @@ class AdminTextbooksPage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final textbooks = ref.watch(textbooksProvider(CampusScope.admin));
     final categories = ref.watch(textbookCategoriesProvider(CampusScope.admin));
-
-    if ((textbooks.isLoading && !textbooks.hasUsableValue) ||
-        (categories.isLoading && !categories.hasUsableValue)) {
-      return const LoadingView();
-    }
-    if (textbooks.hasError || categories.hasError) {
-      return ErrorView(
-        error: (textbooks.error ?? categories.error)!,
-        onRetry: () {
-          ref.invalidate(textbooksProvider);
-          ref.invalidate(textbookCategoriesProvider);
-        },
-      );
-    }
-    if (!textbooks.hasUsableValue || !categories.hasUsableValue) {
-      return const LoadingView();
-    }
-
     final refreshing =
         textbooks.isBackgroundRefreshing || categories.isBackgroundRefreshing;
-    final books = textbooks.requireValue;
-    final cats = categories.requireValue;
-    final groups = groupByCategory(cats, books, includeEmpty: true);
-    final ordered = [for (final g in groups) ?g.category];
+    final catsReady = categories.hasUsableValue;
+    final booksReady = textbooks.hasUsableValue;
+    final cats = catsReady ? categories.requireValue : const <TextbookCategory>[];
+    final books = booksReady ? textbooks.requireValue : const <Textbook>[];
+    final groups = (catsReady && booksReady)
+        ? groupByCategory(cats, books, includeEmpty: true)
+        : const <CategoryGroup>[];
+    final ordered = catsReady ? cats : const <TextbookCategory>[];
     final theme = Theme.of(context);
 
     return RefreshOverlay(
       refreshing: refreshing,
       child: ScrollPageBody(
-      maxWidth: 900,
-      children: [
-        // ---- 카테고리
-        SectionTitle(
-          '카테고리 ${cats.length}개',
-          trailing: OutlinedButton.icon(
-            onPressed: () => _createCategory(context, ref, cats),
-            icon: const Icon(Icons.create_new_folder_outlined),
-            label: const Text('카테고리 추가'),
-          ),
-        ),
-        if (cats.isEmpty)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: Text(
-              '카테고리가 없으면 모든 교재가 "$uncategorizedName"로 보입니다.',
-              style: theme.textTheme.bodyMedium,
-            ),
-          )
-        else
-          Card(
-            clipBehavior: Clip.antiAlias,
-            child: Column(
-              children: [
-                for (final (i, c) in ordered.indexed) ...[
-                  if (i > 0) const Divider(height: 1),
-                  ListTile(
-                    contentPadding: const EdgeInsets.only(left: 16, right: 4),
-                    leading: const Icon(Icons.folder_outlined),
-                    title: Text(c.name),
-                    subtitle: Text(
-                      '교재 ${books.where((t) => t.categoryId == c.id).length}종',
-                    ),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        IconButton(
-                          tooltip: '${c.name} 위로 이동',
-                          onPressed: i == 0
-                              ? null
-                              : () => _move(context, ref, ordered, i, -1),
-                          icon: const Icon(Icons.arrow_upward),
-                        ),
-                        const SizedBox(width: 4),
-                        IconButton(
-                          tooltip: '${c.name} 아래로 이동',
-                          onPressed: i == ordered.length - 1
-                              ? null
-                              : () => _move(context, ref, ordered, i, 1),
-                          icon: const Icon(Icons.arrow_downward),
-                        ),
-                        PopupMenuButton<String>(
-                          tooltip: '더보기',
-                          onSelected: (v) => v == 'rename'
-                              ? _renameCategory(context, ref, c)
-                              : _deleteCategory(context, ref, c),
-                          itemBuilder: (_) => const [
-                            PopupMenuItem(
-                              value: 'rename',
-                              child: Text('이름 변경'),
-                            ),
-                            PopupMenuItem(value: 'delete', child: Text('삭제')),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-        const SizedBox(height: 24),
-
-        // ---- 교재
-        SectionTitle(
-          '교재 ${books.length}종',
-          trailing: FilledButton.icon(
-            onPressed: () => _createTextbook(context, ref, cats, books),
-            icon: const Icon(Icons.add),
-            label: const Text('교재 추가'),
-          ),
-        ),
-        if (books.isEmpty)
-          const EmptyView(
-            icon: Icons.library_books_outlined,
-            message: '등록된 교재가 없습니다. 교재를 추가해 주세요.',
-          ),
-        for (final g in groups)
-          if (g.textbooks.isNotEmpty || g.category != null) ...[
+        maxWidth: 900,
+        children: [
+          // ---- 카테고리
+          if (catsReady)
+            SectionTitle(
+              '카테고리 ${cats.length}개',
+              trailing: OutlinedButton.icon(
+                onPressed: () => _createCategory(context, ref, cats),
+                icon: const Icon(Icons.create_new_folder_outlined),
+                label: const Text('카테고리 추가'),
+              ),
+            )
+          else
             Padding(
-              padding: const EdgeInsets.fromLTRB(4, 12, 0, 8),
+              padding: const EdgeInsets.only(bottom: 12),
               child: Row(
                 children: [
-                  Expanded(
-                    child: Text(
-                      '${g.name} (${g.textbooks.length})',
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        color: theme.colorScheme.primary,
-                        fontWeight: FontWeight.w700,
-                      ),
+                  Text(
+                    '카테고리',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
-                  TextButton.icon(
-                    onPressed: () => _createTextbook(
-                      context,
-                      ref,
-                      cats,
-                      books,
-                      categoryId: g.category?.id,
-                    ),
-                    icon: const Icon(Icons.add, size: 18),
-                    label: const Text('여기에 추가'),
+                  const SizedBox(width: 8),
+                  if (!categories.hasError)
+                    const SkeletonBox(width: 28, height: 18),
+                  const Spacer(),
+                  OutlinedButton.icon(
+                    onPressed: null,
+                    icon: const Icon(Icons.create_new_folder_outlined),
+                    label: const Text('카테고리 추가'),
                   ),
                 ],
               ),
             ),
-            if (g.textbooks.isEmpty)
-              Padding(
-                padding: const EdgeInsets.only(left: 4, bottom: 8),
-                child: Text('교재가 없습니다.', style: theme.textTheme.bodySmall),
+          if (categories.hasError && !categories.isLoading)
+            ErrorView(
+              error: categories.error!,
+              onRetry: () => ref.invalidate(textbookCategoriesProvider),
+            )
+          else if (!catsReady)
+            const SkeletonList.tiles(
+              count: 3,
+              hasLeading: true,
+              hasTrailing: true,
+            )
+          else if (cats.isEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(
+                '카테고리가 없으면 모든 교재가 "$uncategorizedName"로 보입니다.',
+                style: theme.textTheme.bodyMedium,
               ),
-            for (final (i, t) in g.textbooks.indexed) ...[
-              _TextbookRow(
-                textbook: t,
-                onUp: i == 0
-                    ? null
-                    : () => _moveTextbook(context, ref, g.textbooks, i, -1),
-                onDown: i == g.textbooks.length - 1
-                    ? null
-                    : () => _moveTextbook(context, ref, g.textbooks, i, 1),
-                onToggleActive: (v) => _run(
-                  context,
-                  ref,
-                  () => ref
-                      .read(textbookRepositoryProvider)
-                      .setTextbookActive(t.id, isActive: v),
+            )
+          else
+            Card(
+              clipBehavior: Clip.antiAlias,
+              child: Column(
+                children: [
+                  for (final (i, c) in ordered.indexed) ...[
+                    if (i > 0) const Divider(height: 1),
+                    ListTile(
+                      contentPadding: const EdgeInsets.only(left: 16, right: 4),
+                      leading: const Icon(Icons.folder_outlined),
+                      title: Text(c.name),
+                      subtitle: booksReady
+                          ? Text(
+                              '교재 ${books.where((t) => t.categoryId == c.id).length}종',
+                            )
+                          : const SkeletonText(maxWidth: 64, fontSize: 13),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            tooltip: '${c.name} 위로 이동',
+                            onPressed: i == 0
+                                ? null
+                                : () => _move(context, ref, ordered, i, -1),
+                            icon: const Icon(Icons.arrow_upward),
+                          ),
+                          const SizedBox(width: 4),
+                          IconButton(
+                            tooltip: '${c.name} 아래로 이동',
+                            onPressed: i == ordered.length - 1
+                                ? null
+                                : () => _move(context, ref, ordered, i, 1),
+                            icon: const Icon(Icons.arrow_downward),
+                          ),
+                          PopupMenuButton<String>(
+                            tooltip: '더보기',
+                            onSelected: (v) => v == 'rename'
+                                ? _renameCategory(context, ref, c)
+                                : _deleteCategory(context, ref, c),
+                            itemBuilder: (_) => const [
+                              PopupMenuItem(
+                                value: 'rename',
+                                child: Text('이름 변경'),
+                              ),
+                              PopupMenuItem(value: 'delete', child: Text('삭제')),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          const SizedBox(height: 24),
+
+          // ---- 교재
+          if (catsReady && booksReady)
+            SectionTitle(
+              '교재 ${books.length}종',
+              trailing: FilledButton.icon(
+                onPressed: () => _createTextbook(context, ref, cats, books),
+                icon: const Icon(Icons.add),
+                label: const Text('교재 추가'),
+              ),
+            )
+          else
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Row(
+                children: [
+                  Text(
+                    '교재',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  if (!textbooks.hasError)
+                    const SkeletonBox(width: 28, height: 18),
+                  const Spacer(),
+                  FilledButton.icon(
+                    onPressed: null,
+                    icon: const Icon(Icons.add),
+                    label: const Text('교재 추가'),
+                  ),
+                ],
+              ),
+            ),
+          if (textbooks.hasError && !textbooks.isLoading)
+            ErrorView(
+              error: textbooks.error!,
+              onRetry: () => ref.invalidate(textbooksProvider),
+            )
+          else if (!catsReady || !booksReady)
+            SkeletonList.cards(
+              count: 3,
+              spacing: 8,
+              itemBuilder: (_, _) => const _TextbookRowPlaceholder(),
+            )
+          else if (books.isEmpty)
+            const EmptyView(
+              icon: Icons.library_books_outlined,
+              message: '등록된 교재가 없습니다. 교재를 추가해 주세요.',
+            )
+          else
+            for (final g in groups)
+              if (g.textbooks.isNotEmpty || g.category != null) ...[
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(4, 12, 0, 8),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          '${g.name} (${g.textbooks.length})',
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            color: theme.colorScheme.primary,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      TextButton.icon(
+                        onPressed: () => _createTextbook(
+                          context,
+                          ref,
+                          cats,
+                          books,
+                          categoryId: g.category?.id,
+                        ),
+                        icon: const Icon(Icons.add, size: 18),
+                        label: const Text('여기에 추가'),
+                      ),
+                    ],
+                  ),
                 ),
-                onEdit: () => _editTextbook(context, ref, cats, t),
-                onDelete: () => _deleteTextbook(context, ref, t),
-              ),
-              const SizedBox(height: 8),
-            ],
-          ],
-      ],
+                if (g.textbooks.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(left: 4, bottom: 8),
+                    child: Text('교재가 없습니다.', style: theme.textTheme.bodySmall),
+                  ),
+                for (final (i, t) in g.textbooks.indexed) ...[
+                  _TextbookRow(
+                    textbook: t,
+                    onUp: i == 0
+                        ? null
+                        : () => _moveTextbook(context, ref, g.textbooks, i, -1),
+                    onDown: i == g.textbooks.length - 1
+                        ? null
+                        : () => _moveTextbook(context, ref, g.textbooks, i, 1),
+                    onToggleActive: (v) => _run(
+                      context,
+                      ref,
+                      () => ref
+                          .read(textbookRepositoryProvider)
+                          .setTextbookActive(t.id, isActive: v),
+                    ),
+                    onEdit: () => _editTextbook(context, ref, cats, t),
+                    onDelete: () => _deleteTextbook(context, ref, t),
+                  ),
+                  const SizedBox(height: 8),
+                ],
+              ],
+        ],
       ),
     );
   }
@@ -483,6 +543,54 @@ class _TextbookRow extends StatelessWidget {
                 PopupMenuItem(value: 'edit', child: Text('수정')),
                 PopupMenuItem(value: 'delete', child: Text('삭제')),
               ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _TextbookRowPlaceholder extends StatelessWidget {
+  const _TextbookRowPlaceholder();
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(4, 8, 12, 8),
+        child: Row(
+          children: [
+            Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  onPressed: null,
+                  icon: const Icon(Icons.keyboard_arrow_up),
+                ),
+                const SizedBox(height: 4),
+                IconButton(
+                  onPressed: null,
+                  icon: const Icon(Icons.keyboard_arrow_down),
+                ),
+              ],
+            ),
+            const SizedBox(width: 4),
+            const Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SkeletonText(maxWidth: 160, fontSize: 16, announce: false),
+                  SizedBox(height: 2),
+                  SkeletonText(maxWidth: 72, fontSize: 14, announce: false),
+                ],
+              ),
+            ),
+            const SkeletonBox(
+              width: 44,
+              height: 24,
+              radius: 12,
+              announce: false,
             ),
           ],
         ),

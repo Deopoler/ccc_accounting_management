@@ -6,6 +6,7 @@ import '../../../core/config/env.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../core/widgets/feedback.dart';
+import '../../../core/widgets/skeleton.dart';
 import '../../../core/widgets/state_views.dart';
 import '../domain/bank_deposit.dart';
 import 'deposit_providers.dart';
@@ -22,6 +23,7 @@ class DepositSettingsCard extends ConsumerWidget {
         child: AsyncValueView<CampusDepositSettings?>(
           value: settingsAsync,
           showRefreshIndicator: false,
+          loading: const _DepositSettingsPlaceholder(),
           onRetry: () => ref.invalidate(depositSettingsProvider),
           isEmpty: (s) => s == null,
           empty: const EmptyView(message: '캠퍼스 정보를 불러오지 못했습니다.'),
@@ -31,6 +33,76 @@ class DepositSettingsCard extends ConsumerWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _DepositSettingsPlaceholder extends StatelessWidget {
+  const _DepositSettingsPlaceholder();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            const Expanded(child: SectionTitle('자동 입금 확인')),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Switch(value: false, onChanged: null),
+            ),
+          ],
+        ),
+        Text(
+          '회계 담당자 휴대폰의 은행 알림을 받아 교재 신청과 이벤트 송금을 자동으로 확인합니다.',
+          style: theme.textTheme.bodySmall,
+        ),
+        const SizedBox(height: 16),
+        const SkeletonBox(height: 48, radius: 12),
+        const SizedBox(height: 12),
+        Align(
+          alignment: Alignment.centerRight,
+          child: OutlinedButton(onPressed: null, child: const Text('설정 저장')),
+        ),
+        const Divider(height: 28),
+        Text('알림 수집 주소', style: theme.textTheme.titleSmall),
+        const SizedBox(height: 6),
+        const SkeletonBox(height: 40, radius: 12),
+        const SizedBox(height: 16),
+        Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('인증 토큰 (X-Deposit-Token)', style: theme.textTheme.titleSmall),
+                  const SizedBox(height: 4),
+                  const SkeletonText(maxWidth: 130, fontSize: 13),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            OutlinedButton(onPressed: null, child: const Text('토큰 발급')),
+          ],
+        ),
+        const Divider(height: 28),
+        Text('수신 상태', style: theme.textTheme.titleSmall),
+        const SizedBox(height: 6),
+        const SkeletonRegion(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SkeletonText(maxWidth: 210, fontSize: 13, announce: false),
+              SizedBox(height: 4),
+              SkeletonText(maxWidth: 190, fontSize: 13, announce: false),
+              SizedBox(height: 4),
+              SkeletonText(maxWidth: 140, fontSize: 13, announce: false),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }

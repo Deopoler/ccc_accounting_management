@@ -11,6 +11,7 @@ import '../../../core/utils/josa.dart';
 import '../../../core/widgets/app_widgets.dart';
 import '../../../core/widgets/feedback.dart';
 import '../../../core/widgets/responsive.dart';
+import '../../../core/widgets/skeleton.dart';
 import '../../../core/widgets/state_views.dart';
 import '../../auth/domain/profile.dart';
 import '../../campus/presentation/campus_providers.dart';
@@ -214,32 +215,30 @@ class _AdminEventDetailPageState extends ConsumerState<AdminEventDetailPage> {
 
     final event = ref.watch(eventProvider(_id));
     final payments = ref.watch(eventPaymentsProvider(_id));
-
-    if ((event.isLoading && !event.hasUsableValue) ||
-        (payments.isLoading && !payments.hasUsableValue)) {
-      return const LoadingView();
-    }
-    if (event.hasError || payments.hasError) {
-      return ErrorView(
-        error: (event.error ?? payments.error)!,
-        onRetry: _refreshLists,
-      );
-    }
-    if (!event.hasUsableValue || !payments.hasUsableValue) {
-      return const LoadingView();
-    }
-
     final refreshing =
         event.isBackgroundRefreshing || payments.isBackgroundRefreshing;
-    final e = event.requireValue;
-    if (e == null) {
+
+    if (event.hasError && !event.isLoading) {
+      return RefreshOverlay(
+        refreshing: refreshing,
+        child: ErrorView(error: event.error!, onRetry: _refreshLists),
+      );
+    }
+
+    final eventReady = event.hasUsableValue;
+    final e = eventReady ? event.requireValue : null;
+    if (eventReady && e == null) {
       return RefreshOverlay(
         refreshing: refreshing,
         child: const EmptyView(message: '이벤트를 찾을 수 없습니다.'),
       );
     }
-    final all = payments.requireValue;
-    final summary = EventSummary.fromPayments(all, e);
+
+    final paymentsReady = payments.hasUsableValue;
+    final all = paymentsReady ? payments.requireValue : const <EventPayment>[];
+    final summary = (e != null && paymentsReady)
+        ? EventSummary.fromPayments(all, e)
+        : null;
     final q = _search.text.trim().toLowerCase();
     final filtered = all.where((p) {
       if (_filter == _PaidFilter.paid && !p.isPaid) return false;
@@ -256,177 +255,260 @@ class _AdminEventDetailPageState extends ConsumerState<AdminEventDetailPage> {
     return RefreshOverlay(
       refreshing: refreshing,
       child: ScrollPageBody(
-      maxWidth: 900,
-      children: [
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        e.title,
-                        style: theme.textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.w700,
+        maxWidth: 900,
+        children: [
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: e == null
+                  ? Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Row(
+                          children: [
+                            const Expanded(
+                              child: SkeletonText(maxWidth: 200, fontSize: 22),
+                            ),
+                            IconButton(
+                              tooltip: '수정',
+                              onPressed: null,
+                              icon: const Icon(Icons.edit_outlined),
+                            ),
+                            IconButton(
+                              tooltip: '삭제',
+                              onPressed: null,
+                              icon: const Icon(Icons.delete_outline),
+                            ),
+                          ],
                         ),
-                      ),
+                        const SizedBox(height: 6),
+                        const SkeletonRegion(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              SkeletonText(
+                                maxWidth: 96,
+                                fontSize: 22,
+                                announce: false,
+                              ),
+                              SizedBox(height: 4),
+                              SkeletonText(
+                                maxWidth: 150,
+                                fontSize: 14,
+                                announce: false,
+                              ),
+                              SizedBox(height: 4),
+                              SkeletonText(
+                                maxWidth: 130,
+                                fontSize: 12,
+                                announce: false,
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        const PaymentProgressPlaceholder(),
+                        const SizedBox(height: 12),
+                        const LabeledValue(
+                          label: '미수금',
+                          value: SkeletonText(maxWidth: 100, fontSize: 22),
+                        ),
+                      ],
+                    )
+                  : Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                e.title,
+                                style: theme.textTheme.titleLarge?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                            IconButton(
+                              tooltip: '수정',
+                              onPressed: () => _edit(e),
+                              icon: const Icon(Icons.edit_outlined),
+                            ),
+                            IconButton(
+                              tooltip: '삭제',
+                              onPressed: () => _delete(e),
+                              icon: const Icon(Icons.delete_outline),
+                            ),
+                          ],
+                        ),
+                        EventMetaLine(event: e),
+                        const SizedBox(height: 4),
+                        Text(
+                          e.depositName.isEmpty
+                              ? '입금자명: 회원 이름'
+                              : '입금자명 형식: ${e.depositName}',
+                          style: theme.textTheme.bodySmall,
+                        ),
+                        if (e.autoEnrollNewMembers) ...[
+                          const SizedBox(height: 8),
+                          const Align(
+                            alignment: Alignment.centerLeft,
+                            child: AppBadge('신규 가입자 자동 추가'),
+                          ),
+                        ],
+                        if (e.description.isNotEmpty) ...[
+                          const SizedBox(height: 8),
+                          Text(e.description),
+                        ],
+                        const SizedBox(height: 16),
+                        if (summary != null) ...[
+                          PaymentProgress(summary: summary),
+                          const SizedBox(height: 12),
+                          LabeledValue(
+                            label: '미납 ${summary.unpaidCount}명 · 미수금',
+                            value: AmountText(
+                              summary.outstandingAmount,
+                              highlight: summary.unpaidCount > 0,
+                            ),
+                          ),
+                        ] else ...[
+                          const PaymentProgressPlaceholder(),
+                          const SizedBox(height: 12),
+                          const LabeledValue(
+                            label: '미수금',
+                            value: SkeletonText(maxWidth: 100, fontSize: 22),
+                          ),
+                        ],
+                      ],
                     ),
-                    IconButton(
-                      tooltip: '수정',
-                      onPressed: () => _edit(e),
-                      icon: const Icon(Icons.edit_outlined),
-                    ),
-                    IconButton(
-                      tooltip: '삭제',
-                      onPressed: () => _delete(e),
-                      icon: const Icon(Icons.delete_outline),
-                    ),
-                  ],
-                ),
-                EventMetaLine(event: e),
-                const SizedBox(height: 4),
-                Text(
-                  e.depositName.isEmpty
-                      ? '입금자명: 회원 이름'
-                      : '입금자명 형식: ${e.depositName}',
-                  style: theme.textTheme.bodySmall,
-                ),
-                if (e.autoEnrollNewMembers) ...[
-                  const SizedBox(height: 8),
-                  const Align(
-                    alignment: Alignment.centerLeft,
-                    child: AppBadge('신규 가입자 자동 추가'),
-                  ),
-                ],
-                if (e.description.isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  Text(e.description),
-                ],
-                const SizedBox(height: 16),
-                PaymentProgress(summary: summary),
-                const SizedBox(height: 12),
-                LabeledValue(
-                  label: '미납 ${summary.unpaidCount}명 · 미수금',
-                  value: AmountText(
-                    summary.outstandingAmount,
-                    highlight: summary.unpaidCount > 0,
-                  ),
-                ),
-              ],
             ),
           ),
-        ),
-        const SizedBox(height: 16),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            for (final (f, label) in [
-              (_PaidFilter.all, '전체 ${summary.targetCount}'),
-              (_PaidFilter.unpaid, '미납 ${summary.unpaidCount}'),
-              (_PaidFilter.paid, '완납 ${summary.paidCount}'),
-            ])
-              ChoiceChip(
-                label: Text(label),
-                selected: _filter == f,
-                onSelected: (_) => setState(() => _filter = f),
-              ),
-            SizedBox(
-              width: 220,
-              child: TextField(
-                controller: _search,
-                onChanged: (_) => setState(() {}),
-                decoration: const InputDecoration(
-                  labelText: '학번 / 이름 검색',
-                  prefixIcon: Icon(Icons.search),
+          const SizedBox(height: 16),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              for (final (f, label) in [
+                (
+                  _PaidFilter.all,
+                  summary == null ? '전체' : '전체 ${summary.targetCount}',
+                ),
+                (
+                  _PaidFilter.unpaid,
+                  summary == null ? '미납' : '미납 ${summary.unpaidCount}',
+                ),
+                (
+                  _PaidFilter.paid,
+                  summary == null ? '완납' : '완납 ${summary.paidCount}',
+                ),
+              ])
+                ChoiceChip(
+                  label: Text(label),
+                  selected: _filter == f,
+                  onSelected: (_) => setState(() => _filter = f),
+                ),
+              SizedBox(
+                width: 220,
+                child: TextField(
+                  controller: _search,
+                  onChanged: (_) => setState(() {}),
+                  decoration: const InputDecoration(
+                    labelText: '학번 / 이름 검색',
+                    prefixIcon: Icon(Icons.search),
+                  ),
                 ),
               ),
-            ),
-            SizedBox(
-              width: 140,
-              child: DropdownButtonFormField<EventPaymentSort>(
-                initialValue: _sort,
-                decoration: const InputDecoration(labelText: '정렬'),
-                items: [
-                  for (final s in EventPaymentSort.values)
-                    DropdownMenuItem(value: s, child: Text(s.label)),
-                ],
-                onChanged: (s) {
-                  if (s != null) setState(() => _sort = s);
+              SizedBox(
+                width: 140,
+                child: DropdownButtonFormField<EventPaymentSort>(
+                  initialValue: _sort,
+                  decoration: const InputDecoration(labelText: '정렬'),
+                  items: [
+                    for (final s in EventPaymentSort.values)
+                      DropdownMenuItem(value: s, child: Text(s.label)),
+                  ],
+                  onChanged: (s) {
+                    if (s != null) setState(() => _sort = s);
+                  },
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              OutlinedButton.icon(
+                onPressed: e == null || !paymentsReady
+                    ? null
+                    : () => _addTargets(all),
+                icon: const Icon(Icons.person_add_alt),
+                label: const Text('대상 추가'),
+              ),
+              OutlinedButton.icon(
+                onPressed: summary == null || summary.unpaidCount == 0
+                    ? null
+                    : () => _copyUnpaid(all),
+                icon: const Icon(Icons.copy),
+                label: const Text('미납자 복사'),
+              ),
+              OutlinedButton.icon(
+                onPressed:
+                    e == null || summary == null || summary.unpaidCount == 0
+                    ? null
+                    : () => _exportUnpaid(e, all),
+                icon: const Icon(Icons.download),
+                label: const Text('미납자 CSV'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          if (payments.hasError && !payments.isLoading)
+            ErrorView(
+              error: payments.error!,
+              onRetry: () => ref.invalidate(eventPaymentsProvider(_id)),
+            )
+          else if (e == null || !paymentsReady)
+            const SkeletonList.tiles(count: 4, hasTrailing: true)
+          else if (all.isEmpty)
+            EmptyView(
+              icon: Icons.group_add_outlined,
+              message: '아직 송금 대상이 없습니다.\n대상 추가에서 회원을 선택해 주세요.',
+              action: FilledButton.icon(
+                onPressed: () => _addTargets(all),
+                icon: const Icon(Icons.person_add_alt),
+                label: const Text('대상 추가'),
+              ),
+            )
+          else if (visible.isEmpty)
+            const EmptyView(message: '해당하는 회원이 없습니다.')
+          else
+            Card(
+              clipBehavior: Clip.antiAlias,
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final compact = constraints.maxWidth < 600;
+                  return Column(
+                    children: [
+                      for (final (i, p) in visible.indexed) ...[
+                        if (i > 0) const Divider(height: 1),
+                        _PaymentTargetRow(
+                          event: e,
+                          payment: p,
+                          compact: compact,
+                          busy: _busy.contains(p.id),
+                          onToggle: (v) => _toggle(p, v),
+                          onEditAmount: () => _editAmount(e, p),
+                          onRemove: () => _removeTarget(p),
+                        ),
+                      ],
+                    ],
+                  );
                 },
               ),
             ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            OutlinedButton.icon(
-              onPressed: () => _addTargets(all),
-              icon: const Icon(Icons.person_add_alt),
-              label: const Text('대상 추가'),
-            ),
-            OutlinedButton.icon(
-              onPressed: summary.unpaidCount == 0
-                  ? null
-                  : () => _copyUnpaid(all),
-              icon: const Icon(Icons.copy),
-              label: const Text('미납자 복사'),
-            ),
-            OutlinedButton.icon(
-              onPressed: summary.unpaidCount == 0
-                  ? null
-                  : () => _exportUnpaid(e, all),
-              icon: const Icon(Icons.download),
-              label: const Text('미납자 CSV'),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        if (all.isEmpty)
-          EmptyView(
-            icon: Icons.group_add_outlined,
-            message: '아직 송금 대상이 없습니다.\n대상 추가에서 회원을 선택해 주세요.',
-            action: FilledButton.icon(
-              onPressed: () => _addTargets(all),
-              icon: const Icon(Icons.person_add_alt),
-              label: const Text('대상 추가'),
-            ),
-          )
-        else if (visible.isEmpty)
-          const EmptyView(message: '해당하는 회원이 없습니다.')
-        else
-          Card(
-            clipBehavior: Clip.antiAlias,
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final compact = constraints.maxWidth < 600;
-                return Column(
-                  children: [
-                    for (final (i, p) in visible.indexed) ...[
-                      if (i > 0) const Divider(height: 1),
-                      _PaymentTargetRow(
-                        event: e,
-                        payment: p,
-                        compact: compact,
-                        busy: _busy.contains(p.id),
-                        onToggle: (v) => _toggle(p, v),
-                        onEditAmount: () => _editAmount(e, p),
-                        onRemove: () => _removeTarget(p),
-                      ),
-                    ],
-                  ],
-                );
-              },
-            ),
-          ),
-      ],
+        ],
       ),
     );
   }
@@ -570,6 +652,10 @@ class _AddTargetsDialogState extends ConsumerState<_AddTargetsDialog> {
         height: (availableHeight * 0.55).clamp(160.0, 420.0),
         child: AsyncValueView<List<Profile>>(
           value: members,
+          loading: const SkeletonList.tiles(
+            count: 4,
+            hasLeading: true,
+          ),
           onRetry: () => ref.invalidate(membersProvider),
           data: (list) {
             final q = _query.trim().toLowerCase();

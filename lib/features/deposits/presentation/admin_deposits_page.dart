@@ -9,6 +9,7 @@ import '../../../core/utils/korean_search.dart';
 import '../../../core/widgets/app_widgets.dart';
 import '../../../core/widgets/feedback.dart';
 import '../../../core/widgets/responsive.dart';
+import '../../../core/widgets/skeleton.dart';
 import '../../../core/widgets/state_views.dart';
 import '../../admin/presentation/admin_order_providers.dart';
 import '../../campus/presentation/campus_providers.dart';
@@ -331,203 +332,274 @@ class _AdminDepositsPageState extends ConsumerState<AdminDepositsPage> {
     final depositsAsync = ref.watch(bankDepositsProvider(_filter));
     final countsAsync = ref.watch(depositCountsProvider);
     final counts = countsAsync.asData?.value;
+    final refreshing =
+        depositsAsync.isBackgroundRefreshing ||
+        (countsAsync.isRefreshing && counts != null);
+    final unparsedWithRawCount = counts?.unparsedWithRaw ?? 0;
 
-    return AsyncValueView<List<BankDeposit>>(
-      value: depositsAsync,
-      onRetry: _refreshAll,
-      data: (firstPage) {
-        final seen = {for (final d in firstPage) d.id};
-        final loaded = [
-          ...firstPage,
-          for (final d in _extraItems)
-            if (seen.add(d.id)) d,
-        ];
-        final totalInFilter = counts?.countFor(_filter);
-        final hasMore =
-            !_reachedEnd &&
-            firstPage.length >= depositPageSize &&
-            (totalInFilter == null || loaded.length < totalInFilter);
-        final visible = loaded
-            .where((d) => _matchesSearch(d, _search.text))
-            .toList();
-        final unparsedWithRawCount = counts?.unparsedWithRaw ?? 0;
-        final isEmptyCampus =
-            counts != null && counts.all == 0 && loaded.isEmpty;
+    final Widget listSection;
+    if (depositsAsync.hasError && !depositsAsync.isLoading) {
+      listSection = ErrorView(
+        error: depositsAsync.error!,
+        onRetry: _refreshAll,
+      );
+    } else if (!depositsAsync.hasUsableValue) {
+      listSection = SkeletonList.cards(
+        count: 3,
+        spacing: 10,
+        itemBuilder: (_, _) => const _DepositCardPlaceholder(),
+      );
+    } else {
+      final firstPage = depositsAsync.requireValue;
+      final seen = {for (final d in firstPage) d.id};
+      final loaded = [
+        ...firstPage,
+        for (final d in _extraItems)
+          if (seen.add(d.id)) d,
+      ];
+      final totalInFilter = counts?.countFor(_filter);
+      final hasMore =
+          !_reachedEnd &&
+          firstPage.length >= depositPageSize &&
+          (totalInFilter == null || loaded.length < totalInFilter);
+      final visible = loaded
+          .where((d) => _matchesSearch(d, _search.text))
+          .toList();
+      final isEmptyCampus =
+          counts != null && counts.all == 0 && loaded.isEmpty;
 
-        return ListView(
-          children: [
-            PageBody(
-              maxWidth: 960,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  if (countsAsync.hasError && !countsAsync.isLoading) ...[
-                    Card(
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 8,
-                        ),
-                        child: Row(
-                          children: [
-                            Icon(Icons.error_outline, size: 18, color: c.error),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                '상태별 건수를 불러오지 못했습니다.',
-                                style: TextStyle(fontSize: 13, color: c.error),
-                              ),
-                            ),
-                            TextButton(
-                              onPressed: () =>
-                                  ref.invalidate(depositCountsProvider),
-                              child: const Text('다시 시도'),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                  ],
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      for (final f in DepositFilter.values)
-                        ChoiceChip(
-                          label: Text(
-                            counts == null
-                                ? f.label
-                                : '${f.label} ${counts.countFor(f)}',
-                          ),
-                          selected: _filter == f,
-                          onSelected: (_) => _selectFilter(f),
-                        ),
-                    ],
+      listSection = Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (isEmptyCampus)
+            EmptyView(
+              icon: Icons.account_balance_wallet_outlined,
+              message:
+                  '수집된 입금 내역이 아직 없습니다.\n'
+                  '설정에서 자동 입금 확인을 켜고 알림 전달을 연결해 주세요.',
+              action: OutlinedButton(
+                onPressed: () => context.go(AppRoutes.adminSettings),
+                child: const Text('설정으로 이동'),
+              ),
+            )
+          else if (visible.isEmpty)
+            EmptyView(
+              icon: Icons.check_circle_outline,
+              message: _filter == DepositFilter.needsReview &&
+                      _search.text.trim().isEmpty
+                  ? '확인이 필요한 입금이 없습니다.'
+                  : hasMore
+                  ? '불러온 ${loaded.length}건 중 조건에 맞는 입금 내역이 없습니다.'
+                  : '조건에 맞는 입금 내역이 없습니다.',
+            )
+          else
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                SectionTitle(
+                  _search.text.trim().isEmpty &&
+                          totalInFilter != null &&
+                          totalInFilter > loaded.length
+                      ? '입금 ${visible.length} / $totalInFilter건'
+                      : '입금 ${visible.length}건',
+                ),
+                for (final d in visible) ...[
+                  _DepositCard(
+                    deposit: d,
+                    busy: _busy.contains(d.id),
+                    onLink: () => _openLinkDialog(d),
+                    onUndo: () => _undo(d),
+                    onClearDuplicate: () => _clearDuplicate(d),
+                    onIgnore: () => _ignore(d, ignore: true),
+                    onUnignore: () => _ignore(d, ignore: false),
+                    onRematch: () => _rematch(d),
+                    onReparse: () => _reparseOne(d),
                   ),
-                  const SizedBox(height: 12),
-                  LayoutBuilder(
-                    builder: (context, constraints) {
-                      final compact = constraints.maxWidth < 600;
-                      return Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        crossAxisAlignment: WrapCrossAlignment.center,
-                        children: [
-                          SizedBox(
-                            width: compact ? constraints.maxWidth : 280,
-                            child: TextField(
-                              controller: _search,
-                              onChanged: (_) => setState(() {}),
-                              decoration: InputDecoration(
-                                labelText: '입금자명 / 금액 / 원문 검색',
-                                prefixIcon: const Icon(Icons.search),
-                                suffixIcon: _search.text.isEmpty
-                                    ? null
-                                    : IconButton(
-                                        tooltip: '지우기',
-                                        icon: const Icon(Icons.clear),
-                                        onPressed: () {
-                                          _search.clear();
-                                          setState(() {});
-                                        },
-                                      ),
-                              ),
-                            ),
-                          ),
-                          OutlinedButton.icon(
-                            onPressed: _refreshAll,
-                            icon: const Icon(Icons.refresh, size: 18),
-                            label: const Text('새로고침'),
-                          ),
-                          if (unparsedWithRawCount > 0)
-                            OutlinedButton.icon(
-                              onPressed: _bulkReparsing
-                                  ? null
-                                  : _reparseAllUnparsed,
-                              icon: const Icon(Icons.replay, size: 18),
-                              label: Text(
-                                _bulkReparsing
-                                    ? '재해석 중...'
-                                    : '해석 실패 일괄 재실행 ($unparsedWithRawCount)',
-                              ),
-                            ),
-                        ],
-                      );
-                    },
-                  ),
-                  const SizedBox(height: 16),
-                  if (isEmptyCampus)
-                    EmptyView(
-                      icon: Icons.account_balance_wallet_outlined,
-                      message:
-                          '수집된 입금 내역이 아직 없습니다.\n'
-                          '설정에서 자동 입금 확인을 켜고 알림 전달을 연결해 주세요.',
-                      action: OutlinedButton(
-                        onPressed: () => context.go(AppRoutes.adminSettings),
-                        child: const Text('설정으로 이동'),
-                      ),
-                    )
-                  else if (visible.isEmpty)
-                    EmptyView(
-                      icon: Icons.check_circle_outline,
-                      message: _filter == DepositFilter.needsReview &&
-                              _search.text.trim().isEmpty
-                          ? '확인이 필요한 입금이 없습니다.'
-                          : hasMore
-                          ? '불러온 ${loaded.length}건 중 조건에 맞는 입금 내역이 없습니다.'
-                          : '조건에 맞는 입금 내역이 없습니다.',
-                    )
-                  else
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        SectionTitle(
-                          _search.text.trim().isEmpty &&
-                                  totalInFilter != null &&
-                                  totalInFilter > loaded.length
-                              ? '입금 ${visible.length} / $totalInFilter건'
-                              : '입금 ${visible.length}건',
-                        ),
-                        for (final d in visible) ...[
-                          _DepositCard(
-                            deposit: d,
-                            busy: _busy.contains(d.id),
-                            onLink: () => _openLinkDialog(d),
-                            onUndo: () => _undo(d),
-                            onClearDuplicate: () => _clearDuplicate(d),
-                            onIgnore: () => _ignore(d, ignore: true),
-                            onUnignore: () => _ignore(d, ignore: false),
-                            onRematch: () => _rematch(d),
-                            onReparse: () => _reparseOne(d),
-                          ),
-                          const SizedBox(height: 10),
-                        ],
-                      ],
-                    ),
-                  if (hasMore) ...[
-                    const SizedBox(height: 4),
-                    Center(
-                      child: OutlinedButton(
-                        onPressed: _loadingMore
-                            ? null
-                            : () => _loadMore(loaded),
-                        child: Text(
-                          _loadingMore
-                              ? '불러오는 중...'
-                              : totalInFilter != null
-                              ? '더 보기 (${loaded.length} / $totalInFilter)'
-                              : '더 보기',
-                        ),
-                      ),
-                    ),
-                  ],
+                  const SizedBox(height: 10),
                 ],
+              ],
+            ),
+          if (hasMore) ...[
+            const SizedBox(height: 4),
+            Center(
+              child: OutlinedButton(
+                onPressed: _loadingMore ? null : () => _loadMore(loaded),
+                child: Text(
+                  _loadingMore
+                      ? '불러오는 중...'
+                      : totalInFilter != null
+                      ? '더 보기 (${loaded.length} / $totalInFilter)'
+                      : '더 보기',
+                ),
               ),
             ),
           ],
-        );
-      },
+        ],
+      );
+    }
+
+    return RefreshOverlay(
+      refreshing: refreshing,
+      child: ListView(
+        children: [
+          PageBody(
+            maxWidth: 960,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (countsAsync.hasError && !countsAsync.isLoading) ...[
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.error_outline, size: 18, color: c.error),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              '상태별 건수를 불러오지 못했습니다.',
+                              style: TextStyle(fontSize: 13, color: c.error),
+                            ),
+                          ),
+                          TextButton(
+                            onPressed: () =>
+                                ref.invalidate(depositCountsProvider),
+                            child: const Text('다시 시도'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                ],
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final f in DepositFilter.values)
+                      ChoiceChip(
+                        label: Text(
+                          counts == null
+                              ? f.label
+                              : '${f.label} ${counts.countFor(f)}',
+                        ),
+                        selected: _filter == f,
+                        onSelected: (_) => _selectFilter(f),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final compact = constraints.maxWidth < 600;
+                    return Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        SizedBox(
+                          width: compact ? constraints.maxWidth : 280,
+                          child: TextField(
+                            controller: _search,
+                            onChanged: (_) => setState(() {}),
+                            decoration: InputDecoration(
+                              labelText: '입금자명 / 금액 / 원문 검색',
+                              prefixIcon: const Icon(Icons.search),
+                              suffixIcon: _search.text.isEmpty
+                                  ? null
+                                  : IconButton(
+                                      tooltip: '지우기',
+                                      icon: const Icon(Icons.clear),
+                                      onPressed: () {
+                                        _search.clear();
+                                        setState(() {});
+                                      },
+                                    ),
+                            ),
+                          ),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed: _refreshAll,
+                          icon: const Icon(Icons.refresh, size: 18),
+                          label: const Text('새로고침'),
+                        ),
+                        if (unparsedWithRawCount > 0)
+                          OutlinedButton.icon(
+                            onPressed: _bulkReparsing
+                                ? null
+                                : _reparseAllUnparsed,
+                            icon: const Icon(Icons.replay, size: 18),
+                            label: Text(
+                              _bulkReparsing
+                                  ? '재해석 중...'
+                                  : '해석 실패 일괄 재실행 ($unparsedWithRawCount)',
+                            ),
+                          ),
+                      ],
+                    );
+                  },
+                ),
+                const SizedBox(height: 16),
+                listSection,
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DepositCardPlaceholder extends StatelessWidget {
+  const _DepositCardPlaceholder();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Card(
+      child: Padding(
+        padding: EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          SkeletonText(
+                            width: 84,
+                            fontSize: 16,
+                            announce: false,
+                          ),
+                          SizedBox(width: 8),
+                          SkeletonBox(width: 56, height: 22, announce: false),
+                        ],
+                      ),
+                      SizedBox(height: 4),
+                      SkeletonText(
+                        maxWidth: 180,
+                        fontSize: 13,
+                        announce: false,
+                      ),
+                    ],
+                  ),
+                ),
+                SizedBox(width: 12),
+                SkeletonText(width: 72, fontSize: 17, announce: false),
+              ],
+            ),
+            SizedBox(height: 10),
+            SkeletonText(maxWidth: 240, fontSize: 13, announce: false),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -1018,6 +1090,10 @@ class _LinkDepositDialogState extends ConsumerState<_LinkDepositDialog> {
               Expanded(
                 child: AsyncValueView<UnpaidLinkTargets>(
                   value: targetsAsync,
+                  loading: const SkeletonList.tiles(
+                    count: 4,
+                    hasLeading: true,
+                  ),
                   onRetry: () => ref.invalidate(unpaidLinkTargetsProvider),
                   data: (targets) {
                     if (_tab == _LinkTab.orders) {

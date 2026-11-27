@@ -9,6 +9,7 @@ import '../../../core/utils/formatters.dart';
 import '../../../core/utils/korean_search.dart';
 import '../../../core/widgets/feedback.dart';
 import '../../../core/widgets/responsive.dart';
+import '../../../core/widgets/skeleton.dart';
 import '../../../core/widgets/state_views.dart';
 import '../domain/order_round.dart';
 import '../domain/textbook.dart';
@@ -189,12 +190,16 @@ class _TextbooksPageState extends ConsumerState<TextbooksPage> {
     List<Textbook> textbooks,
     Map<String, int> quantities, {
     bool enabled = true,
+    bool loadingQuantities = false,
   }) => [
     for (final t in textbooks) ...[
       _TextbookTile(
         textbook: t,
         quantity: quantities[t.id] ?? 0,
-        onChanged: enabled ? (v) => _setQuantity(t.id, v) : null,
+        loadingQuantity: loadingQuantities,
+        onChanged: enabled && !loadingQuantities
+            ? (v) => _setQuantity(t.id, v)
+            : null,
       ),
       const SizedBox(height: 8),
     ],
@@ -261,45 +266,53 @@ class _TextbooksPageState extends ConsumerState<TextbooksPage> {
         ? const <String, int>{}
         : ref.watch(textbookCartProvider);
 
-    final loading = [textbooks, categories, round, editOrder];
-    if (loading.any((v) => v.isLoading && !v.hasUsableValue)) {
-      return const LoadingView();
-    }
-    // 수정할 신청을 최신 값으로 채우기 전에는 0권으로 보이지 않게 기다린다.
-    if (_editing && order != null && _prefilledFor != order.id) {
-      return const LoadingView();
-    }
-    final error = loading.where((v) => v.hasError).firstOrNull;
-    if (error != null) {
-      return ErrorView(
-        error: error.error!,
-        onRetry: () {
-          ref.invalidate(textbooksProvider);
-          ref.invalidate(textbookCategoriesProvider);
-          ref.invalidate(currentRoundProvider);
-          if (_editing) ref.invalidate(orderProvider(widget.editOrderId!));
-        },
-      );
-    }
-    if (loading.any((v) => !v.hasUsableValue) || round.requireValue == null) {
-      return const LoadingView();
-    }
-
+    final watched = [textbooks, categories, round, if (_editing) editOrder];
+    final error = watched.where((v) => v.hasError && !v.isLoading).firstOrNull;
+    final roundReady = round.hasUsableValue && round.requireValue != null;
+    final booksReady = textbooks.hasUsableValue && categories.hasUsableValue;
+    // 수정할 신청을 최신 값으로 채우기 전에는 0권으로 보이지 않게 잠근다.
     final editLocked =
         _editing &&
         (_awaitingFreshOrder ||
             editOrder.isLoading ||
             editOrder.isRefreshing ||
+            !editOrder.hasUsableValue ||
             _prefilledFor != order?.id);
     final refreshing =
-        loading.any((v) => v.isBackgroundRefreshing) ||
+        watched.any((v) => v.isBackgroundRefreshing) ||
         (_editing && _awaitingFreshOrder);
-    final currentRound = round.requireValue!;
-    final books = textbooks.requireValue;
+
+    void retryAll() {
+      ref.invalidate(textbooksProvider);
+      ref.invalidate(textbookCategoriesProvider);
+      ref.invalidate(currentRoundProvider);
+      if (_editing) ref.invalidate(orderProvider(widget.editOrderId!));
+    }
+
+    if (error != null) {
+      return RefreshOverlay(
+        refreshing: refreshing,
+        child: ErrorView(error: error.error!, onRetry: retryAll),
+      );
+    }
+
+    if (round.hasUsableValue && round.requireValue == null) {
+      return RefreshOverlay(
+        refreshing: refreshing,
+        child: const EmptyView(message: '현재 신청 가능한 회차가 없습니다.'),
+      );
+    }
+
+    final currentRound = roundReady ? round.requireValue! : null;
+    final books = textbooks.hasUsableValue
+        ? textbooks.requireValue
+        : const <Textbook>[];
 
     final Map<String, int> quantities;
     if (_editing) {
       quantities = _editQuantities;
+    } else if (!textbooks.hasUsableValue) {
+      quantities = const {};
     } else {
       final activeIds = {
         for (final b in books)
@@ -318,14 +331,14 @@ class _TextbooksPageState extends ConsumerState<TextbooksPage> {
       }
     }
 
-    if (_editing) {
+    if (_editing && !editLocked) {
       if (order == null) {
         return RefreshOverlay(
           refreshing: refreshing,
           child: const EmptyView(message: '신청 내역을 찾을 수 없습니다.'),
         );
       }
-      if (!order.canMemberEdit(currentRound)) {
+      if (currentRound != null && !order.canMemberEdit(currentRound)) {
         return RefreshOverlay(
           refreshing: refreshing,
           child: EmptyView(
@@ -340,62 +353,117 @@ class _TextbooksPageState extends ConsumerState<TextbooksPage> {
       }
     }
 
-    // 수정 중인 신청에 포함된 비활성 교재도 목록에 보여야 수량을 줄일 수 있다.
-    final visible = books
-        .where((t) => t.isActive || (_editing && (quantities[t.id] ?? 0) > 0))
-        .toList();
-    final groups = groupByCategory(categories.requireValue, visible);
-
-    final query = _search.text.trim().toLowerCase();
     final List<Widget> content;
-    if (widget.categoryId != null) {
-      final group = groups.where((g) => g.id == widget.categoryId).firstOrNull;
-      content = [
-        _CategoryHeader(
-          name: group?.name ?? '카테고리',
-          onBack: () => _openCategory(null),
-        ),
-        const SizedBox(height: 12),
-        if (group == null)
-          const EmptyView(message: '이 카테고리에는 신청 가능한 교재가 없습니다.')
-        else
-          ..._tiles(group.textbooks, quantities, enabled: !editLocked),
-      ];
-    } else if (query.isNotEmpty) {
-      final hits = visible
-          .where((t) => matchesKoreanQuery(t.title, query))
-          .toList();
-      content = [
-        _SearchField(controller: _search, onChanged: () => setState(() {})),
-        const SizedBox(height: 12),
-        if (hits.isEmpty)
-          const EmptyView(message: '검색 결과가 없습니다.')
-        else
-          ..._tiles(hits, quantities, enabled: !editLocked),
-      ];
+    if (!booksReady) {
+      if (widget.categoryId != null) {
+        final catName = categories.hasUsableValue
+            ? categories.requireValue
+                  .where((c) => c.id == widget.categoryId)
+                  .firstOrNull
+                  ?.name
+            : null;
+        content = [
+          _CategoryHeader(
+            name: catName,
+            onBack: () => _openCategory(null),
+          ),
+          const SizedBox(height: 12),
+          SkeletonList.cards(
+            count: 4,
+            spacing: 8,
+            itemBuilder: (_, _) => const _TextbookTilePlaceholder(),
+          ),
+        ];
+      } else {
+        content = [
+          _SearchField(
+            controller: _search,
+            enabled: false,
+            onChanged: () {},
+          ),
+          const SizedBox(height: 12),
+          SkeletonList.cards(
+            count: 4,
+            spacing: 8,
+            itemBuilder: (_, _) => const _CategoryTilePlaceholder(),
+          ),
+        ];
+      }
     } else {
-      content = [
-        _SearchField(controller: _search, onChanged: () => setState(() {})),
-        const SizedBox(height: 12),
-        if (groups.isEmpty)
-          const EmptyView(
-            icon: Icons.menu_book_outlined,
-            message: '현재 신청 가능한 교재가 없습니다.',
+      // 수정 중인 신청에 포함된 비활성 교재도 목록에 보여야 수량을 줄일 수 있다.
+      final visible = books
+          .where((t) => t.isActive || (_editing && (quantities[t.id] ?? 0) > 0))
+          .toList();
+      final groups = groupByCategory(categories.requireValue, visible);
+      final query = _search.text.trim().toLowerCase();
+
+      if (widget.categoryId != null) {
+        final group = groups.where((g) => g.id == widget.categoryId).firstOrNull;
+        content = [
+          _CategoryHeader(
+            name: group?.name ?? '카테고리',
+            onBack: () => _openCategory(null),
           ),
-        for (final g in groups) ...[
-          _CategoryTile(
-            group: g,
-            selected: g.textbooks.fold(
-              0,
-              (s, t) => s + (quantities[t.id] ?? 0),
+          const SizedBox(height: 12),
+          if (group == null)
+            const EmptyView(message: '이 카테고리에는 신청 가능한 교재가 없습니다.')
+          else
+            ..._tiles(
+              group.textbooks,
+              quantities,
+              enabled: roundReady && !editLocked,
+              loadingQuantities: editLocked,
             ),
-            onTap: () => _openCategory(g.id),
+        ];
+      } else if (query.isNotEmpty) {
+        final hits = visible
+            .where((t) => matchesKoreanQuery(t.title, query))
+            .toList();
+        content = [
+          _SearchField(
+            controller: _search,
+            enabled: !editLocked,
+            onChanged: () => setState(() {}),
           ),
-          const SizedBox(height: 8),
-        ],
-      ];
+          const SizedBox(height: 12),
+          if (hits.isEmpty)
+            const EmptyView(message: '검색 결과가 없습니다.')
+          else
+            ..._tiles(
+              hits,
+              quantities,
+              enabled: roundReady && !editLocked,
+              loadingQuantities: editLocked,
+            ),
+        ];
+      } else {
+        content = [
+          _SearchField(
+            controller: _search,
+            enabled: !editLocked,
+            onChanged: () => setState(() {}),
+          ),
+          const SizedBox(height: 12),
+          if (groups.isEmpty)
+            const EmptyView(
+              icon: Icons.menu_book_outlined,
+              message: '현재 신청 가능한 교재가 없습니다.',
+            ),
+          for (final g in groups) ...[
+            _CategoryTile(
+              group: g,
+              selected: editLocked
+                  ? 0
+                  : g.textbooks.fold(0, (s, t) => s + (quantities[t.id] ?? 0)),
+              onTap: () => _openCategory(g.id),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ];
+      }
     }
 
+    final barLoading = !booksReady || !roundReady || editLocked;
     final selectedCount = _count(quantities);
     return RefreshOverlay(
       refreshing: refreshing,
@@ -409,11 +477,17 @@ class _TextbooksPageState extends ConsumerState<TextbooksPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      _RoundBanner(
-                        round: currentRound,
-                        editing: _editing,
-                        onCancelEdit: _cancelEdit,
-                      ),
+                      if (currentRound != null)
+                        _RoundBanner(
+                          round: currentRound,
+                          editing: _editing,
+                          onCancelEdit: _cancelEdit,
+                        )
+                      else
+                        _RoundBannerPlaceholder(
+                          editing: _editing,
+                          onCancelEdit: _cancelEdit,
+                        ),
                       const SizedBox(height: 16),
                       ...content,
                     ],
@@ -423,11 +497,12 @@ class _TextbooksPageState extends ConsumerState<TextbooksPage> {
             ),
           ),
           _SubmitBar(
+            loading: barLoading,
             count: selectedCount,
             total: _total(books, quantities),
             label: _editing ? '수정하기' : '신청하기',
             submitting: _submitting,
-            onSubmit: selectedCount == 0 || editLocked
+            onSubmit: barLoading || selectedCount == 0
                 ? null
                 : () => _submit(books, quantities),
           ),
@@ -491,21 +566,82 @@ class _RoundBanner extends StatelessWidget {
   }
 }
 
+class _RoundBannerPlaceholder extends StatelessWidget {
+  const _RoundBannerPlaceholder({
+    required this.editing,
+    required this.onCancelEdit,
+  });
+
+  final bool editing;
+  final VoidCallback onCancelEdit;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final c = context.colors;
+    return Card(
+      color: c.surfaceMuted,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 16, 12, 16),
+        child: Row(
+          children: [
+            Icon(
+              editing ? Icons.edit_note : Icons.schedule,
+              color: c.textSecondary,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Text(
+                        editing ? '신청 내역 수정 중' : '이번 회차',
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          color: c.textPrimary,
+                        ),
+                      ),
+                      if (!editing) ...[
+                        const SizedBox(width: 8),
+                        const Flexible(
+                          child: SkeletonText(maxWidth: 130, fontSize: 14),
+                        ),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 2),
+                  const SkeletonText(maxWidth: 230, fontSize: 13),
+                ],
+              ),
+            ),
+            if (editing)
+              TextButton(onPressed: onCancelEdit, child: const Text('수정 취소')),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _TextbookTile extends StatelessWidget {
   const _TextbookTile({
     required this.textbook,
     required this.quantity,
     required this.onChanged,
+    this.loadingQuantity = false,
   });
 
   final Textbook textbook;
   final int quantity;
   final ValueChanged<int>? onChanged;
+  final bool loadingQuantity;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final selected = quantity > 0;
+    final selected = !loadingQuantity && quantity > 0;
     return Card(
       clipBehavior: Clip.antiAlias,
       shape: RoundedRectangleBorder(
@@ -543,11 +679,42 @@ class _TextbookTile extends StatelessWidget {
               ),
               QuantityStepper(
                 value: quantity,
+                loading: loadingQuantity,
                 canIncrement: textbook.isActive,
                 onChanged: onChanged,
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _TextbookTilePlaceholder extends StatelessWidget {
+  const _TextbookTilePlaceholder();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Card(
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(20, 14, 12, 14),
+        child: Row(
+          children: [
+            Expanded(
+              child: SkeletonRegion(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SkeletonText(maxWidth: 160, fontSize: 16, announce: false),
+                    SizedBox(height: 4),
+                    SkeletonText(maxWidth: 84, fontSize: 17, announce: false),
+                  ],
+                ),
+              ),
+            ),
+            QuantityStepper(value: 0, loading: true, onChanged: null),
+          ],
         ),
       ),
     );
@@ -561,6 +728,7 @@ class _SubmitBar extends StatelessWidget {
     required this.label,
     required this.submitting,
     required this.onSubmit,
+    this.loading = false,
   });
 
   final int count;
@@ -568,6 +736,7 @@ class _SubmitBar extends StatelessWidget {
   final String label;
   final bool submitting;
   final VoidCallback? onSubmit;
+  final bool loading;
 
   @override
   Widget build(BuildContext context) {
@@ -585,17 +754,41 @@ class _SubmitBar extends StatelessWidget {
           child: Row(
             children: [
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      '선택 $count권',
-                      style: TextStyle(fontSize: 13, color: c.textSecondary),
-                    ),
-                    AmountText(total),
-                  ],
-                ),
+                child: loading
+                    ? const SkeletonRegion(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            SkeletonText(
+                              maxWidth: 64,
+                              fontSize: 13,
+                              announce: false,
+                            ),
+                            SizedBox(height: 4),
+                            SkeletonText(
+                              maxWidth: 96,
+                              fontSize: 22,
+                              lineHeight: 1.3,
+                              announce: false,
+                            ),
+                          ],
+                        ),
+                      )
+                    : Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            '선택 $count권',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: c.textSecondary,
+                            ),
+                          ),
+                          AmountText(total),
+                        ],
+                      ),
               ),
               FilledButton(
                 onPressed: submitting ? null : onSubmit,
@@ -615,20 +808,26 @@ class _SubmitBar extends StatelessWidget {
 }
 
 class _SearchField extends StatelessWidget {
-  const _SearchField({required this.controller, required this.onChanged});
+  const _SearchField({
+    required this.controller,
+    required this.onChanged,
+    this.enabled = true,
+  });
 
   final TextEditingController controller;
   final VoidCallback onChanged;
+  final bool enabled;
 
   @override
   Widget build(BuildContext context) {
     return TextField(
       controller: controller,
+      enabled: enabled,
       onChanged: (_) => onChanged(),
       decoration: InputDecoration(
         labelText: '교재명으로 찾기',
         prefixIcon: const Icon(Icons.search),
-        suffixIcon: controller.text.isEmpty
+        suffixIcon: controller.text.isEmpty || !enabled
             ? null
             : IconButton(
                 tooltip: '지우기',
@@ -638,6 +837,36 @@ class _SearchField extends StatelessWidget {
                   onChanged();
                 },
               ),
+      ),
+    );
+  }
+}
+
+class _CategoryTilePlaceholder extends StatelessWidget {
+  const _CategoryTilePlaceholder();
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 14, 16, 14),
+        child: Row(
+          children: [
+            Icon(Icons.folder_outlined, color: context.colors.textSecondary),
+            const SizedBox(width: 16),
+            const Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SkeletonText(maxWidth: 130, fontSize: 16, announce: false),
+                  SizedBox(height: 4),
+                  SkeletonText(maxWidth: 72, fontSize: 13, announce: false),
+                ],
+              ),
+            ),
+            Icon(Icons.chevron_right, color: context.colors.textDisabled),
+          ],
+        ),
       ),
     );
   }
@@ -686,7 +915,7 @@ class _CategoryTile extends StatelessWidget {
 class _CategoryHeader extends StatelessWidget {
   const _CategoryHeader({required this.name, required this.onBack});
 
-  final String name;
+  final String? name;
   final VoidCallback onBack;
 
   @override
@@ -700,11 +929,13 @@ class _CategoryHeader extends StatelessWidget {
         ),
         const SizedBox(width: 4),
         Expanded(
-          child: Text(
-            name,
-            style: Theme.of(context).textTheme.titleLarge
-                ?.copyWith(fontWeight: FontWeight.w700),
-          ),
+          child: name != null
+              ? Text(
+                  name!,
+                  style: Theme.of(context).textTheme.titleLarge
+                      ?.copyWith(fontWeight: FontWeight.w700),
+                )
+              : const SkeletonText(maxWidth: 140, fontSize: 20),
         ),
         TextButton(onPressed: onBack, child: const Text('다른 카테고리')),
       ],

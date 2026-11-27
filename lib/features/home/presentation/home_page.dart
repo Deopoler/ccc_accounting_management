@@ -6,6 +6,7 @@ import '../../../core/router/routes.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../core/widgets/responsive.dart';
+import '../../../core/widgets/skeleton.dart';
 import '../../../core/widgets/state_views.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../../events/domain/event.dart';
@@ -21,7 +22,8 @@ class HomePage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final profile = ref.watch(currentProfileProvider).value;
+    final profileAsync = ref.watch(currentProfileProvider);
+    final profile = profileAsync.value;
     final refreshing =
         ref.watch(myOrdersProvider).isBackgroundRefreshing ||
         ref.watch(currentRoundProvider).isBackgroundRefreshing ||
@@ -43,6 +45,11 @@ class HomePage extends ConsumerWidget {
                   fontWeight: FontWeight.w700,
                 ),
               ),
+            )
+          else if (profileAsync.isLoading && !profileAsync.hasUsableValue)
+            const Padding(
+              padding: EdgeInsets.fromLTRB(4, 4, 4, 16),
+              child: SkeletonText(maxWidth: 180, fontSize: 24, lineHeight: 1.3),
             ),
           LayoutBuilder(
             builder: (context, c) {
@@ -478,14 +485,7 @@ class _CardPlaceholder extends StatelessWidget {
     final c = context.colors;
     Widget bar(double width, double height) => Align(
       alignment: Alignment.centerLeft,
-      child: Container(
-        width: width,
-        height: height,
-        decoration: BoxDecoration(
-          color: c.surfaceStrong,
-          borderRadius: BorderRadius.circular(6),
-        ),
-      ),
+      child: SkeletonBox(width: width, height: height, announce: false),
     );
     Widget figure(String label, double width) => Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -496,9 +496,7 @@ class _CardPlaceholder extends StatelessWidget {
       ],
     );
 
-    return Semantics(
-      label: '불러오는 중',
-      excludeSemantics: true,
+    return SkeletonRegion(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [

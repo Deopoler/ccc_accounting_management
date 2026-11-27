@@ -5,6 +5,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../core/widgets/feedback.dart';
 import '../../../core/widgets/responsive.dart';
+import '../../../core/widgets/skeleton.dart';
 import '../../../core/widgets/state_views.dart';
 import '../domain/feedback_entry.dart';
 import 'feedback_providers.dart';
@@ -62,15 +63,17 @@ class _AdminFeedbackPageState extends ConsumerState<AdminFeedbackPage> {
             ],
           ),
           const SizedBox(height: 16),
-          if (list.isLoading && !list.hasUsableValue)
-            const LoadingView()
-          else if (list.hasError)
+          if (list.hasError && !list.isLoading)
             ErrorView(
               error: list.error!,
               onRetry: () => ref.invalidate(feedbackListProvider(filter)),
             )
           else if (!list.hasUsableValue)
-            const LoadingView()
+            SkeletonList.cards(
+              count: 3,
+              spacing: 12,
+              itemBuilder: (_, _) => const _FeedbackCardPlaceholder(),
+            )
           else if (list.requireValue.isEmpty)
             EmptyView(
               icon: Icons.inbox_outlined,
@@ -164,6 +167,44 @@ class _FeedbackCard extends StatelessWidget {
                     ),
                   ),
                 ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _FeedbackCardPlaceholder extends StatelessWidget {
+  const _FeedbackCardPlaceholder();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Card(
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(20, 16, 12, 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            SkeletonText(maxWidth: 140, fontSize: 15, announce: false),
+            SizedBox(height: 2),
+            SkeletonText(maxWidth: 180, fontSize: 13, announce: false),
+            SizedBox(height: 12),
+            SkeletonText(maxWidth: 320, fontSize: 14, announce: false),
+            SizedBox(height: 4),
+            SkeletonText(maxWidth: 220, fontSize: 14, announce: false),
+            SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: SkeletonText(
+                    maxWidth: 80,
+                    fontSize: 13,
+                    announce: false,
+                  ),
+                ),
+                SkeletonBox(width: 44, height: 24, radius: 12, announce: false),
               ],
             ),
           ],

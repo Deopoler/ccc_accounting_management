@@ -7,6 +7,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../core/widgets/feedback.dart';
 import '../../../core/widgets/responsive.dart';
+import '../../../core/widgets/skeleton.dart';
 import '../../../core/widgets/state_views.dart';
 import '../../deposits/presentation/deposit_providers.dart';
 import '../../push/presentation/signup_push_card.dart';
@@ -29,23 +30,50 @@ class MyOrdersPage extends ConsumerWidget {
       ref.invalidate(currentRoundProvider);
     }
 
-    if ((orders.isLoading && !orders.hasUsableValue) ||
-        (round.isLoading && !round.hasUsableValue)) {
-      return const LoadingView();
-    }
-    if (orders.hasError || round.hasError) {
-      return ErrorView(error: (orders.error ?? round.error)!, onRetry: retry);
-    }
-    if (!orders.hasUsableValue ||
-        !round.hasUsableValue ||
-        round.requireValue == null) {
-      return const LoadingView();
-    }
-
+    final error = (orders.hasError && !orders.isLoading)
+        ? orders.error
+        : (round.hasError && !round.isLoading)
+        ? round.error
+        : null;
     final refreshing =
         orders.isBackgroundRefreshing || round.isBackgroundRefreshing;
+
+    if (error != null) {
+      return RefreshOverlay(
+        refreshing: refreshing,
+        child: ErrorView(error: error, onRetry: retry),
+      );
+    }
+
+    if (!orders.hasUsableValue || !round.hasUsableValue) {
+      return RefreshOverlay(
+        refreshing: refreshing,
+        child: ScrollPageBody(
+          maxWidth: 800,
+          children: [
+            const OrderPushCard(),
+            const SizedBox(height: 16),
+            SkeletonList.cards(
+              count: 3,
+              spacing: 12,
+              itemBuilder: (_, _) => const _OrderCardPlaceholder(),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final current = round.requireValue;
+    if (current == null) {
+      return RefreshOverlay(
+        refreshing: refreshing,
+        child: const EmptyView(
+          icon: Icons.receipt_long_outlined,
+          message: '신청 회차 정보를 불러올 수 없습니다.',
+        ),
+      );
+    }
     final list = orders.requireValue;
-    final current = round.requireValue!;
     if (list.isEmpty) {
       return RefreshOverlay(
         refreshing: refreshing,
@@ -302,6 +330,43 @@ class _DeliveryPanel extends StatelessWidget {
             ),
           ],
         ],
+      ),
+    );
+  }
+}
+
+class _OrderCardPlaceholder extends StatelessWidget {
+  const _OrderCardPlaceholder();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Card(
+      child: Padding(
+        padding: EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SkeletonText(maxWidth: 140, fontSize: 15, announce: false),
+                      SizedBox(height: 4),
+                      SkeletonText(maxWidth: 120, fontSize: 12, announce: false),
+                    ],
+                  ),
+                ),
+                SkeletonBox(width: 48, height: 22, announce: false),
+                SizedBox(width: 6),
+                SkeletonBox(width: 56, height: 22, announce: false),
+              ],
+            ),
+            SizedBox(height: 16),
+            OrderItemsSummaryPlaceholder(),
+          ],
+        ),
       ),
     );
   }

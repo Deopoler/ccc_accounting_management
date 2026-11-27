@@ -31,6 +31,7 @@ import 'package:ccc_accounting_management/features/textbooks/domain/order_round.
 import 'package:ccc_accounting_management/features/textbooks/domain/textbook.dart';
 import 'package:ccc_accounting_management/features/textbooks/domain/textbook_category.dart';
 import 'package:ccc_accounting_management/features/textbooks/domain/textbook_order.dart';
+import 'package:ccc_accounting_management/features/textbooks/presentation/my_orders_page.dart';
 import 'package:ccc_accounting_management/features/textbooks/presentation/textbook_providers.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/misc.dart' show Override;
@@ -555,7 +556,21 @@ void main() {
     await tester.pump();
     await tester.pump();
     expect(find.textContaining('기존 교재'), findsNothing);
-    expect(find.byType(LoadingView), findsWidgets);
+    expect(find.byType(MyOrdersPage), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byType(MyOrdersPage),
+        matching: find.byType(LoadingView),
+      ),
+      findsNothing,
+    );
+    expect(find.byWidgetPredicate((w) => w is Semantics && w.properties.label == '불러오는 중'), findsWidgets);
+
+    // 스플래시 -> 셸 전환 애니메이션(300ms)이 끝난 뒤에도 주문 로딩 중에는 LoadingView 가 남지 않는다.
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.textContaining('기존 교재'), findsNothing);
+    expect(find.byType(LoadingView), findsNothing);
+    expect(find.byWidgetPredicate((w) => w is Semantics && w.properties.label == '불러오는 중'), findsWidgets);
 
     u2Completer.complete([_order('o2', 'u2', 'u2 전용 교재')]);
     await tester.pumpAndSettle();
@@ -591,7 +606,8 @@ void main() {
 
     // 서울대 로딩 중에는 KAIST 회원 목록이 보이면 안 되고, 언마운트된 이전 캠퍼스 캐시도 즉시 폐기된다.
     expect(find.text('KAIST 회원'), findsNothing);
-    expect(find.byType(LoadingView), findsOneWidget);
+    expect(find.byType(LoadingView), findsNothing);
+    expect(find.bySemanticsLabel('불러오는 중'), findsWidgets);
     expect(container.exists(eventsProvider(CampusScope.admin)), isFalse);
 
     snuCompleter.complete([
@@ -1067,9 +1083,18 @@ void main() {
       of: find.byTooltip('더하기'),
       matching: find.byType(IconButton),
     );
-    // 최신 응답 전에는 이전 수량(3권)이나 0권을 보여 주지 않고 로딩으로 기다린다.
+    // 최신 응답 전에는 이전 수량(3권)이나 0권을 보여 주지 않고 비활성 스켈레톤으로 기다린다.
     expect(find.text('선택 3권'), findsNothing);
-    expect(find.byType(LoadingView), findsWidgets);
+    expect(find.text('선택 0권'), findsNothing);
+    expect(find.byType(LoadingView), findsNothing);
+    expect(find.bySemanticsLabel('불러오는 중'), findsWidgets);
+    expect(tester.widget<IconButton>(plusButton).onPressed, isNull);
+    expect(
+      tester
+          .widget<FilledButton>(find.widgetWithText(FilledButton, '수정하기'))
+          .onPressed,
+      isNull,
+    );
 
     editCompleter.complete(_order('o1', 'u1', '수정 대상 교재', qty: 2));
     await tester.pumpAndSettle();

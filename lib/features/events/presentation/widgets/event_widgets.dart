@@ -3,6 +3,7 @@ import 'package:material_ui/material_ui.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/formatters.dart';
 import '../../../../core/widgets/app_widgets.dart';
+import '../../../../core/widgets/skeleton.dart';
 import '../../domain/event.dart';
 
 /// 납부 상태 배지: 미납(파랑, 해야 할 일) / 완납(회색) / 대상 아님(흐림).
@@ -119,6 +120,33 @@ class PaymentProgress extends StatelessWidget {
           style: TextStyle(fontSize: 13, color: c.textSecondary),
         ),
       ],
+    );
+  }
+}
+
+/// [PaymentProgress] 의 로딩 플레이스홀더.
+class PaymentProgressPlaceholder extends StatelessWidget {
+  const PaymentProgressPlaceholder({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return const SkeletonRegion(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              SkeletonText(width: 90, fontSize: 14, announce: false),
+              Spacer(),
+              SkeletonText(width: 44, fontSize: 17, announce: false),
+            ],
+          ),
+          SizedBox(height: 8),
+          SkeletonBox(height: 6, radius: 4, announce: false),
+          SizedBox(height: 8),
+          SkeletonText(maxWidth: 140, fontSize: 13, announce: false),
+        ],
+      ),
     );
   }
 }
