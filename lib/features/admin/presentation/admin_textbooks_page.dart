@@ -231,6 +231,10 @@ class AdminTextbooksPage extends ConsumerWidget {
     final textbooks = ref.watch(textbooksProvider(CampusScope.admin));
     final categories = ref.watch(textbookCategoriesProvider(CampusScope.admin));
 
+    if ((textbooks.isLoading && !textbooks.hasUsableValue) ||
+        (categories.isLoading && !categories.hasUsableValue)) {
+      return const LoadingView();
+    }
     if (textbooks.hasError || categories.hasError) {
       return ErrorView(
         error: (textbooks.error ?? categories.error)!,

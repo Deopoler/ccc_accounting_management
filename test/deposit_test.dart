@@ -309,6 +309,9 @@ class _FakeEvents implements EventRepository {
   final List<EventPayment> payments;
 
   @override
+  Future<List<Event>> fetchEvents(String campusId) async => [event];
+
+  @override
   Future<Event?> fetchEvent(String id) async => event;
 
   @override

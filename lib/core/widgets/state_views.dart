@@ -159,14 +159,19 @@ class AsyncValueView<T> extends StatelessWidget {
     final keepingData =
         value.hasValue &&
         (value.isRefreshing || (skipLoadingOnReload && value.isReloading));
-    final content = value.when(
-      skipLoadingOnReload: skipLoadingOnReload,
-      skipLoadingOnRefresh: true,
-      data: (d) =>
-          (isEmpty?.call(d) ?? false) ? (empty ?? const EmptyView()) : data(d),
-      error: (e, _) => ErrorView(error: e, onRetry: onRetry),
-      loading: () => const LoadingView(),
-    );
+    final Widget content;
+    if (value.isLoading && !keepingData) {
+      content = const LoadingView();
+    } else if (value.hasError && !keepingData) {
+      content = ErrorView(error: value.error!, onRetry: onRetry);
+    } else if (value.hasValue) {
+      final d = value.requireValue;
+      content = (isEmpty?.call(d) ?? false)
+          ? (empty ?? const EmptyView())
+          : data(d);
+    } else {
+      content = const LoadingView();
+    }
     if (!showRefreshIndicator) return content;
     return RefreshOverlay(
       refreshing: value.isLoading && keepingData,

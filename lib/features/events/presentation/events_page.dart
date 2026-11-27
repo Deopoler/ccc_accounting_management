@@ -21,6 +21,10 @@ class EventsPage extends ConsumerWidget {
     final events = ref.watch(eventsProvider(CampusScope.member));
     final payments = ref.watch(myEventPaymentsProvider);
 
+    if ((events.isLoading && !events.hasUsableValue) ||
+        (payments.isLoading && !payments.hasUsableValue)) {
+      return const LoadingView();
+    }
     if (events.hasError || payments.hasError) {
       return ErrorView(
         error: (events.error ?? payments.error)!,

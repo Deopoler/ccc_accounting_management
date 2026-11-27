@@ -33,9 +33,12 @@ final textbookCategoriesProvider = FutureProvider.autoDispose
     });
 
 /// 본인 캠퍼스의 이번 회차 (회원 화면).
-final currentRoundProvider = FutureProvider.autoDispose<OrderRound>((ref) {
-  ref.watch(currentUserIdProvider);
-  ref.watch(myCampusIdProvider);
+final currentRoundProvider = FutureProvider.autoDispose<OrderRound?>((
+  ref,
+) async {
+  final userId = ref.watch(currentUserIdProvider);
+  final campusId = ref.watch(myCampusIdProvider);
+  if (userId == null || campusId == null) return null;
   ref.cacheFor(defaultCacheDuration, campusScope: CampusScope.member);
   return ref.watch(textbookRepositoryProvider).fetchCurrentRound();
 });
@@ -106,6 +109,15 @@ class TextbookCartNotifier extends Notifier<Map<String, int>> {
       return;
     }
     state = Map.unmodifiable({...state, textbookId: quantity});
+  }
+
+  void prune(Set<String> validIds) {
+    if (state.isEmpty) return;
+    if (state.keys.every(validIds.contains)) return;
+    state = Map.unmodifiable({
+      for (final entry in state.entries)
+        if (validIds.contains(entry.key)) entry.key: entry.value,
+    });
   }
 
   void clear() => state = const {};

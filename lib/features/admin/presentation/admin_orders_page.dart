@@ -17,6 +17,7 @@ import '../../textbooks/presentation/widgets/order_widgets.dart';
 import '../domain/csv_exports.dart';
 import 'admin_order_providers.dart';
 import '../../campus/presentation/campus_providers.dart';
+import '../../deposits/presentation/deposit_providers.dart';
 
 /// 이 너비보다 좁으면 (모바일) 필터 / 집계 카드를 고정 너비 대신 폭에 맞춘다.
 const _compactWidth = 600.0;
@@ -212,6 +213,7 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
       ref.invalidate(adminOrdersProvider);
       ref.invalidate(adminCurrentRoundProvider);
       ref.invalidate(adminRoundsProvider);
+      ref.invalidate(unpaidLinkTargetsProvider);
       if (mounted) {
         setState(() => _picked.removeAll(ids));
         showSnack(context, '${ids.length}건을 $dir 회차로 옮겼습니다.');
@@ -259,6 +261,10 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
     final roundList = ref.watch(adminRoundsProvider);
     final textbooks = ref.watch(textbooksProvider(CampusScope.admin));
 
+    if ((currentRoundAsync.isLoading && !currentRoundAsync.hasUsableValue) ||
+        (roundList.isLoading && roundList.hasError)) {
+      return const LoadingView();
+    }
     if (currentRoundAsync.hasError || roundList.hasError) {
       return ErrorView(
         error: (currentRoundAsync.error ?? roundList.error)!,

@@ -8,6 +8,7 @@ import '../../../core/utils/formatters.dart';
 import '../../../core/widgets/feedback.dart';
 import '../../../core/widgets/responsive.dart';
 import '../../../core/widgets/state_views.dart';
+import '../../deposits/presentation/deposit_providers.dart';
 import '../../push/presentation/signup_push_card.dart';
 import '../../settings/presentation/bank_account_card.dart';
 import '../domain/order_round.dart';
@@ -28,17 +29,23 @@ class MyOrdersPage extends ConsumerWidget {
       ref.invalidate(currentRoundProvider);
     }
 
+    if ((orders.isLoading && !orders.hasUsableValue) ||
+        (round.isLoading && !round.hasUsableValue)) {
+      return const LoadingView();
+    }
     if (orders.hasError || round.hasError) {
       return ErrorView(error: (orders.error ?? round.error)!, onRetry: retry);
     }
-    if (!orders.hasUsableValue || !round.hasUsableValue) {
+    if (!orders.hasUsableValue ||
+        !round.hasUsableValue ||
+        round.requireValue == null) {
       return const LoadingView();
     }
 
     final refreshing =
         orders.isBackgroundRefreshing || round.isBackgroundRefreshing;
     final list = orders.requireValue;
-    final current = round.requireValue;
+    final current = round.requireValue!;
     if (list.isEmpty) {
       return RefreshOverlay(
         refreshing: refreshing,
@@ -104,6 +111,7 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
     try {
       await ref.read(textbookRepositoryProvider).cancelOrder(widget.order.id);
       ref.invalidate(myOrdersProvider);
+      ref.invalidate(unpaidLinkTargetsProvider);
       if (mounted) showSnack(context, '신청이 취소되었습니다.');
     } catch (e) {
       if (mounted) showErrorSnack(context, e);

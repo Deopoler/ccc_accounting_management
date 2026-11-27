@@ -13,6 +13,8 @@ import '../../../core/widgets/feedback.dart';
 import '../../../core/widgets/responsive.dart';
 import '../../../core/widgets/state_views.dart';
 import '../../auth/domain/profile.dart';
+import '../../campus/presentation/campus_providers.dart';
+import '../../deposits/presentation/deposit_providers.dart';
 import '../../../core/utils/korean_search.dart';
 import '../../events/domain/event.dart';
 import '../../events/presentation/event_providers.dart';
@@ -52,7 +54,8 @@ class _AdminEventDetailPageState extends ConsumerState<AdminEventDetailPage> {
       ..invalidate(eventsProvider)
       ..invalidate(eventSummariesProvider)
       ..invalidate(eventProvider(_id))
-      ..invalidate(eventPaymentsProvider(_id));
+      ..invalidate(eventPaymentsProvider(_id))
+      ..invalidate(unpaidLinkTargetsProvider);
   }
 
   Future<void> _toggle(EventPayment p, bool isPaid) async {
@@ -155,7 +158,8 @@ class _AdminEventDetailPageState extends ConsumerState<AdminEventDetailPage> {
       await ref.read(eventRepositoryProvider).deleteEvent(event.id);
       ref
         ..invalidate(eventsProvider)
-        ..invalidate(eventSummariesProvider);
+        ..invalidate(eventSummariesProvider)
+        ..invalidate(unpaidLinkTargetsProvider);
       if (mounted) {
         showSnack(context, '이벤트를 삭제했습니다.');
         context.go(AppRoutes.adminEvents);
@@ -187,9 +191,19 @@ class _AdminEventDetailPageState extends ConsumerState<AdminEventDetailPage> {
 
   @override
   Widget build(BuildContext context) {
+    ref.listen<String?>(adminCampusIdProvider, (prev, next) {
+      if (prev != null && next != null && prev != next) {
+        GoRouter.maybeOf(context)?.go(AppRoutes.adminEvents);
+      }
+    });
+
     final event = ref.watch(eventProvider(_id));
     final payments = ref.watch(eventPaymentsProvider(_id));
 
+    if ((event.isLoading && !event.hasUsableValue) ||
+        (payments.isLoading && !payments.hasUsableValue)) {
+      return const LoadingView();
+    }
     if (event.hasError || payments.hasError) {
       return ErrorView(
         error: (event.error ?? payments.error)!,

@@ -164,7 +164,14 @@ class _TextbookSummaryCard extends ConsumerWidget {
     final round = ref.watch(currentRoundProvider);
 
     Widget body;
-    if (orders.hasError || round.hasError) {
+    if ((orders.isLoading && !orders.hasUsableValue) ||
+        (round.isLoading && !round.hasUsableValue)) {
+      body = const _CardPlaceholder(
+        firstLabel: '이번 회차 신청',
+        secondLabel: '입금 대기',
+        hasTopLine: true,
+      );
+    } else if (orders.hasError || round.hasError) {
       body = ErrorView(
         error: (orders.error ?? round.error)!,
         onRetry: () {
@@ -172,14 +179,16 @@ class _TextbookSummaryCard extends ConsumerWidget {
           ref.invalidate(currentRoundProvider);
         },
       );
-    } else if (!orders.hasUsableValue || !round.hasUsableValue) {
+    } else if (!orders.hasUsableValue ||
+        !round.hasUsableValue ||
+        round.requireValue == null) {
       body = const _CardPlaceholder(
         firstLabel: '이번 회차 신청',
         secondLabel: '입금 대기',
         hasTopLine: true,
       );
     } else {
-      final current = round.requireValue;
+      final current = round.requireValue!;
       final list = orders.requireValue;
       final thisRound = list
           .where(
@@ -344,7 +353,14 @@ class _EventSummaryCard extends ConsumerWidget {
     final theme = Theme.of(context);
 
     Widget body;
-    if (events.hasError || payments.hasError) {
+    if ((events.isLoading && !events.hasUsableValue) ||
+        (payments.isLoading && !payments.hasUsableValue)) {
+      body = const _CardPlaceholder(
+        firstLabel: '완납',
+        secondLabel: '미납',
+        hasBottomLine: true,
+      );
+    } else if (events.hasError || payments.hasError) {
       body = ErrorView(
         error: (events.error ?? payments.error)!,
         onRetry: () {

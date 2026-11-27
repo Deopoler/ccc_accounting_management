@@ -12,9 +12,9 @@ import '../../features/settings/presentation/settings_providers.dart';
 import '../../features/textbooks/presentation/textbook_providers.dart';
 import 'routes.dart';
 
-/// Silently refreshes already-loaded providers for [location] on re-entry.
+/// Silently refreshes already-loaded providers for [uri] on re-entry.
 /// Skips providers still loading so first visits do not double-fetch.
-void revalidateRoute(WidgetRef ref, String location) {
+void revalidateRoute(WidgetRef ref, Uri uri) {
   void refreshIfLoaded(ProviderBase<AsyncValue<Object?>> provider) {
     if (!ref.exists(provider)) return;
     final state = ref.read(provider);
@@ -23,13 +23,14 @@ void revalidateRoute(WidgetRef ref, String location) {
     }
   }
 
-  final segments = Uri.parse(location).pathSegments;
+  final segments = uri.pathSegments;
   if (segments.length == 3 &&
       segments[0] == 'admin' &&
       segments[1] == 'events') {
     final eventId = segments[2];
     refreshIfLoaded(eventProvider(eventId));
     refreshIfLoaded(eventPaymentsProvider(eventId));
+    refreshIfLoaded(membersProvider);
     return;
   }
   if (segments.length == 3 &&
@@ -39,7 +40,7 @@ void revalidateRoute(WidgetRef ref, String location) {
     return;
   }
 
-  switch (location) {
+  switch (uri.path) {
     case AppRoutes.home:
       refreshIfLoaded(myOrdersProvider);
       refreshIfLoaded(currentRoundProvider);
@@ -49,6 +50,10 @@ void revalidateRoute(WidgetRef ref, String location) {
       refreshIfLoaded(textbooksProvider(CampusScope.member));
       refreshIfLoaded(textbookCategoriesProvider(CampusScope.member));
       refreshIfLoaded(currentRoundProvider);
+      final editOrderId = uri.queryParameters['edit'];
+      if (editOrderId != null && editOrderId.isNotEmpty) {
+        refreshIfLoaded(orderProvider(editOrderId));
+      }
     case AppRoutes.myOrders:
       refreshIfLoaded(myOrdersProvider);
       refreshIfLoaded(currentRoundProvider);
@@ -63,22 +68,26 @@ void revalidateRoute(WidgetRef ref, String location) {
       refreshIfLoaded(textbooksProvider(CampusScope.admin));
       refreshIfLoaded(textbookCategoriesProvider(CampusScope.admin));
     case AppRoutes.adminOrders:
+      final rounds = ref.exists(adminRoundsProvider)
+          ? ref.read(adminRoundsProvider).value
+          : null;
+      final current = ref.exists(adminCurrentRoundProvider)
+          ? ref.read(adminCurrentRoundProvider).value
+          : null;
       refreshIfLoaded(adminCurrentRoundProvider);
       refreshIfLoaded(adminRoundsProvider);
       refreshIfLoaded(textbooksProvider(CampusScope.admin));
       refreshIfLoaded(adminOrdersProvider(null));
-      if (ref.exists(adminRoundsProvider)) {
-        final rounds = ref.read(adminRoundsProvider).value;
-        if (rounds != null) {
-          for (final round in rounds.all) {
+      final refreshedRoundIds = <String>{};
+      if (rounds != null) {
+        for (final round in rounds.all) {
+          if (refreshedRoundIds.add(round.id)) {
             refreshIfLoaded(adminOrdersProvider(round.id));
           }
         }
-      } else if (ref.exists(adminCurrentRoundProvider)) {
-        final current = ref.read(adminCurrentRoundProvider).value;
-        if (current != null) {
-          refreshIfLoaded(adminOrdersProvider(current.id));
-        }
+      }
+      if (current != null && refreshedRoundIds.add(current.id)) {
+        refreshIfLoaded(adminOrdersProvider(current.id));
       }
     case AppRoutes.adminEvents:
       refreshIfLoaded(eventsProvider(CampusScope.admin));

@@ -39,24 +39,23 @@ class _AdminDepositsPageState extends ConsumerState<AdminDepositsPage> {
     super.dispose();
   }
 
+  void _resetPaging() {
+    _extraItems = [];
+    _reachedEnd = false;
+    _loadingMore = false;
+    _loadGeneration++;
+  }
+
   void _selectFilter(DepositFilter next) {
     if (_filter == next) return;
     setState(() {
       _filter = next;
-      _extraItems = [];
-      _reachedEnd = false;
-      _loadingMore = false;
-      _loadGeneration++;
+      _resetPaging();
     });
   }
 
   void _refreshAll() {
-    setState(() {
-      _extraItems = [];
-      _reachedEnd = false;
-      _loadingMore = false;
-      _loadGeneration++;
-    });
+    setState(_resetPaging);
     ref
       ..invalidate(bankDepositsProvider)
       ..invalidate(depositCountsProvider)
@@ -248,6 +247,7 @@ class _AdminDepositsPageState extends ConsumerState<AdminDepositsPage> {
   }
 
   Future<void> _openLinkDialog(BankDeposit deposit) async {
+    ref.invalidate(unpaidLinkTargetsProvider);
     final result = await showDialog<_LinkSelection>(
       context: context,
       builder: (_) => _LinkDepositDialog(deposit: deposit),
@@ -307,12 +307,24 @@ class _AdminDepositsPageState extends ConsumerState<AdminDepositsPage> {
     final c = context.colors;
     ref.listen<String?>(adminCampusIdProvider, (prev, next) {
       if (prev != next) {
-        setState(() {
-          _extraItems = [];
-          _reachedEnd = false;
-          _loadingMore = false;
-          _loadGeneration++;
-        });
+        setState(_resetPaging);
+      }
+    });
+    ref.listen<AsyncValue<List<BankDeposit>>>(bankDepositsProvider(_filter), (
+      prev,
+      next,
+    ) {
+      if (next.isLoading && prev?.isLoading != true) {
+        _loadGeneration++;
+        if (_loadingMore) setState(() => _loadingMore = false);
+      } else if (!next.isLoading &&
+          next.hasValue &&
+          (prev == null ||
+              prev.isLoading ||
+              !identical(prev.value, next.value))) {
+        if (_extraItems.isNotEmpty || _reachedEnd || _loadingMore) {
+          setState(_resetPaging);
+        }
       }
     });
 
@@ -324,7 +336,12 @@ class _AdminDepositsPageState extends ConsumerState<AdminDepositsPage> {
       value: depositsAsync,
       onRetry: _refreshAll,
       data: (firstPage) {
-        final loaded = [...firstPage, ..._extraItems];
+        final seen = {for (final d in firstPage) d.id};
+        final loaded = [
+          ...firstPage,
+          for (final d in _extraItems)
+            if (seen.add(d.id)) d,
+        ];
         final totalInFilter = counts?.countFor(_filter);
         final hasMore =
             !_reachedEnd &&
@@ -344,7 +361,7 @@ class _AdminDepositsPageState extends ConsumerState<AdminDepositsPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  if (countsAsync.hasError) ...[
+                  if (countsAsync.hasError && !countsAsync.isLoading) ...[
                     Card(
                       child: Padding(
                         padding: const EdgeInsets.symmetric(
@@ -839,7 +856,9 @@ class _LinkDepositDialogState extends ConsumerState<_LinkDepositDialog> {
     final c = context.colors;
     final theme = Theme.of(context);
     final targetsAsync = ref.watch(unpaidLinkTargetsProvider);
-    final loadedTargets = targetsAsync.asData?.value;
+    final loadedTargets = targetsAsync.hasUsableValue && !targetsAsync.isLoading
+        ? targetsAsync.requireValue
+        : null;
     final availableHeight =
         MediaQuery.sizeOf(context).height -
         MediaQuery.viewInsetsOf(context).bottom;

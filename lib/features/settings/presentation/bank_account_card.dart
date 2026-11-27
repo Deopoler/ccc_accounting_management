@@ -44,6 +44,7 @@ class BankAccountCard extends ConsumerWidget {
         padding: const EdgeInsets.all(20),
         child: AsyncValueView(
           value: account,
+          showRefreshIndicator: false,
           onRetry: () => ref.invalidate(bankAccountProvider),
           data: (a) {
             if (!a.isConfigured) {
