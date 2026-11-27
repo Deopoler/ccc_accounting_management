@@ -759,7 +759,9 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('KAIST 수련회'), findsOneWidget);
     expect(find.text('KAIST 회원'), findsOneWidget);
-    expect(h.events.fetchEventsCalls, eventsCallsBefore);
+    // 상세 화면은 목록(fetchEvents)으로 소속을 확인하지 않는다. 목록 조회 1회는 중첩 경로의
+    // 상위 화면(이벤트 관리 목록)이 함께 만들어지며 생긴다.
+    expect(h.events.fetchEventsCalls, lessThanOrEqualTo(eventsCallsBefore + 1));
     expect(h.events.fetchEventCalls, 1);
 
     container.read(centralCampusOverrideProvider.notifier).select('s');
