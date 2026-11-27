@@ -291,6 +291,11 @@ class _TextbooksPageState extends ConsumerState<TextbooksPage> {
       if (_editing) ref.invalidate(orderProvider(widget.editOrderId!));
     }
 
+    final campusFallback = missingCampusFallback(ref, campusId);
+    if (campusFallback != null) {
+      return RefreshOverlay(refreshing: refreshing, child: campusFallback);
+    }
+
     if (error != null) {
       return RefreshOverlay(
         refreshing: refreshing,

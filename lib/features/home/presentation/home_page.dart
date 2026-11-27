@@ -22,6 +22,10 @@ class HomePage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final campusId = ref.watch(myCampusIdProvider);
+    final campusFallback = missingCampusFallback(ref, campusId);
+    if (campusFallback != null) return campusFallback;
+
     final profileAsync = ref.watch(currentProfileProvider);
     final profile =
         profileAsync.hasUsableValue ? profileAsync.requireValue : null;
@@ -190,21 +194,22 @@ class _TextbookSummaryCard extends ConsumerWidget {
       );
     } else if (campusId == null ||
         !orders.hasUsableValue ||
-        !round.hasUsableValue ||
-        round.requireValue == null) {
+        !round.hasUsableValue) {
       body = const _CardPlaceholder(
         firstLabel: '이번 회차 신청',
         secondLabel: '입금 대기',
         hasTopLine: true,
       );
     } else {
-      final current = round.requireValue!;
+      final current = round.requireValue;
       final list = orders.requireValue;
-      final thisRound = list
-          .where(
-            (o) => o.roundId == current.id && o.status != OrderStatus.cancelled,
-          )
-          .toList();
+      final thisRound = current == null
+          ? const <TextbookOrder>[]
+          : list
+              .where(
+                (o) => o.roundId == current.id && o.status != OrderStatus.cancelled,
+              )
+              .toList();
       final unpaid = list
           .where((o) => o.status == OrderStatus.requested)
           .fold(0, (s, o) => s + o.totalPrice);
@@ -215,7 +220,9 @@ class _TextbookSummaryCard extends ConsumerWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
-            '이번 회차 ${current.label} · 마감 ${current.deadlineLabel}',
+            current == null
+                ? '현재 신청 가능한 회차가 없습니다.'
+                : '이번 회차 ${current.label} · 마감 ${current.deadlineLabel}',
             style: Theme.of(context).textTheme.bodySmall,
           ),
           const SizedBox(height: 12),

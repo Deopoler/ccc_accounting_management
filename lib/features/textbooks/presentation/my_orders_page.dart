@@ -40,6 +40,11 @@ class MyOrdersPage extends ConsumerWidget {
     final refreshing =
         orders.isBackgroundRefreshing || round.isBackgroundRefreshing;
 
+    final campusFallback = missingCampusFallback(ref, campusId);
+    if (campusFallback != null) {
+      return RefreshOverlay(refreshing: refreshing, child: campusFallback);
+    }
+
     if (error != null) {
       return RefreshOverlay(
         refreshing: refreshing,

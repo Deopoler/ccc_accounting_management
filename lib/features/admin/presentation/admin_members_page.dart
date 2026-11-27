@@ -180,6 +180,9 @@ class _AdminMembersPageState extends ConsumerState<AdminMembersPage> {
   @override
   Widget build(BuildContext context) {
     final activeCampusId = ref.watch(adminCampusIdProvider);
+    final campusFallback = missingCampusFallback(ref, activeCampusId);
+    if (campusFallback != null) return campusFallback;
+
     final members = ref.watch(membersProvider);
     final me = ref.watch(currentUserIdProvider);
     final iAmCentral = ref.watch(isCentralAdminProvider);

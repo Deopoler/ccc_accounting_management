@@ -35,6 +35,7 @@ import 'package:ccc_accounting_management/features/push/presentation/push_provid
 import 'package:ccc_accounting_management/features/settings/data/settings_repository.dart';
 import 'package:ccc_accounting_management/features/settings/domain/bank_account.dart';
 import 'package:ccc_accounting_management/features/settings/presentation/admin_settings_page.dart';
+import 'package:ccc_accounting_management/features/settings/presentation/bank_account_card.dart';
 import 'package:ccc_accounting_management/features/settings/presentation/settings_providers.dart';
 import 'package:ccc_accounting_management/features/textbooks/data/textbook_repository.dart';
 import 'package:ccc_accounting_management/features/textbooks/domain/order_round.dart';
@@ -46,6 +47,7 @@ import 'package:ccc_accounting_management/features/textbooks/presentation/order_
 import 'package:ccc_accounting_management/features/textbooks/presentation/textbook_providers.dart';
 import 'package:ccc_accounting_management/features/textbooks/presentation/textbooks_page.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/misc.dart' show Override;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:intl/intl.dart';
@@ -132,15 +134,19 @@ final _eventPayment = EventPayment(
 );
 
 class _FakeAuth implements AuthRepository {
+  String userId = 'u1';
   Completer<Profile?>? pendingProfile;
+  Profile? profileResult = _admin;
+  Object? profileError;
 
   @override
-  String? get currentUserId => 'u1';
+  String? get currentUserId => userId;
 
   @override
   Future<Profile?> fetchProfile(String userId) {
     if (pendingProfile != null) return pendingProfile!.future;
-    return Future.value(_admin);
+    if (profileError != null) return Future.error(profileError!);
+    return Future.value(profileResult);
   }
 
   @override
@@ -185,6 +191,9 @@ class _FakeTextbooks implements TextbookRepository {
   Completer<TextbookOrder?>? pendingOrder;
 
   List<TextbookCategory> categoriesResult = const [_category];
+  List<OrderRound>? roundsResult;
+  Object? roundsError;
+  Map<String?, List<TextbookOrder>> ordersByRound = {};
   TextbookOrder? orderResult = _order;
   final List<List<String>> reorderedCategories = [];
 
@@ -214,7 +223,8 @@ class _FakeTextbooks implements TextbookRepository {
   @override
   Future<List<OrderRound>> fetchRounds(String campusId) {
     if (pendingRounds != null) return pendingRounds!.future;
-    return Future.value([_round]);
+    if (roundsError != null) return Future.error(roundsError!);
+    return Future.value(roundsResult ?? [_round]);
   }
 
   @override
@@ -229,6 +239,9 @@ class _FakeTextbooks implements TextbookRepository {
     String? roundId,
   }) {
     if (pendingAllOrders != null) return pendingAllOrders!.future;
+    if (ordersByRound.isNotEmpty) {
+      return Future.value(ordersByRound[roundId] ?? const []);
+    }
     return Future.value([_order]);
   }
 
@@ -289,6 +302,8 @@ class _FakeDeposits implements DepositRepository {
   Completer<List<BankDeposit>>? pendingDeposits;
   Completer<DepositCounts>? pendingCounts;
   Completer<CampusDepositSettings>? pendingSettings;
+  Completer<List<({String depositId, DepositStatus status})>>? pendingReparse;
+  Completer<void>? pendingIgnore;
   Object? depositsError;
   DepositCounts countsResult = const DepositCounts(needsReview: 1, all: 1);
 
@@ -327,6 +342,21 @@ class _FakeDeposits implements DepositRepository {
     return Future.value(
       CampusDepositSettings(campusId: campusId, enabled: true, accountLabel: 'KAIST CCC'),
     );
+  }
+
+  @override
+  Future<void> ignoreDeposit(String depositId, {required bool ignore}) {
+    if (pendingIgnore != null) return pendingIgnore!.future;
+    return Future.value();
+  }
+
+  @override
+  Future<List<({String depositId, DepositStatus status})>> reparse({
+    String? depositId,
+    String? campusId,
+  }) {
+    if (pendingReparse != null) return pendingReparse!.future;
+    return Future.value(const []);
   }
 
   @override
@@ -409,6 +439,7 @@ class _Harness {
     Widget page, {
     Size size = const Size(1280, 800),
     ThemeData? theme,
+    List<Override> extraOverrides = const [],
   }) async {
     tester.view.physicalSize = size * 2;
     tester.view.devicePixelRatio = 2;
@@ -419,7 +450,7 @@ class _Harness {
         key: UniqueKey(),
         retry: (_, _) => null,
         overrides: [
-          currentUserIdProvider.overrideWith((ref) => 'u1'),
+          currentUserIdProvider.overrideWith((ref) => auth.currentUserId),
           authRepositoryProvider.overrideWithValue(auth),
           campusRepositoryProvider.overrideWithValue(campuses),
           memberRepositoryProvider.overrideWithValue(members),
@@ -430,6 +461,7 @@ class _Harness {
           feedbackRepositoryProvider.overrideWithValue(feedback),
           pushBrowserProvider.overrideWithValue(_FakePushBrowser()),
           pushRepositoryProvider.overrideWithValue(_FakePushRepo()),
+          ...extraOverrides,
         ],
         child: MaterialApp(
           theme: theme ?? AppTheme.light(),
@@ -954,5 +986,255 @@ void main() {
     expect(h.textbooks.reorderedCategories, [
       ['c1', 'c3', 'c2'],
     ]);
+  });
+
+  testWidgets('OrderCompletePage 는 주문 새로고침 중 이전 금액과 복사 버튼을 숨기고 스켈레톤을 보인다', (
+    tester,
+  ) async {
+    final h = _Harness();
+    await h.pump(tester, const OrderCompletePage(orderId: 'o1', edited: true));
+    await tester.pumpAndSettle();
+
+    expect(find.text('24,000원'), findsWidgets);
+    // 송금 금액 + 계좌번호 복사 버튼 2개
+    expect(find.widgetWithText(TextButton, '복사'), findsNWidgets(2));
+
+    final refreshCompleter = Completer<TextbookOrder?>();
+    h.textbooks.pendingOrder = refreshCompleter;
+    ProviderScope.containerOf(
+      tester.element(find.byType(OrderCompletePage)),
+    ).invalidate(orderProvider('o1'));
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('24,000원'), findsNothing);
+    expect(find.bySemanticsLabel('불러오는 중'), findsWidgets);
+    // 송금 금액 행은 스켈레톤이므로 계좌번호 복사 버튼 1개만 남는다.
+    expect(find.widgetWithText(TextButton, '복사'), findsOneWidget);
+
+    refreshCompleter.complete(
+      TextbookOrder(
+        id: 'o1',
+        userId: 'u1',
+        roundId: _round.id,
+        round: _round,
+        status: OrderStatus.requested,
+        totalPrice: 36000,
+        createdAt: _order.createdAt,
+        items: const [
+          TextbookOrderItem(
+            textbookId: 'b1',
+            title: '기초 성경공부',
+            quantity: 3,
+            unitPrice: 12000,
+          ),
+        ],
+        member: _order.member,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('36,000원'), findsWidgets);
+    expect(find.widgetWithText(TextButton, '복사'), findsNWidgets(2));
+  });
+
+  testWidgets('HomePage 는 currentRound 가 null 로 확정되면 미납/안내 정보를 표시한다', (
+    tester,
+  ) async {
+    final h = _Harness();
+    await h.pump(
+      tester,
+      const HomePage(),
+      extraOverrides: [
+        currentRoundProvider.overrideWith((ref) async => null),
+      ],
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('현재 신청 가능한 회차가 없습니다.'), findsOneWidget);
+    expect(find.text('0건'), findsOneWidget);
+    expect(find.text('24,000원'), findsOneWidget);
+    expect(find.bySemanticsLabel('불러오는 중'), findsNothing);
+  });
+
+  testWidgets('계정 전환 재로딩 중 campusId 는 이전 사용자 캠퍼스를 노출하지 않는다', (
+    tester,
+  ) async {
+    final h = _Harness();
+    await h.pump(tester, const MyOrdersPage());
+    await tester.pumpAndSettle();
+
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(MyOrdersPage)),
+    );
+    expect(container.read(myCampusIdProvider), 'k');
+    expect(container.read(adminCampusIdProvider), 'k');
+    expect(find.textContaining('기초 성경공부'), findsOneWidget);
+
+    h.auth.userId = 'u2';
+    final profileCompleter = Completer<Profile?>();
+    h.auth.pendingProfile = profileCompleter;
+    container.invalidate(currentUserIdProvider);
+    await tester.pump();
+    await tester.pump();
+
+    expect(container.read(myCampusIdProvider), isNull);
+    expect(container.read(adminCampusIdProvider), isNull);
+    expect(find.bySemanticsLabel('불러오는 중'), findsWidgets);
+    expect(find.textContaining('기초 성경공부'), findsNothing);
+
+    profileCompleter.complete(_member);
+    await tester.pumpAndSettle();
+    expect(container.read(myCampusIdProvider), 'k');
+  });
+
+  testWidgets('프로필 조회 오류 시 ErrorView 를 보이고 다시 시도로 복구한다', (tester) async {
+    final h = _Harness();
+    h.auth.profileError = Exception('profile failed');
+
+    await h.pump(tester, const HomePage());
+    await tester.pumpAndSettle();
+
+    expect(find.byType(ErrorView), findsOneWidget);
+    expect(find.bySemanticsLabel('불러오는 중'), findsNothing);
+
+    h.auth.profileError = null;
+    await tester.tap(find.widgetWithText(OutlinedButton, '다시 시도'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('홍길동님, 안녕하세요'), findsOneWidget);
+  });
+
+  testWidgets('프로필에 캠퍼스가 없으면 빈 캠퍼스 안내 EmptyView 를 보인다', (tester) async {
+    final h = _Harness();
+    h.auth.profileResult = Profile(
+      id: 'u_empty',
+      campusId: '',
+      studentId: '20249999',
+      name: '미배정',
+      role: UserRole.member,
+      mustChangePassword: false,
+      isApproved: true,
+      createdAt: DateTime(2026, 9, 1),
+    );
+
+    for (final widget in const [
+      TextbooksPage(),
+      MyOrdersPage(),
+      HomePage(),
+      BankAccountCard(),
+      AdminDepositsPage(),
+    ]) {
+      await h.pump(tester, widget);
+      await tester.pumpAndSettle();
+      expect(find.text(missingCampusMessage), findsOneWidget);
+      expect(find.bySemanticsLabel('불러오는 중'), findsNothing);
+    }
+  });
+
+  testWidgets('AdminOrdersPage 는 과거 회차 선택 중 회차 목록이 실패해도 선택 회차를 유지하고 변경을 잠근다', (
+    tester,
+  ) async {
+    final pastRound = OrderRound(
+      id: 'r_past',
+      start: DateTime(_now.year, _now.month, _now.day - 7, 9),
+      deadline: DateTime(_now.year, _now.month, _now.day - 1, 9),
+    );
+    final pastOrder = TextbookOrder(
+      id: 'o_past',
+      userId: 'u2',
+      roundId: pastRound.id,
+      round: pastRound,
+      status: OrderStatus.requested,
+      totalPrice: 15000,
+      createdAt: DateTime(2026, 10, 20, 10),
+      items: const [
+        TextbookOrderItem(
+          textbookId: 'b2',
+          title: '지난 회차 교재',
+          quantity: 1,
+          unitPrice: 15000,
+        ),
+      ],
+      member: const OrderMember(studentId: '20240002', name: '김민수'),
+    );
+
+    final h = _Harness();
+    h.textbooks.roundsResult = [_round, pastRound];
+    h.textbooks.ordersByRound = {
+      _round.id: [_order],
+      pastRound.id: [pastOrder],
+    };
+
+    await h.pump(tester, const AdminOrdersPage());
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('이전 회차'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('지난 회차 교재 ×1'), findsOneWidget);
+    expect(find.text('기초 성경공부 ×2'), findsNothing);
+    expect(tester.widget<DataTable>(find.byType(DataTable)).onSelectAll, isNotNull);
+
+    h.textbooks.roundsError = Exception('rounds failed');
+    ProviderScope.containerOf(
+      tester.element(find.byType(AdminOrdersPage)),
+    ).invalidate(adminRoundsProvider);
+    await tester.pumpAndSettle();
+
+    expect(find.text('지난 회차 교재 ×1'), findsOneWidget);
+    expect(find.text('기초 성경공부 ×2'), findsNothing);
+    expect(find.text('지난 회차 목록을 불러오지 못했습니다.'), findsOneWidget);
+    expect(tester.widget<DataTable>(find.byType(DataTable)).onSelectAll, isNull);
+    for (final cb in tester.widgetList<Checkbox>(find.byType(Checkbox))) {
+      expect(cb.onChanged, isNull);
+    }
+  });
+
+  testWidgets('AdminDepositsPage 에서 일괄 재해석과 개별 입금 처리가 서로 잠긴다', (tester) async {
+    final h = _Harness();
+    h.deposits.countsResult = const DepositCounts(
+      needsReview: 1,
+      unparsedWithRaw: 2,
+      all: 3,
+    );
+
+    await h.pump(tester, const AdminDepositsPage());
+    await tester.pumpAndSettle();
+
+    final bulkBtn = find.ancestor(
+      of: find.text('해석 실패 일괄 재실행 (2)'),
+      matching: find.byWidgetPredicate((w) => w is OutlinedButton),
+    );
+    final linkBtn = find.widgetWithText(OutlinedButton, '대상 연결');
+    final ignoreBtn = find.widgetWithText(TextButton, '무시');
+
+    // 1. 일괄 재실행 중에는 개별 카드 액션이 비활성화된다.
+    final reparseCompleter =
+        Completer<List<({String depositId, DepositStatus status})>>();
+    h.deposits.pendingReparse = reparseCompleter;
+    await tester.tap(bulkBtn);
+    await tester.pump();
+
+    expect(tester.widget<OutlinedButton>(linkBtn).onPressed, isNull);
+    expect(tester.widget<TextButton>(ignoreBtn).onPressed, isNull);
+
+    reparseCompleter.complete(const []);
+    h.deposits.pendingReparse = null;
+    await tester.pumpAndSettle();
+    expect(tester.widget<OutlinedButton>(linkBtn).onPressed, isNotNull);
+
+    // 2. 개별 입금 처리 중에는 일괄 재실행 버튼이 비활성화된다.
+    final ignoreCompleter = Completer<void>();
+    h.deposits.pendingIgnore = ignoreCompleter;
+    await tester.tap(ignoreBtn);
+    await tester.pump();
+
+    expect(tester.widget<OutlinedButton>(bulkBtn).onPressed, isNull);
+
+    ignoreCompleter.complete();
+    h.deposits.pendingIgnore = null;
+    await tester.pumpAndSettle();
+    expect(tester.widget<OutlinedButton>(bulkBtn).onPressed, isNotNull);
   });
 }

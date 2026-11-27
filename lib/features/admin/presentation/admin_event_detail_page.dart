@@ -214,6 +214,9 @@ class _AdminEventDetailPageState extends ConsumerState<AdminEventDetailPage> {
     });
 
     final activeCampusId = ref.watch(adminCampusIdProvider);
+    final campusFallback = missingCampusFallback(ref, activeCampusId);
+    if (campusFallback != null) return campusFallback;
+
     final event = ref.watch(eventProvider(_id));
     final payments = ref.watch(eventPaymentsProvider(_id));
     final refreshing =

@@ -258,6 +258,9 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
     });
 
     final activeCampusId = ref.watch(adminCampusIdProvider);
+    final campusFallback = missingCampusFallback(ref, activeCampusId);
+    if (campusFallback != null) return campusFallback;
+
     final currentRoundAsync = ref.watch(adminCurrentRoundProvider);
     final roundList = ref.watch(adminRoundsProvider);
     final textbooks = ref.watch(textbooksProvider(CampusScope.admin));
@@ -290,10 +293,24 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
         roundList.requireValue?.campusId == activeCampusId;
     final RoundList? rounds = roundsLoaded ? roundList.requireValue! : null;
 
-    final OrderRound? selected = rounds != null
+    final OrderRound? selected = _allRounds
+        ? null
+        : rounds != null
         ? _selected(rounds)
-        : (_allRounds ? null : currentRound);
-    final roundId = selected?.id;
+        : (_roundId == null || _roundId == currentRound?.id)
+        ? currentRound
+        : null;
+    final String? roundId = _allRounds
+        ? null
+        : (rounds != null
+            ? selected?.id
+            : (_roundId ?? currentRound?.id));
+    // 회차 목록을 불러오지 못한 상태에서 과거 회차를 선택 중이면 변경 작업을 잠근다.
+    final selectionConfirmed =
+        rounds != null ||
+        _allRounds ||
+        _roundId == null ||
+        _roundId == currentRound?.id;
     final AsyncValue<List<TextbookOrder>>? orders = roundReady
         ? ref.watch(adminOrdersProvider(roundId))
         : null;
@@ -365,6 +382,7 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
                   orders: filtered,
                   busy: _busy,
                   picked: _picked,
+                  mutationsEnabled: selectionConfirmed,
                   onPick: (o, v) => setState(
                     () => v ? _picked.add(o.id) : _picked.remove(o.id),
                   ),
@@ -729,9 +747,11 @@ class _RoundNavigator extends StatelessWidget {
         ),
       );
     } else {
-      final title = _all ? '전체 회차' : selected!.label;
+      final title = _all ? '전체 회차' : (selected?.label ?? '선택한 회차');
       final sub = _all
           ? '모든 회차의 신청'
+          : selected == null
+          ? '회차 정보를 확인하지 못했습니다.'
           : isCurrent
           ? '이번 회차 · ${selected!.deadlineLabel} 마감'
           : r != null
@@ -1204,6 +1224,7 @@ class _OrdersList extends StatelessWidget {
     required this.orders,
     required this.busy,
     required this.picked,
+    this.mutationsEnabled = true,
     required this.onPick,
     required this.onPickAll,
     required this.onStatus,
@@ -1216,6 +1237,7 @@ class _OrdersList extends StatelessWidget {
   final List<TextbookOrder> orders;
   final Set<String> busy;
   final Set<String> picked;
+  final bool mutationsEnabled;
   final _OnToggle onPick;
   final ValueChanged<bool> onPickAll;
   final _OnStatus onStatus;
@@ -1226,8 +1248,8 @@ class _OrdersList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // 처리 중인 행이 있으면 선택 / 일괄 처리를 막는다.
-    final enabled = busy.isEmpty;
+    // 처리 중인 행이 있거나 회차 선택이 확인되지 않았으면 선택 / 일괄 처리를 막는다.
+    final enabled = mutationsEnabled && busy.isEmpty;
     return LayoutBuilder(
       builder: (context, constraints) {
         final table = constraints.maxWidth >= 760;
@@ -1292,7 +1314,7 @@ class _OrdersList extends StatelessWidget {
                               DataCell(
                                 _StatusMenu(
                                   order: o,
-                                  enabled: !busy.contains(o.id),
+                                  enabled: mutationsEnabled && !busy.contains(o.id),
                                   onStatus: onStatus,
                                 ),
                               ),
@@ -1303,7 +1325,7 @@ class _OrdersList extends StatelessWidget {
                                   children: [
                                     _PaidCheckbox(
                                       order: o,
-                                      enabled: !busy.contains(o.id),
+                                      enabled: mutationsEnabled && !busy.contains(o.id),
                                       onStatus: onStatus,
                                     ),
                                     if (o.isAutoConfirmed)
@@ -1320,7 +1342,7 @@ class _OrdersList extends StatelessWidget {
                               DataCell(
                                 _ShippedCheckbox(
                                   order: o,
-                                  enabled: !busy.contains(o.id),
+                                  enabled: mutationsEnabled && !busy.contains(o.id),
                                   onShipped: onShipped,
                                 ),
                               ),
@@ -1330,7 +1352,7 @@ class _OrdersList extends StatelessWidget {
                                   children: [
                                     _ReceivedCheckbox(
                                       order: o,
-                                      enabled: !busy.contains(o.id),
+                                      enabled: mutationsEnabled && !busy.contains(o.id),
                                       onReceived: onReceived,
                                     ),
                                     _ReceiptText(o),
@@ -1354,7 +1376,7 @@ class _OrdersList extends StatelessWidget {
             for (final o in orders) ...[
               _OrderCard(
                 order: o,
-                enabled: !busy.contains(o.id),
+                enabled: mutationsEnabled && !busy.contains(o.id),
                 picked: picked.contains(o.id),
                 onPick: enabled ? onPick : null,
                 onStatus: onStatus,

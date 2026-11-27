@@ -39,6 +39,9 @@ class AdminEventsPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final activeCampusId = ref.watch(adminCampusIdProvider);
+    final campusFallback = missingCampusFallback(ref, activeCampusId);
+    if (campusFallback != null) return campusFallback;
+
     final events = ref.watch(eventsProvider(CampusScope.admin));
     final summaries = ref.watch(eventSummariesProvider);
     final refreshing =

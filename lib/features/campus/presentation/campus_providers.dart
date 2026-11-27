@@ -1,9 +1,11 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/riverpod/cache_for.dart';
 import '../../../core/supabase/supabase_providers.dart';
 import '../../../core/utils/app_exception.dart';
+import '../../../core/widgets/state_views.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../data/campus_repository.dart';
 import '../domain/campus.dart';
@@ -32,10 +34,31 @@ class CentralCampusOverride extends Notifier<String?> {
   void select(String? campusId) => state = campusId;
 }
 
+const missingCampusMessage = '캠퍼스 정보가 없습니다. 관리자에게 문의해 주세요.';
+
+String? _nonEmptyCampus(String? id) => (id == null || id.isEmpty) ? null : id;
+
+/// [campusId] 가 비어 있고 프로필 로딩이 끝났을 때 에러/빈 상태 화면을 반환한다.
+/// 로딩 중이거나 캠퍼스 id 가 있으면 null 을 반환해 각 화면이 스켈레톤/데이터를 그리게 한다.
+Widget? missingCampusFallback(WidgetRef ref, String? campusId) {
+  if (campusId != null) return null;
+  final profile = ref.watch(currentProfileProvider);
+  if (profile.hasError && !profile.isLoading) {
+    return ErrorView(
+      error: profile.error!,
+      onRetry: () => ref.invalidate(currentProfileProvider),
+    );
+  }
+  if (profile.isLoading) return null;
+  return const EmptyView(message: missingCampusMessage);
+}
+
 /// 본인 캠퍼스 id. 회원 화면(교재 신청, 이벤트, 입금 안내)은 항상 이것을 쓴다. 로그아웃 상태면 null.
-final myCampusIdProvider = Provider<String?>(
-  (ref) => ref.watch(currentProfileProvider).value?.campusId,
-);
+final myCampusIdProvider = Provider<String?>((ref) {
+  final profile = ref.watch(currentProfileProvider);
+  final p = profile.hasUsableValue ? profile.requireValue : null;
+  return _nonEmptyCampus(p?.campusId);
+});
 
 /// 본인 캠퍼스 (없으면 null). 내 정보 메뉴 표시용.
 final myCampusProvider = FutureProvider.autoDispose<Campus?>((ref) async {
@@ -55,12 +78,13 @@ final myCampusProvider = FutureProvider.autoDispose<Campus?>((ref) async {
 /// 캠퍼스 관리자는 본인 캠퍼스(서버 RLS 도 그것만 허용한다).
 /// 총괄 관리자는 고른 캠퍼스(기본 본인). 모든 캠퍼스를 볼 수 있으므로, 목록이 섞이지 않게 모든 조회를 이 캠퍼스로 거른다.
 final adminCampusIdProvider = Provider<String?>((ref) {
-  final profile = ref.watch(currentProfileProvider).value;
+  final profileAsync = ref.watch(currentProfileProvider);
+  final profile = profileAsync.hasUsableValue ? profileAsync.requireValue : null;
   if (profile == null) return null;
   final override = ref.watch(centralCampusOverrideProvider);
-  return profile.isCentralAdmin && override != null
-      ? override
-      : profile.campusId;
+  return _nonEmptyCampus(
+    profile.isCentralAdmin && override != null ? override : profile.campusId,
+  );
 });
 
 /// 회원 화면 / 관리자 화면 중 어느 쪽 캠퍼스 기준인지. (총괄 관리자가 캠퍼스를 바꾸면 관리자 화면만 바뀐다)

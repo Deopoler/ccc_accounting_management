@@ -106,7 +106,7 @@ class _AdminDepositsPageState extends ConsumerState<AdminDepositsPage> {
     Future<void> Function() action, {
     String? successMessage,
   }) async {
-    if (_busy.contains(depositId)) return;
+    if (_bulkReparsing || _busy.contains(depositId)) return;
     setState(() => _busy.add(depositId));
     try {
       await action();
@@ -174,7 +174,7 @@ class _AdminDepositsPageState extends ConsumerState<AdminDepositsPage> {
   }
 
   Future<void> _rematch(BankDeposit deposit) async {
-    if (_busy.contains(deposit.id)) return;
+    if (_bulkReparsing || _busy.contains(deposit.id)) return;
     setState(() => _busy.add(deposit.id));
     try {
       final status = await ref
@@ -196,7 +196,7 @@ class _AdminDepositsPageState extends ConsumerState<AdminDepositsPage> {
   }
 
   Future<void> _reparseOne(BankDeposit deposit) async {
-    if (_busy.contains(deposit.id)) return;
+    if (_bulkReparsing || _busy.contains(deposit.id)) return;
     setState(() => _busy.add(deposit.id));
     try {
       final results = await ref
@@ -221,7 +221,7 @@ class _AdminDepositsPageState extends ConsumerState<AdminDepositsPage> {
   }
 
   Future<void> _reparseAllUnparsed() async {
-    if (_bulkReparsing) return;
+    if (_bulkReparsing || _busy.isNotEmpty) return;
     setState(() => _bulkReparsing = true);
     try {
       final campusId = await ref.requireAdminCampusId();
@@ -330,6 +330,9 @@ class _AdminDepositsPageState extends ConsumerState<AdminDepositsPage> {
     });
 
     final activeCampusId = ref.watch(adminCampusIdProvider);
+    final campusFallback = missingCampusFallback(ref, activeCampusId);
+    if (campusFallback != null) return campusFallback;
+
     final depositsAsync = ref.watch(bankDepositsProvider(_filter));
     final countsAsync = ref.watch(depositCountsProvider);
     final depositsReady = activeCampusId != null && depositsAsync.hasUsableValue;
@@ -417,7 +420,7 @@ class _AdminDepositsPageState extends ConsumerState<AdminDepositsPage> {
                   for (final d in visible) ...[
                     _DepositCard(
                       deposit: d,
-                      busy: _busy.contains(d.id),
+                      busy: _bulkReparsing || _busy.contains(d.id),
                       onLink: () => _openLinkDialog(d),
                       onUndo: () => _undo(d),
                       onClearDuplicate: () => _clearDuplicate(d),
@@ -540,9 +543,13 @@ class _AdminDepositsPageState extends ConsumerState<AdminDepositsPage> {
                         ),
                         if (unparsedWithRawCount > 0)
                           OutlinedButton.icon(
-                            onPressed: _bulkReparsing || !depositsReady
-                                ? null
-                                : _reparseAllUnparsed,
+                            onPressed:
+                                _bulkReparsing ||
+                                        _busy.isNotEmpty ||
+                                        !depositsReady ||
+                                        depositsAsync.isRefreshing
+                                    ? null
+                                    : _reparseAllUnparsed,
                             icon: const Icon(Icons.replay, size: 18),
                             label: Text(
                               _bulkReparsing
@@ -972,27 +979,28 @@ class _LinkDepositDialogState extends ConsumerState<_LinkDepositDialog> {
     final c = context.colors;
     final theme = Theme.of(context);
     final targetsAsync = ref.watch(unpaidLinkTargetsProvider);
-    final loadedTargets = targetsAsync.hasUsableValue && !targetsAsync.isLoading
+    // 백그라운드 새로고침 중에는 선택 상태를 유지하고 버튼만 비활성화한다.
+    final displayTargets = targetsAsync.hasUsableValue
         ? targetsAsync.requireValue
         : null;
     final availableHeight =
         MediaQuery.sizeOf(context).height -
         MediaQuery.viewInsetsOf(context).bottom;
     final d = widget.deposit;
-    final freshCandidates = loadedTargets == null
+    final freshCandidates = displayTargets == null
         ? const <(DepositCandidate, int)>[]
         : [
             for (final cand in d.candidates)
-              if (_freshCandidateAmount(cand, loadedTargets)
+              if (_freshCandidateAmount(cand, displayTargets)
                   case final amount?)
                 (cand, amount),
           ];
-    final validOrderIds = loadedTargets == null
+    final validOrderIds = displayTargets == null
         ? const <String>{}
-        : {for (final o in loadedTargets.orders) o.orderId};
-    final validEventIds = loadedTargets == null
+        : {for (final o in displayTargets.orders) o.orderId};
+    final validEventIds = displayTargets == null
         ? const <String>{}
-        : {for (final p in loadedTargets.eventPayments) p.paymentId};
+        : {for (final p in displayTargets.eventPayments) p.paymentId};
     final activeSelectedOrderIds = _selectedOrderIds
         .where(validOrderIds.contains)
         .toSet();
@@ -1000,7 +1008,7 @@ class _LinkDepositDialogState extends ConsumerState<_LinkDepositDialog> {
         ? _selectedEventPaymentId
         : null;
     final canSubmit =
-        loadedTargets != null &&
+        displayTargets != null &&
         (_tab == _LinkTab.events
             ? activeSelectedEventId != null
             : activeSelectedOrderIds.isNotEmpty);
@@ -1063,9 +1071,10 @@ class _LinkDepositDialogState extends ConsumerState<_LinkDepositDialog> {
                           ),
                           const SizedBox(width: 8),
                           OutlinedButton(
-                            onPressed: loadedTargets == null
-                                ? null
-                                : () => _pickCandidate(cand, loadedTargets),
+                            onPressed:
+                                displayTargets == null || targetsAsync.isLoading
+                                    ? null
+                                    : () => _pickCandidate(cand, displayTargets),
                             child: const Text('연결'),
                           ),
                         ],
@@ -1218,9 +1227,10 @@ class _LinkDepositDialogState extends ConsumerState<_LinkDepositDialog> {
           child: const Text('취소'),
         ),
         FilledButton(
-          onPressed: loadedTargets == null || !canSubmit
-              ? null
-              : () => _submitManual(loadedTargets),
+          onPressed:
+              displayTargets == null || targetsAsync.isLoading || !canSubmit
+                  ? null
+                  : () => _submitManual(displayTargets),
           child: const Text('연결'),
         ),
       ],

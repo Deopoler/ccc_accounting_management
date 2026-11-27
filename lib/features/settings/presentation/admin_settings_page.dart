@@ -24,6 +24,9 @@ class AdminSettingsPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final activeCampusId = ref.watch(adminCampusIdProvider);
+    final campusFallback = missingCampusFallback(ref, activeCampusId);
+    if (campusFallback != null) return campusFallback;
+
     final account = ref.watch(bankAccountProvider(CampusScope.admin));
     final currentRound = ref.watch(adminCurrentRoundProvider);
     final depositSettings = ref.watch(depositSettingsProvider);

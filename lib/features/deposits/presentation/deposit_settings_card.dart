@@ -18,14 +18,16 @@ class DepositSettingsCard extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final activeCampusId = ref.watch(adminCampusIdProvider);
+    final campusFallback = missingCampusFallback(ref, activeCampusId);
     final settingsAsync = ref.watch(depositSettingsProvider);
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(20),
-        child: AsyncValueView<CampusDepositSettings?>(
-          value: activeCampusId == null
-              ? const AsyncLoading<CampusDepositSettings?>()
-              : settingsAsync,
+        child: campusFallback ??
+            AsyncValueView<CampusDepositSettings?>(
+              value: activeCampusId == null
+                  ? const AsyncLoading<CampusDepositSettings?>()
+                  : settingsAsync,
           showRefreshIndicator: false,
           loading: const _DepositSettingsPlaceholder(),
           onRetry: () => ref.invalidate(depositSettingsProvider),

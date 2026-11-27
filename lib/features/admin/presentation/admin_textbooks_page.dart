@@ -230,6 +230,9 @@ class AdminTextbooksPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final activeCampusId = ref.watch(adminCampusIdProvider);
+    final campusFallback = missingCampusFallback(ref, activeCampusId);
+    if (campusFallback != null) return campusFallback;
+
     final textbooks = ref.watch(textbooksProvider(CampusScope.admin));
     final categories = ref.watch(textbookCategoriesProvider(CampusScope.admin));
     final refreshing =

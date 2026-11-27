@@ -38,6 +38,8 @@ class BankAccountCard extends ConsumerWidget {
     final theme = Theme.of(context);
     final showDepositName = depositName != null && depositName!.isNotEmpty;
 
+    final campusFallback = missingCampusFallback(ref, campusId);
+
     final c = context.colors;
     return Card(
       color: embedded ? c.background : c.surfaceMuted,
@@ -48,7 +50,8 @@ class BankAccountCard extends ConsumerWidget {
           : null,
       child: Padding(
         padding: const EdgeInsets.all(20),
-        child: AsyncValueView(
+        child: campusFallback ??
+            AsyncValueView(
           value: campusId == null ? const AsyncLoading<BankAccount>() : account,
           showRefreshIndicator: false,
           onRetry: () => ref.invalidate(bankAccountProvider),

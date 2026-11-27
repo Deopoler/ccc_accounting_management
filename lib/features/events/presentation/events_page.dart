@@ -25,6 +25,11 @@ class EventsPage extends ConsumerWidget {
     final refreshing =
         events.isBackgroundRefreshing || payments.isBackgroundRefreshing;
 
+    final campusFallback = missingCampusFallback(ref, campusId);
+    if (campusFallback != null) {
+      return RefreshOverlay(refreshing: refreshing, child: campusFallback);
+    }
+
     if ((events.hasError && !events.isLoading) ||
         (payments.hasError && !payments.isLoading)) {
       return RefreshOverlay(

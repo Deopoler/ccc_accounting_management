@@ -81,10 +81,12 @@ final _previousRound = OrderRound(
 
 Profile _profile(
   String id, {
+  String campusId = 'k',
   UserRole role = UserRole.member,
   bool approved = true,
 }) => Profile(
   id: id,
+  campusId: campusId,
   studentId: '2024${id.padLeft(4, '0')}',
   name: id == 'u1' ? _longName : '회원$id',
   role: role,

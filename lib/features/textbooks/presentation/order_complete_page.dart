@@ -7,6 +7,7 @@ import '../../../core/widgets/responsive.dart';
 import '../../../core/widgets/state_views.dart';
 import '../../push/presentation/signup_push_card.dart';
 import '../../settings/presentation/bank_account_card.dart';
+import '../domain/textbook_order.dart';
 import 'textbook_providers.dart';
 import 'widgets/order_widgets.dart';
 
@@ -27,7 +28,7 @@ class OrderCompletePage extends ConsumerWidget {
     final theme = Theme.of(context);
 
     return AsyncValueView(
-      value: order,
+      value: order.isLoading ? const AsyncLoading<TextbookOrder?>() : order,
       onRetry: () => ref.invalidate(orderProvider(orderId)),
       isEmpty: (o) => o == null,
       empty: const EmptyView(message: '신청 내역을 찾을 수 없습니다.'),
