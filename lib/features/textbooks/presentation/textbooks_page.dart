@@ -44,25 +44,43 @@ class _TextbooksPageState extends ConsumerState<TextbooksPage> {
 
   bool get _editing => widget.editOrderId != null;
 
+  bool _wasActive = true;
+
   @override
   void initState() {
     super.initState();
+    _requestFreshOrder();
+  }
+
+  /// 이미 받아 둔 신청이 있으면 최신 서버 값으로 다시 받은 뒤에 수량을 채운다.
+  void _requestFreshOrder() {
     final editId = widget.editOrderId;
-    if (editId != null && ref.exists(orderProvider(editId))) {
-      final current = ref.read(orderProvider(editId));
-      if (current.hasValue || current.hasError || current.isLoading) {
-        _awaitingFreshOrder = true;
-        if (!current.isLoading) {
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (!mounted) return;
-            final latest = ref.read(orderProvider(editId));
-            if (!latest.isLoading) {
-              ref.invalidate(orderProvider(editId));
-            }
-          });
-        }
-      }
+    if (editId == null || !ref.exists(orderProvider(editId))) return;
+    final current = ref.read(orderProvider(editId));
+    if (!(current.hasValue || current.hasError || current.isLoading)) return;
+    _awaitingFreshOrder = true;
+    if (current.isLoading) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final latest = ref.read(orderProvider(editId));
+      if (!latest.isLoading) ref.invalidate(orderProvider(editId));
+    });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // 수정 중에 다른 탭으로 나가면 수정을 그만둔 것으로 본다.
+    // 다시 들어오면 서버의 최신 신청으로 처음부터 채운다(나간 뒤 남은 수량이 되살아나지 않게).
+    final active = TickerMode.valuesOf(context).enabled;
+    if (_editing && _wasActive && !active) {
+      _editQuantities = {};
+      _prefilledFor = null;
+      _editDirty = false;
+    } else if (_editing && !_wasActive && active) {
+      _requestFreshOrder();
     }
+    _wasActive = active;
   }
 
   @override
@@ -245,6 +263,10 @@ class _TextbooksPageState extends ConsumerState<TextbooksPage> {
 
     final loading = [textbooks, categories, round, editOrder];
     if (loading.any((v) => v.isLoading && !v.hasUsableValue)) {
+      return const LoadingView();
+    }
+    // 수정할 신청을 최신 값으로 채우기 전에는 0권으로 보이지 않게 기다린다.
+    if (_editing && order != null && _prefilledFor != order.id) {
       return const LoadingView();
     }
     final error = loading.where((v) => v.hasError).firstOrNull;

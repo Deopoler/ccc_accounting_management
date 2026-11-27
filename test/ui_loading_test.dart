@@ -1026,7 +1026,7 @@ void main() {
     expect(find.text('입금자51'), findsNothing);
   });
 
-  testWidgets('교재 신청 수정은 탭 전환 시 유지되고 취소 시 초기화·브랜치 리셋되며 재진입 시 최신 주문 로드 전까지 잠긴다', (
+  testWidgets('교재 신청 수정은 다른 탭으로 나가면 그만둔 것으로 보고, 취소 시 브랜치 리셋, 재진입 시 최신 주문으로만 채운다', (
     tester,
   ) async {
     final h = _Harness();
@@ -1042,12 +1042,13 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('선택 4권'), findsOneWidget);
 
-    // 임시 탭 전환 후 복귀해도 제출 전 수정 수량은 유지된다.
+    // 다른 탭으로 나갔다 오면 제출 안 한 수정은 버리고 서버의 최신 신청으로 다시 채운다.
     router.go('/home');
     await tester.pumpAndSettle();
     router.go('/textbooks?edit=o1&category=c1');
     await tester.pumpAndSettle();
-    expect(find.text('선택 4권'), findsOneWidget);
+    expect(find.text('선택 4권'), findsNothing);
+    expect(find.text('선택 3권'), findsOneWidget);
 
     // 수정 취소 시 /my-orders 로 이동하고 교재 탭 브랜치도 /textbooks 로 초기화된다.
     await tester.tap(find.widgetWithText(TextButton, '수정 취소'));
@@ -1066,14 +1067,9 @@ void main() {
       of: find.byTooltip('더하기'),
       matching: find.byType(IconButton),
     );
+    // 최신 응답 전에는 이전 수량(3권)이나 0권을 보여 주지 않고 로딩으로 기다린다.
     expect(find.text('선택 3권'), findsNothing);
-    expect(tester.widget<IconButton>(plusButton).onPressed, isNull);
-    expect(
-      tester
-          .widget<FilledButton>(find.widgetWithText(FilledButton, '수정하기'))
-          .onPressed,
-      isNull,
-    );
+    expect(find.byType(LoadingView), findsWidgets);
 
     editCompleter.complete(_order('o1', 'u1', '수정 대상 교재', qty: 2));
     await tester.pumpAndSettle();
