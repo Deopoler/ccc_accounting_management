@@ -6,22 +6,106 @@ import '../../features/auth/presentation/account_menu_button.dart';
 import '../../features/auth/presentation/auth_providers.dart';
 import '../../features/campus/presentation/campus_switcher.dart';
 import '../../features/push/presentation/push_providers.dart';
+import '../router/route_revalidation.dart';
 import '../router/routes.dart';
 import '../theme/app_theme.dart';
 import 'focus_ring.dart';
 import 'responsive.dart';
 
 /// 로그인 후 화면 공통 틀. 데스크톱은 사이드 네비게이션, 모바일은 하단 네비게이션.
-class AppShell extends ConsumerWidget {
-  const AppShell({super.key, required this.location, required this.child});
+class AppShell extends ConsumerStatefulWidget {
+  const AppShell({
+    super.key,
+    required this.location,
+    required this.child,
+    this.uri,
+    this.navigationShell,
+  });
 
   final String location;
   final Widget child;
+  final Uri? uri;
+  final StatefulNavigationShell? navigationShell;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<AppShell> createState() => _AppShellState();
+}
+
+class _AppShellState extends ConsumerState<AppShell> {
+  static const _textbooksBranchIndex = 1;
+
+  Uri? _lastTextbooksUri;
+
+  @override
+  void initState() {
+    super.initState();
+    _recordTextbooksUri();
+  }
+
+  Uri get _currentUri => widget.uri ?? Uri.parse(widget.location);
+
+  static bool _sameRevalidationTarget(Uri a, Uri b) =>
+      a.path == b.path &&
+      a.queryParameters['edit'] == b.queryParameters['edit'];
+
+  @override
+  void didUpdateWidget(covariant AppShell oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _recordTextbooksUri();
+    final oldUri = oldWidget.uri ?? Uri.parse(oldWidget.location);
+    final targetUri = _currentUri;
+    if (!_sameRevalidationTarget(oldUri, targetUri)) {
+      // 새 화면이 그려지기 전에 이미 불러온 것만 골라 둔다(첫 방문은 다시 받지 않는다).
+      final loaded = loadedRouteProviders(ref, targetUri);
+      if (loaded.isEmpty) return;
+      // Wait for TickerMode on the newly active IndexedStack branch to resume
+      // before invalidating, so Riverpod refreshes in-place instead of disposing.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _sameRevalidationTarget(_currentUri, targetUri)) {
+          revalidateProviders(ref, loaded);
+        }
+      });
+    }
+  }
+
+  void _recordTextbooksUri() {
+    if (widget.location == AppRoutes.textbooks ||
+        widget.location.startsWith('${AppRoutes.textbooks}/')) {
+      _lastTextbooksUri = widget.uri ?? Uri.parse(widget.location);
+    }
+  }
+
+  void _goBranch(int index) {
+    final shell = widget.navigationShell;
+    if (shell == null) return;
+    final resettingTextbooks =
+        index == _textbooksBranchIndex &&
+        _lastTextbooksUri != null &&
+        (_lastTextbooksUri!.path != AppRoutes.textbooks ||
+            _lastTextbooksUri!.queryParameters.containsKey('edit'));
+    shell.goBranch(
+      index,
+      initialLocation: index == shell.currentIndex || resettingTextbooks,
+    );
+  }
+
+  void _navigateToPath(String path) {
+    final shell = widget.navigationShell;
+    if (shell != null) {
+      final memberIndex = memberDestinations.indexWhere((d) => d.path == path);
+      if (memberIndex >= 0) {
+        _goBranch(memberIndex);
+        return;
+      }
+    }
+    context.go(path);
+  }
+
+  @override
+  Widget build(BuildContext context) {
     // 회원이 로그인했을 때 이미 알림 권한이 허용된 기기면 자동으로 구독을 등록한다.
     ref.watch(signupPushProvider);
+    final location = widget.location;
     final isAdmin = ref.watch(isAdminProvider);
     final isCentral = ref.watch(isCentralAdminProvider);
     final desktop = isDesktop(context);
@@ -55,10 +139,11 @@ class AppShell extends ConsumerWidget {
               location: location,
               isAdmin: isAdmin,
               isCentral: isCentral,
+              onSelect: _navigateToPath,
             ),
             const VerticalDivider(width: 1, thickness: 1),
             Expanded(
-              child: Scaffold(appBar: appBar, body: child),
+              child: Scaffold(appBar: appBar, body: widget.child),
             ),
           ],
         ),
@@ -79,7 +164,7 @@ class AppShell extends ConsumerWidget {
 
     return Scaffold(
       appBar: appBar,
-      body: child,
+      body: widget.child,
       bottomNavigationBar: DecoratedBox(
         // 그림자 대신 얇은 구분선
         decoration: BoxDecoration(
@@ -87,7 +172,13 @@ class AppShell extends ConsumerWidget {
         ),
         child: NavigationBar(
           selectedIndex: selected ?? 0,
-          onDestinationSelected: (i) => context.go(destinations[i].path),
+          onDestinationSelected: (i) {
+            if (widget.navigationShell != null) {
+              _goBranch(i);
+            } else {
+              context.go(destinations[i].path);
+            }
+          },
           destinations: [
             for (final d in destinations)
               NavigationDestination(
@@ -113,11 +204,13 @@ class _SideNav extends StatelessWidget {
     required this.location,
     required this.isAdmin,
     required this.isCentral,
+    required this.onSelect,
   });
 
   final String location;
   final bool isAdmin;
   final bool isCentral;
+  final ValueChanged<String> onSelect;
 
   @override
   Widget build(BuildContext context) {
@@ -150,7 +243,7 @@ class _SideNav extends StatelessWidget {
                 fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
               ),
             ),
-            onTap: () => context.go(d.path),
+            onTap: () => onSelect(d.path),
           ),
         ),
       );

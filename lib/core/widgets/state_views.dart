@@ -92,6 +92,47 @@ class ErrorView extends StatelessWidget {
   }
 }
 
+/// Helpers for distinguishing safe in-place refreshes from scope-change reloads.
+extension AsyncValueDisplay<T> on AsyncValue<T> {
+  /// True when data is safe to render without flashing another user's or
+  /// campus's previous state during a dependency reload or after an error.
+  bool get hasUsableValue => hasValue && !hasError && !isReloading;
+
+  /// True when refreshing already-visible data in the background.
+  bool get isBackgroundRefreshing => isRefreshing && hasValue && !hasError;
+}
+
+/// Overlays a thin progress bar at the top edge without shifting [child].
+class RefreshOverlay extends StatelessWidget {
+  const RefreshOverlay({
+    super.key,
+    required this.refreshing,
+    required this.child,
+  });
+
+  final bool refreshing;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      fit: StackFit.passthrough,
+      children: [
+        child,
+        if (refreshing)
+          const Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: ExcludeSemantics(
+              child: LinearProgressIndicator(minHeight: 2),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
 /// [AsyncValue] 의 로딩 / 에러 / 빈 상태 / 데이터를 한 번에 처리한다.
 class AsyncValueView<T> extends StatelessWidget {
   const AsyncValueView({
@@ -101,6 +142,8 @@ class AsyncValueView<T> extends StatelessWidget {
     this.onRetry,
     this.isEmpty,
     this.empty,
+    this.skipLoadingOnReload = false,
+    this.showRefreshIndicator = true,
   });
 
   final AsyncValue<T> value;
@@ -108,14 +151,32 @@ class AsyncValueView<T> extends StatelessWidget {
   final VoidCallback? onRetry;
   final bool Function(T data)? isEmpty;
   final Widget? empty;
+  final bool skipLoadingOnReload;
+  final bool showRefreshIndicator;
 
   @override
   Widget build(BuildContext context) {
-    return value.when(
-      data: (d) =>
-          (isEmpty?.call(d) ?? false) ? (empty ?? const EmptyView()) : data(d),
-      error: (e, _) => ErrorView(error: e, onRetry: onRetry),
-      loading: () => const LoadingView(),
+    final keepingData =
+        value.hasValue &&
+        !value.hasError &&
+        (value.isRefreshing || (skipLoadingOnReload && value.isReloading));
+    final Widget content;
+    if (value.isLoading && !keepingData) {
+      content = const LoadingView();
+    } else if (value.hasError && !keepingData) {
+      content = ErrorView(error: value.error!, onRetry: onRetry);
+    } else if (value.hasValue) {
+      final d = value.requireValue;
+      content = (isEmpty?.call(d) ?? false)
+          ? (empty ?? const EmptyView())
+          : data(d);
+    } else {
+      content = const LoadingView();
+    }
+    if (!showRefreshIndicator) return content;
+    return RefreshOverlay(
+      refreshing: value.isLoading && keepingData,
+      child: content,
     );
   }
 }

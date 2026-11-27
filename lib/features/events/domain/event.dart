@@ -3,6 +3,7 @@ import '../../textbooks/domain/order_round.dart';
 class Event {
   const Event({
     required this.id,
+    this.campusId = '',
     required this.title,
     required this.amount,
     required this.dueDate,
@@ -14,6 +15,7 @@ class Event {
 
   factory Event.fromJson(Map<String, dynamic> json) => Event(
     id: json['id'] as String,
+    campusId: json['campus_id'] as String? ?? '',
     title: json['title'] as String,
     amount: json['amount'] as int,
     dueDate: switch (json['due_date']) {
@@ -27,6 +29,7 @@ class Event {
   );
 
   final String id;
+  final String campusId;
   final String title;
   final int amount;
   final DateTime? dueDate;

@@ -39,24 +39,23 @@ class _AdminDepositsPageState extends ConsumerState<AdminDepositsPage> {
     super.dispose();
   }
 
+  void _resetPaging() {
+    _extraItems = [];
+    _reachedEnd = false;
+    _loadingMore = false;
+    _loadGeneration++;
+  }
+
   void _selectFilter(DepositFilter next) {
     if (_filter == next) return;
     setState(() {
       _filter = next;
-      _extraItems = [];
-      _reachedEnd = false;
-      _loadingMore = false;
-      _loadGeneration++;
+      _resetPaging();
     });
   }
 
   void _refreshAll() {
-    setState(() {
-      _extraItems = [];
-      _reachedEnd = false;
-      _loadingMore = false;
-      _loadGeneration++;
-    });
+    setState(_resetPaging);
     ref
       ..invalidate(bankDepositsProvider)
       ..invalidate(depositCountsProvider)
@@ -248,6 +247,7 @@ class _AdminDepositsPageState extends ConsumerState<AdminDepositsPage> {
   }
 
   Future<void> _openLinkDialog(BankDeposit deposit) async {
+    ref.invalidate(unpaidLinkTargetsProvider);
     final result = await showDialog<_LinkSelection>(
       context: context,
       builder: (_) => _LinkDepositDialog(deposit: deposit),
@@ -305,14 +305,26 @@ class _AdminDepositsPageState extends ConsumerState<AdminDepositsPage> {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
-    ref.listen<AsyncValue<String?>>(adminCampusIdProvider, (prev, next) {
-      if (prev?.asData?.value != next.asData?.value) {
-        setState(() {
-          _extraItems = [];
-          _reachedEnd = false;
-          _loadingMore = false;
-          _loadGeneration++;
-        });
+    ref.listen<String?>(adminCampusIdProvider, (prev, next) {
+      if (prev != next) {
+        setState(_resetPaging);
+      }
+    });
+    ref.listen<AsyncValue<List<BankDeposit>>>(bankDepositsProvider(_filter), (
+      prev,
+      next,
+    ) {
+      if (next.isLoading && prev?.isLoading != true) {
+        _loadGeneration++;
+        if (_loadingMore) setState(() => _loadingMore = false);
+      } else if (!next.isLoading &&
+          next.hasValue &&
+          (prev == null ||
+              prev.isLoading ||
+              !identical(prev.value, next.value))) {
+        if (_extraItems.isNotEmpty || _reachedEnd || _loadingMore) {
+          setState(_resetPaging);
+        }
       }
     });
 
@@ -324,7 +336,12 @@ class _AdminDepositsPageState extends ConsumerState<AdminDepositsPage> {
       value: depositsAsync,
       onRetry: _refreshAll,
       data: (firstPage) {
-        final loaded = [...firstPage, ..._extraItems];
+        final seen = {for (final d in firstPage) d.id};
+        final loaded = [
+          ...firstPage,
+          for (final d in _extraItems)
+            if (seen.add(d.id)) d,
+        ];
         final totalInFilter = counts?.countFor(_filter);
         final hasMore =
             !_reachedEnd &&
@@ -344,7 +361,7 @@ class _AdminDepositsPageState extends ConsumerState<AdminDepositsPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  if (countsAsync.hasError) ...[
+                  if (countsAsync.hasError && !countsAsync.isLoading) ...[
                     Card(
                       child: Padding(
                         padding: const EdgeInsets.symmetric(
@@ -768,14 +785,18 @@ class _LinkDepositDialogState extends ConsumerState<_LinkDepositDialog> {
     }
   }
 
-  int _freshCandidateAmount(DepositCandidate cand, UnpaidLinkTargets targets) {
+  /// Returns the current unpaid amount for [cand] from [targets], or null if
+  /// any of its target IDs is no longer unpaid.
+  int? _freshCandidateAmount(DepositCandidate cand, UnpaidLinkTargets targets) {
+    if (!cand.isLinkable) return null;
     if (cand.isEvent) {
       for (final p in targets.eventPayments) {
         if (p.paymentId == cand.eventPaymentId) return p.amount;
       }
-      return cand.amount;
+      return null;
     }
     final wanted = cand.orderIds.toSet();
+    if (wanted.isEmpty) return null;
     var matchedCount = 0;
     var sum = 0;
     for (final o in targets.orders) {
@@ -784,12 +805,28 @@ class _LinkDepositDialogState extends ConsumerState<_LinkDepositDialog> {
         sum += o.amount;
       }
     }
-    return matchedCount == wanted.length ? sum : cand.amount;
+    return matchedCount == wanted.length ? sum : null;
+  }
+
+  void _pruneSelections(UnpaidLinkTargets targets) {
+    final validOrderIds = {for (final o in targets.orders) o.orderId};
+    final validEventIds = {for (final p in targets.eventPayments) p.paymentId};
+    final removedOrders = _selectedOrderIds.any(
+      (id) => !validOrderIds.contains(id),
+    );
+    final clearEvent =
+        _selectedEventPaymentId != null &&
+        !validEventIds.contains(_selectedEventPaymentId);
+    if (!removedOrders && !clearEvent) return;
+    setState(() {
+      _selectedOrderIds.retainAll(validOrderIds);
+      if (clearEvent) _selectedEventPaymentId = null;
+    });
   }
 
   void _pickCandidate(DepositCandidate cand, UnpaidLinkTargets targets) {
-    if (!cand.isLinkable) return;
     final amount = _freshCandidateAmount(cand, targets);
+    if (amount == null) return;
     if (cand.isEvent) {
       Navigator.pop(
         context,
@@ -798,7 +835,10 @@ class _LinkDepositDialogState extends ConsumerState<_LinkDepositDialog> {
     } else {
       Navigator.pop(
         context,
-        _OrdersLinkSelection(cand.orderIds, targetAmount: amount),
+        _OrdersLinkSelection(
+          cand.orderIds.toSet().toList(),
+          targetAmount: amount,
+        ),
       );
     }
   }
@@ -820,14 +860,15 @@ class _LinkDepositDialogState extends ConsumerState<_LinkDepositDialog> {
         _EventLinkSelection(payment.paymentId, targetAmount: payment.amount),
       );
     } else {
-      if (_selectedOrderIds.isEmpty) return;
-      final selectedSum = targets.orders
+      final validOrders = targets.orders
           .where((o) => _selectedOrderIds.contains(o.orderId))
-          .fold<int>(0, (sum, o) => sum + o.amount);
+          .toList();
+      if (validOrders.isEmpty) return;
+      final selectedSum = validOrders.fold<int>(0, (sum, o) => sum + o.amount);
       Navigator.pop(
         context,
         _OrdersLinkSelection(
-          _selectedOrderIds.toList(),
+          [for (final o in validOrders) o.orderId],
           targetAmount: selectedSum,
         ),
       );
@@ -836,20 +877,49 @@ class _LinkDepositDialogState extends ConsumerState<_LinkDepositDialog> {
 
   @override
   Widget build(BuildContext context) {
+    ref.listen<AsyncValue<UnpaidLinkTargets>>(unpaidLinkTargetsProvider, (
+      _,
+      next,
+    ) {
+      if (!next.hasUsableValue || next.isLoading) return;
+      _pruneSelections(next.requireValue);
+    });
+
     final c = context.colors;
     final theme = Theme.of(context);
     final targetsAsync = ref.watch(unpaidLinkTargetsProvider);
-    final loadedTargets = targetsAsync.asData?.value;
+    final loadedTargets = targetsAsync.hasUsableValue && !targetsAsync.isLoading
+        ? targetsAsync.requireValue
+        : null;
     final availableHeight =
         MediaQuery.sizeOf(context).height -
         MediaQuery.viewInsetsOf(context).bottom;
     final d = widget.deposit;
-    final linkableCandidates = d.candidates.where((x) => x.isLinkable).toList();
+    final freshCandidates = loadedTargets == null
+        ? const <(DepositCandidate, int)>[]
+        : [
+            for (final cand in d.candidates)
+              if (_freshCandidateAmount(cand, loadedTargets)
+                  case final amount?)
+                (cand, amount),
+          ];
+    final validOrderIds = loadedTargets == null
+        ? const <String>{}
+        : {for (final o in loadedTargets.orders) o.orderId};
+    final validEventIds = loadedTargets == null
+        ? const <String>{}
+        : {for (final p in loadedTargets.eventPayments) p.paymentId};
+    final activeSelectedOrderIds = _selectedOrderIds
+        .where(validOrderIds.contains)
+        .toSet();
+    final activeSelectedEventId = validEventIds.contains(_selectedEventPaymentId)
+        ? _selectedEventPaymentId
+        : null;
     final canSubmit =
         loadedTargets != null &&
         (_tab == _LinkTab.events
-            ? _selectedEventPaymentId != null
-            : _selectedOrderIds.isNotEmpty);
+            ? activeSelectedEventId != null
+            : activeSelectedOrderIds.isNotEmpty);
 
     return AlertDialog(
       title: const Text('입금 대상 연결'),
@@ -868,7 +938,7 @@ class _LinkDepositDialogState extends ConsumerState<_LinkDepositDialog> {
                 style: theme.textTheme.titleSmall,
               ),
               const SizedBox(height: 10),
-              if (linkableCandidates.isNotEmpty) ...[
+              if (freshCandidates.isNotEmpty) ...[
                 Text(
                   '추천 후보',
                   style: TextStyle(
@@ -878,7 +948,7 @@ class _LinkDepositDialogState extends ConsumerState<_LinkDepositDialog> {
                   ),
                 ),
                 const SizedBox(height: 6),
-                for (final cand in linkableCandidates.take(4))
+                for (final (cand, freshAmount) in freshCandidates.take(4))
                   Padding(
                     padding: const EdgeInsets.only(bottom: 6),
                     child: Container(
@@ -901,14 +971,7 @@ class _LinkDepositDialogState extends ConsumerState<_LinkDepositDialog> {
                                   style: theme.textTheme.bodyMedium,
                                 ),
                                 Text(
-                                  formatWon(
-                                    loadedTargets == null
-                                        ? cand.amount
-                                        : _freshCandidateAmount(
-                                            cand,
-                                            loadedTargets,
-                                          ),
-                                  ),
+                                  formatWon(freshAmount),
                                   style: theme.textTheme.bodySmall,
                                 ),
                               ],
@@ -967,16 +1030,18 @@ class _LinkDepositDialogState extends ConsumerState<_LinkDepositDialog> {
                         return const EmptyView(message: '연결할 미납 교재 신청이 없습니다.');
                       }
                       final selectedSum = targets.orders
-                          .where((o) => _selectedOrderIds.contains(o.orderId))
+                          .where(
+                            (o) => activeSelectedOrderIds.contains(o.orderId),
+                          )
                           .fold<int>(0, (sum, o) => sum + o.amount);
                       return Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          if (_selectedOrderIds.isNotEmpty)
+                          if (activeSelectedOrderIds.isNotEmpty)
                             Padding(
                               padding: const EdgeInsets.only(bottom: 6),
                               child: Text(
-                                '선택 합계 ${formatWon(selectedSum)} (${_selectedOrderIds.length}건)',
+                                '선택 합계 ${formatWon(selectedSum)} (${activeSelectedOrderIds.length}건)',
                                 style: TextStyle(
                                   fontSize: 13,
                                   fontWeight: FontWeight.w600,
@@ -990,7 +1055,7 @@ class _LinkDepositDialogState extends ConsumerState<_LinkDepositDialog> {
                                 for (final o in filtered)
                                   CheckboxListTile(
                                     contentPadding: EdgeInsets.zero,
-                                    value: _selectedOrderIds.contains(
+                                    value: activeSelectedOrderIds.contains(
                                       o.orderId,
                                     ),
                                     onChanged: (v) => setState(() {
@@ -1031,12 +1096,12 @@ class _LinkDepositDialogState extends ConsumerState<_LinkDepositDialog> {
                             contentPadding: const EdgeInsets.symmetric(
                               horizontal: 8,
                             ),
-                            selected: _selectedEventPaymentId == p.paymentId,
+                            selected: activeSelectedEventId == p.paymentId,
                             leading: Icon(
-                              _selectedEventPaymentId == p.paymentId
+                              activeSelectedEventId == p.paymentId
                                   ? Icons.radio_button_checked
                                   : Icons.radio_button_off,
-                              color: _selectedEventPaymentId == p.paymentId
+                              color: activeSelectedEventId == p.paymentId
                                   ? c.primary
                                   : c.textSecondary,
                             ),

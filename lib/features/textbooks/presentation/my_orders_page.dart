@@ -8,6 +8,7 @@ import '../../../core/utils/formatters.dart';
 import '../../../core/widgets/feedback.dart';
 import '../../../core/widgets/responsive.dart';
 import '../../../core/widgets/state_views.dart';
+import '../../deposits/presentation/deposit_providers.dart';
 import '../../push/presentation/signup_push_card.dart';
 import '../../settings/presentation/bank_account_card.dart';
 import '../domain/order_round.dart';
@@ -28,20 +29,33 @@ class MyOrdersPage extends ConsumerWidget {
       ref.invalidate(currentRoundProvider);
     }
 
+    if ((orders.isLoading && !orders.hasUsableValue) ||
+        (round.isLoading && !round.hasUsableValue)) {
+      return const LoadingView();
+    }
     if (orders.hasError || round.hasError) {
       return ErrorView(error: (orders.error ?? round.error)!, onRetry: retry);
     }
-    if (!orders.hasValue || !round.hasValue) return const LoadingView();
+    if (!orders.hasUsableValue ||
+        !round.hasUsableValue ||
+        round.requireValue == null) {
+      return const LoadingView();
+    }
 
+    final refreshing =
+        orders.isBackgroundRefreshing || round.isBackgroundRefreshing;
     final list = orders.requireValue;
-    final current = round.requireValue;
+    final current = round.requireValue!;
     if (list.isEmpty) {
-      return EmptyView(
-        icon: Icons.receipt_long_outlined,
-        message: '아직 신청한 교재가 없습니다.',
-        action: FilledButton(
-          onPressed: () => context.go(AppRoutes.textbooks),
-          child: const Text('교재 신청하러 가기'),
+      return RefreshOverlay(
+        refreshing: refreshing,
+        child: EmptyView(
+          icon: Icons.receipt_long_outlined,
+          message: '아직 신청한 교재가 없습니다.',
+          action: FilledButton(
+            onPressed: () => context.go(AppRoutes.textbooks),
+            child: const Text('교재 신청하러 가기'),
+          ),
         ),
       );
     }
@@ -50,20 +64,23 @@ class MyOrdersPage extends ConsumerWidget {
         .where((o) => o.status == OrderStatus.requested)
         .fold(0, (sum, o) => sum + o.totalPrice);
 
-    return ScrollPageBody(
-      maxWidth: 800,
-      children: [
-        if (unpaid > 0) ...[
-          BankAccountCard(amount: unpaid, title: '입금 대기 금액'),
+    return RefreshOverlay(
+      refreshing: refreshing,
+      child: ScrollPageBody(
+        maxWidth: 800,
+        children: [
+          if (unpaid > 0) ...[
+            BankAccountCard(amount: unpaid, title: '입금 대기 금액'),
+            const SizedBox(height: 16),
+          ],
+          const OrderPushCard(),
           const SizedBox(height: 16),
+          for (final order in list) ...[
+            _OrderCard(order: order, currentRound: current),
+            const SizedBox(height: 12),
+          ],
         ],
-        const OrderPushCard(),
-        const SizedBox(height: 16),
-        for (final order in list) ...[
-          _OrderCard(order: order, currentRound: current),
-          const SizedBox(height: 12),
-        ],
-      ],
+      ),
     );
   }
 }
@@ -94,6 +111,7 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
     try {
       await ref.read(textbookRepositoryProvider).cancelOrder(widget.order.id);
       ref.invalidate(myOrdersProvider);
+      ref.invalidate(unpaidLinkTargetsProvider);
       if (mounted) showSnack(context, '신청이 취소되었습니다.');
     } catch (e) {
       if (mounted) showErrorSnack(context, e);

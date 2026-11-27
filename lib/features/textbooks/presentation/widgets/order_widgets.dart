@@ -54,7 +54,7 @@ class QuantityStepper extends StatelessWidget {
   });
 
   final int value;
-  final ValueChanged<int> onChanged;
+  final ValueChanged<int>? onChanged;
   final bool canIncrement;
   final int max;
 
@@ -82,7 +82,9 @@ class QuantityStepper extends StatelessWidget {
           IconButton(
             tooltip: '빼기',
             style: style,
-            onPressed: value > 0 ? () => onChanged(value - 1) : null,
+            onPressed: onChanged != null && value > 0
+                ? () => onChanged!(value - 1)
+                : null,
             icon: const Icon(Icons.remove, size: 18),
           ),
           SizedBox(
@@ -101,8 +103,8 @@ class QuantityStepper extends StatelessWidget {
           IconButton(
             tooltip: '더하기',
             style: style,
-            onPressed: canIncrement && value < max
-                ? () => onChanged(value + 1)
+            onPressed: onChanged != null && canIncrement && value < max
+                ? () => onChanged!(value + 1)
                 : null,
             icon: const Icon(Icons.add, size: 18),
           ),

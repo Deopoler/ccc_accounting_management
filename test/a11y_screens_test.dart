@@ -78,6 +78,7 @@ final _members = [
 
 final _event = Event(
   id: 'e1',
+  campusId: 'k',
   title: '겨울 수련회',
   amount: 30000,
   dueDate: DateTime(2026, 11, 30),

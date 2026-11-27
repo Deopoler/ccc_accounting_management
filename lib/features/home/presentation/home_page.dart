@@ -22,46 +22,54 @@ class HomePage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final profile = ref.watch(currentProfileProvider).value;
+    final refreshing =
+        ref.watch(myOrdersProvider).isBackgroundRefreshing ||
+        ref.watch(currentRoundProvider).isBackgroundRefreshing ||
+        ref.watch(eventsProvider(CampusScope.member)).isBackgroundRefreshing ||
+        ref.watch(myEventPaymentsProvider).isBackgroundRefreshing;
     final theme = Theme.of(context);
 
-    return ScrollPageBody(
-      maxWidth: 900,
-      children: [
-        if (profile != null)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(4, 4, 4, 16),
-            child: Text(
-              '${profile.name}님, 안녕하세요',
-              style: theme.textTheme.headlineSmall?.copyWith(
-                fontWeight: FontWeight.w700,
+    return RefreshOverlay(
+      refreshing: refreshing,
+      child: ScrollPageBody(
+        maxWidth: 900,
+        children: [
+          if (profile != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(4, 4, 4, 16),
+              child: Text(
+                '${profile.name}님, 안녕하세요',
+                style: theme.textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
               ),
             ),
-          ),
-        LayoutBuilder(
-          builder: (context, c) {
-            if (c.maxWidth < 640) {
-              return const Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  _TextbookSummaryCard(),
-                  SizedBox(height: 12),
-                  _EventSummaryCard(),
-                ],
+          LayoutBuilder(
+            builder: (context, c) {
+              if (c.maxWidth < 640) {
+                return const Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _TextbookSummaryCard(),
+                    SizedBox(height: 12),
+                    _EventSummaryCard(),
+                  ],
+                );
+              }
+              return const IntrinsicHeight(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Expanded(child: _TextbookSummaryCard()),
+                    SizedBox(width: 12),
+                    Expanded(child: _EventSummaryCard()),
+                  ],
+                ),
               );
-            }
-            return const IntrinsicHeight(
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Expanded(child: _TextbookSummaryCard()),
-                  SizedBox(width: 12),
-                  Expanded(child: _EventSummaryCard()),
-                ],
-              ),
-            );
-          },
-        ),
-      ],
+            },
+          ),
+        ],
+      ),
     );
   }
 }
@@ -156,7 +164,14 @@ class _TextbookSummaryCard extends ConsumerWidget {
     final round = ref.watch(currentRoundProvider);
 
     Widget body;
-    if (orders.hasError || round.hasError) {
+    if ((orders.isLoading && !orders.hasUsableValue) ||
+        (round.isLoading && !round.hasUsableValue)) {
+      body = const _CardPlaceholder(
+        firstLabel: '이번 회차 신청',
+        secondLabel: '입금 대기',
+        hasTopLine: true,
+      );
+    } else if (orders.hasError || round.hasError) {
       body = ErrorView(
         error: (orders.error ?? round.error)!,
         onRetry: () {
@@ -164,10 +179,16 @@ class _TextbookSummaryCard extends ConsumerWidget {
           ref.invalidate(currentRoundProvider);
         },
       );
-    } else if (!orders.hasValue || !round.hasValue) {
-      body = const LoadingView();
+    } else if (!orders.hasUsableValue ||
+        !round.hasUsableValue ||
+        round.requireValue == null) {
+      body = const _CardPlaceholder(
+        firstLabel: '이번 회차 신청',
+        secondLabel: '입금 대기',
+        hasTopLine: true,
+      );
     } else {
-      final current = round.requireValue;
+      final current = round.requireValue!;
       final list = orders.requireValue;
       final thisRound = list
           .where(
@@ -332,7 +353,14 @@ class _EventSummaryCard extends ConsumerWidget {
     final theme = Theme.of(context);
 
     Widget body;
-    if (events.hasError || payments.hasError) {
+    if ((events.isLoading && !events.hasUsableValue) ||
+        (payments.isLoading && !payments.hasUsableValue)) {
+      body = const _CardPlaceholder(
+        firstLabel: '완납',
+        secondLabel: '미납',
+        hasBottomLine: true,
+      );
+    } else if (events.hasError || payments.hasError) {
       body = ErrorView(
         error: (events.error ?? payments.error)!,
         onRetry: () {
@@ -340,8 +368,12 @@ class _EventSummaryCard extends ConsumerWidget {
           ref.invalidate(myEventPaymentsProvider);
         },
       );
-    } else if (!events.hasValue || !payments.hasValue) {
-      body = const LoadingView();
+    } else if (!events.hasUsableValue || !payments.hasUsableValue) {
+      body = const _CardPlaceholder(
+        firstLabel: '완납',
+        secondLabel: '미납',
+        hasBottomLine: true,
+      );
     } else {
       final mine = payments.requireValue;
       final targets = events.requireValue.where((e) => mine.containsKey(e.id));
@@ -423,6 +455,63 @@ class _EventSummaryCard extends ConsumerWidget {
       actionLabel: '이벤트 보기',
       onAction: () => context.go(AppRoutes.events),
       child: body,
+    );
+  }
+}
+
+/// Static placeholder matching the summary card metrics on first load.
+class _CardPlaceholder extends StatelessWidget {
+  const _CardPlaceholder({
+    required this.firstLabel,
+    required this.secondLabel,
+    this.hasTopLine = false,
+    this.hasBottomLine = false,
+  });
+
+  final String firstLabel;
+  final String secondLabel;
+  final bool hasTopLine;
+  final bool hasBottomLine;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    Widget bar(double width, double height) => Align(
+      alignment: Alignment.centerLeft,
+      child: Container(
+        width: width,
+        height: height,
+        decoration: BoxDecoration(
+          color: c.surfaceStrong,
+          borderRadius: BorderRadius.circular(6),
+        ),
+      ),
+    );
+    Widget figure(String label, double width) => Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: TextStyle(fontSize: 13, color: c.textSecondary)),
+        const SizedBox(height: 8),
+        bar(width, 24),
+      ],
+    );
+
+    return Semantics(
+      label: '불러오는 중',
+      excludeSemantics: true,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (hasTopLine) ...[bar(180, 14), const SizedBox(height: 14)],
+          Row(
+            children: [
+              Expanded(child: figure(firstLabel, 56)),
+              Expanded(child: figure(secondLabel, 84)),
+            ],
+          ),
+          if (hasBottomLine) ...[const SizedBox(height: 14), bar(160, 14)],
+        ],
+      ),
     );
   }
 }

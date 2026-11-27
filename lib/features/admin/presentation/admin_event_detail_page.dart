@@ -13,6 +13,8 @@ import '../../../core/widgets/feedback.dart';
 import '../../../core/widgets/responsive.dart';
 import '../../../core/widgets/state_views.dart';
 import '../../auth/domain/profile.dart';
+import '../../campus/presentation/campus_providers.dart';
+import '../../deposits/presentation/deposit_providers.dart';
 import '../../../core/utils/korean_search.dart';
 import '../../events/domain/event.dart';
 import '../../events/presentation/event_providers.dart';
@@ -38,8 +40,15 @@ class _AdminEventDetailPageState extends ConsumerState<AdminEventDetailPage> {
   EventPaymentSort _sort = EventPaymentSort.studentId;
   final _search = TextEditingController();
   final Set<String> _busy = {};
+  String? _lastCampusId;
 
   String get _id => widget.eventId;
+
+  @override
+  void initState() {
+    super.initState();
+    _lastCampusId = ref.read(adminCampusIdProvider);
+  }
 
   @override
   void dispose() {
@@ -52,7 +61,8 @@ class _AdminEventDetailPageState extends ConsumerState<AdminEventDetailPage> {
       ..invalidate(eventsProvider)
       ..invalidate(eventSummariesProvider)
       ..invalidate(eventProvider(_id))
-      ..invalidate(eventPaymentsProvider(_id));
+      ..invalidate(eventPaymentsProvider(_id))
+      ..invalidate(unpaidLinkTargetsProvider);
   }
 
   Future<void> _toggle(EventPayment p, bool isPaid) async {
@@ -155,7 +165,8 @@ class _AdminEventDetailPageState extends ConsumerState<AdminEventDetailPage> {
       await ref.read(eventRepositoryProvider).deleteEvent(event.id);
       ref
         ..invalidate(eventsProvider)
-        ..invalidate(eventSummariesProvider);
+        ..invalidate(eventSummariesProvider)
+        ..invalidate(unpaidLinkTargetsProvider);
       if (mounted) {
         showSnack(context, '이벤트를 삭제했습니다.');
         context.go(AppRoutes.adminEvents);
@@ -187,20 +198,45 @@ class _AdminEventDetailPageState extends ConsumerState<AdminEventDetailPage> {
 
   @override
   Widget build(BuildContext context) {
+    ref.listen<String?>(adminCampusIdProvider, (_, next) {
+      if (next == null) return;
+      final prev = _lastCampusId;
+      _lastCampusId = next;
+      if (prev != null && prev != next) {
+        final router = GoRouter.maybeOf(context);
+        if (router != null &&
+            router.routerDelegate.currentConfiguration.uri.path ==
+                AppRoutes.adminEventDetail(_id)) {
+          router.go(AppRoutes.adminEvents);
+        }
+      }
+    });
+
     final event = ref.watch(eventProvider(_id));
     final payments = ref.watch(eventPaymentsProvider(_id));
 
+    if ((event.isLoading && !event.hasUsableValue) ||
+        (payments.isLoading && !payments.hasUsableValue)) {
+      return const LoadingView();
+    }
     if (event.hasError || payments.hasError) {
       return ErrorView(
         error: (event.error ?? payments.error)!,
         onRetry: _refreshLists,
       );
     }
-    if (!event.hasValue || !payments.hasValue) return const LoadingView();
+    if (!event.hasUsableValue || !payments.hasUsableValue) {
+      return const LoadingView();
+    }
 
+    final refreshing =
+        event.isBackgroundRefreshing || payments.isBackgroundRefreshing;
     final e = event.requireValue;
     if (e == null) {
-      return const EmptyView(message: '이벤트를 찾을 수 없습니다.');
+      return RefreshOverlay(
+        refreshing: refreshing,
+        child: const EmptyView(message: '이벤트를 찾을 수 없습니다.'),
+      );
     }
     final all = payments.requireValue;
     final summary = EventSummary.fromPayments(all, e);
@@ -217,7 +253,9 @@ class _AdminEventDetailPageState extends ConsumerState<AdminEventDetailPage> {
     final visible = sortEventPayments(filtered, _sort);
 
     final theme = Theme.of(context);
-    return ScrollPageBody(
+    return RefreshOverlay(
+      refreshing: refreshing,
+      child: ScrollPageBody(
       maxWidth: 900,
       children: [
         Card(
@@ -389,6 +427,7 @@ class _AdminEventDetailPageState extends ConsumerState<AdminEventDetailPage> {
             ),
           ),
       ],
+      ),
     );
   }
 }
