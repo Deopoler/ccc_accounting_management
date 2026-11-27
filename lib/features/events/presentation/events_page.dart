@@ -19,6 +19,7 @@ class EventsPage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final campusId = ref.watch(myCampusIdProvider);
     final events = ref.watch(eventsProvider(CampusScope.member));
     final payments = ref.watch(myEventPaymentsProvider);
     final refreshing =
@@ -38,7 +39,7 @@ class EventsPage extends ConsumerWidget {
       );
     }
 
-    if (!events.hasUsableValue) {
+    if (campusId == null || !events.hasUsableValue) {
       return RefreshOverlay(
         refreshing: refreshing,
         child: ScrollPageBody(

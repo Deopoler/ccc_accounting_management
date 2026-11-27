@@ -11,6 +11,7 @@ import '../../../core/widgets/skeleton.dart';
 import '../../../core/widgets/state_views.dart';
 import '../../auth/domain/profile.dart';
 import '../../auth/presentation/auth_providers.dart';
+import '../../campus/presentation/campus_providers.dart';
 import 'member_providers.dart';
 
 /// 회원 관리: 가입 승인, 관리자 지정.
@@ -178,12 +179,15 @@ class _AdminMembersPageState extends ConsumerState<AdminMembersPage> {
 
   @override
   Widget build(BuildContext context) {
+    final activeCampusId = ref.watch(adminCampusIdProvider);
     final members = ref.watch(membersProvider);
     final me = ref.watch(currentUserIdProvider);
     final iAmCentral = ref.watch(isCentralAdminProvider);
 
     return AsyncValueView(
-      value: members,
+      value: activeCampusId == null
+          ? const AsyncLoading<List<Profile>>()
+          : members,
       loading: const _MembersLoadingView(),
       onRetry: () => ref.invalidate(membersProvider),
       data: (all) {

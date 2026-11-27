@@ -10,6 +10,7 @@ import '../../../core/widgets/responsive.dart';
 import '../../../core/widgets/skeleton.dart';
 import '../../../core/widgets/state_views.dart';
 import '../../campus/presentation/campus_providers.dart';
+import '../../deposits/presentation/deposit_providers.dart';
 import '../../deposits/presentation/deposit_settings_card.dart';
 import '../../push/presentation/signup_push_card.dart';
 import '../../textbooks/domain/order_round.dart';
@@ -22,10 +23,14 @@ class AdminSettingsPage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final activeCampusId = ref.watch(adminCampusIdProvider);
     final account = ref.watch(bankAccountProvider(CampusScope.admin));
     final currentRound = ref.watch(adminCurrentRoundProvider);
+    final depositSettings = ref.watch(depositSettingsProvider);
     final refreshing =
-        account.isBackgroundRefreshing || currentRound.isBackgroundRefreshing;
+        account.isBackgroundRefreshing ||
+        currentRound.isBackgroundRefreshing ||
+        depositSettings.isBackgroundRefreshing;
 
     return RefreshOverlay(
       refreshing: refreshing,
@@ -33,7 +38,9 @@ class AdminSettingsPage extends ConsumerWidget {
         maxWidth: 640,
         children: [
           AsyncValueView<BankAccount>(
-            value: account,
+            value: activeCampusId == null
+                ? const AsyncLoading<BankAccount>()
+                : account,
             showRefreshIndicator: false,
             loading: const _BankAccountFormPlaceholder(),
             onRetry: () => ref.invalidate(bankAccountProvider),
@@ -290,6 +297,7 @@ class _RoundDeadlineFormState extends ConsumerState<_RoundDeadlineForm> {
 
   @override
   Widget build(BuildContext context) {
+    final activeCampusId = ref.watch(adminCampusIdProvider);
     final currentRound = ref.watch(adminCurrentRoundProvider);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
@@ -304,7 +312,9 @@ class _RoundDeadlineFormState extends ConsumerState<_RoundDeadlineForm> {
           ),
           const SizedBox(height: 16),
           AsyncValueView(
-            value: currentRound,
+            value: activeCampusId == null
+                ? const AsyncLoading<OrderRound?>()
+                : currentRound,
             showRefreshIndicator: false,
             loading: const _RoundDeadlinePlaceholder(),
             onRetry: () => ref.invalidate(adminCurrentRoundProvider),

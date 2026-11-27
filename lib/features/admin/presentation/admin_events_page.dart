@@ -38,13 +38,16 @@ class AdminEventsPage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final activeCampusId = ref.watch(adminCampusIdProvider);
     final events = ref.watch(eventsProvider(CampusScope.admin));
     final summaries = ref.watch(eventSummariesProvider);
     final refreshing =
         events.isBackgroundRefreshing || summaries.isBackgroundRefreshing;
-    final eventsReady = events.hasUsableValue;
+    final eventsReady = activeCampusId != null && events.hasUsableValue;
+    final summariesReady = activeCampusId != null && summaries.hasUsableValue;
+    final summariesError = summaries.hasError && !summaries.isLoading;
     final list = eventsReady ? events.requireValue : const <Event>[];
-    final sums = summaries.hasUsableValue
+    final sums = summariesReady
         ? summaries.requireValue
         : const <String, EventSummary>{};
 
@@ -166,9 +169,14 @@ class AdminEventsPage extends ConsumerWidget {
                           const SizedBox(height: 4),
                           EventMetaLine(event: e),
                           const SizedBox(height: 12),
-                          if (summaries.hasUsableValue)
+                          if (summariesReady)
                             PaymentProgress(
                               summary: sums[e.id] ?? EventSummary.empty,
+                            )
+                          else if (summariesError)
+                            Text(
+                              '송금 현황: -',
+                              style: Theme.of(context).textTheme.bodySmall,
                             )
                           else
                             const PaymentProgressPlaceholder(),

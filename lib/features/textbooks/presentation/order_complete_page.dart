@@ -60,7 +60,7 @@ class OrderCompletePage extends ConsumerWidget {
             ),
           ),
           const SizedBox(height: 12),
-          const BankAccountCard(),
+          const BankAccountCard(expectAmount: true),
           const SizedBox(height: 12),
           const OrderPushCard(),
           const SizedBox(height: 24),

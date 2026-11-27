@@ -9,6 +9,7 @@ import '../../../core/widgets/feedback.dart';
 import '../../../core/widgets/skeleton.dart';
 import '../../../core/widgets/state_views.dart';
 import 'settings_providers.dart';
+import '../domain/bank_account.dart';
 import '../../campus/presentation/campus_providers.dart';
 
 /// 송금 계좌 안내. [amount] 가 있으면 송금할 금액, [depositName] 이 있으면 입금자명도 보여준다.
@@ -16,12 +17,14 @@ class BankAccountCard extends ConsumerWidget {
   const BankAccountCard({
     super.key,
     this.amount,
+    this.expectAmount = false,
     this.depositName,
     this.title = '송금 계좌 안내',
     this.embedded = false,
   });
 
   final int? amount;
+  final bool expectAmount;
   final String? depositName;
   final String title;
 
@@ -30,8 +33,10 @@ class BankAccountCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final campusId = ref.watch(myCampusIdProvider);
     final account = ref.watch(bankAccountProvider(CampusScope.member));
     final theme = Theme.of(context);
+    final showDepositName = depositName != null && depositName!.isNotEmpty;
 
     final c = context.colors;
     return Card(
@@ -44,7 +49,7 @@ class BankAccountCard extends ConsumerWidget {
       child: Padding(
         padding: const EdgeInsets.all(20),
         child: AsyncValueView(
-          value: account,
+          value: campusId == null ? const AsyncLoading<BankAccount>() : account,
           showRefreshIndicator: false,
           onRetry: () => ref.invalidate(bankAccountProvider),
           loading: Column(
@@ -56,10 +61,14 @@ class BankAccountCard extends ConsumerWidget {
                   label: '송금 금액',
                   value: formatWon(amount!),
                   emphasize: true,
-                ),
+                )
+              else if (expectAmount)
+                const _SkeletonInfoRow(label: '송금 금액', width: 110, fontSize: 20),
               const _SkeletonInfoRow(label: '은행', width: 90),
               const _SkeletonInfoRow(label: '계좌번호', width: 150),
               const _SkeletonInfoRow(label: '예금주', width: 80),
+              if (showDepositName)
+                const _SkeletonInfoRow(label: '입금자명', width: 110),
             ],
           ),
           data: (a) {
@@ -85,7 +94,9 @@ class BankAccountCard extends ConsumerWidget {
                     copyText: '$amount',
                     copiedMessage: '금액을 복사했습니다.',
                     emphasize: true,
-                  ),
+                  )
+                else if (expectAmount)
+                  const _SkeletonInfoRow(label: '송금 금액', width: 110, fontSize: 20),
                 _CopyRow(label: '은행', value: a.bankName),
                 _CopyRow(
                   label: '계좌번호',
@@ -96,7 +107,7 @@ class BankAccountCard extends ConsumerWidget {
                 ),
                 if (a.holder.isNotEmpty)
                   _CopyRow(label: '예금주', value: a.holder),
-                if (depositName != null && depositName!.isNotEmpty)
+                if (showDepositName)
                   _CopyRow(
                     label: '입금자명',
                     value: depositName!,
@@ -183,10 +194,15 @@ class _CopyRow extends StatelessWidget {
 }
 
 class _SkeletonInfoRow extends StatelessWidget {
-  const _SkeletonInfoRow({required this.label, required this.width});
+  const _SkeletonInfoRow({
+    required this.label,
+    required this.width,
+    this.fontSize = 16,
+  });
 
   final String label;
   final double width;
+  final double fontSize;
 
   @override
   Widget build(BuildContext context) {
@@ -207,7 +223,7 @@ class _SkeletonInfoRow extends StatelessWidget {
               ),
             ),
             Expanded(
-              child: SkeletonText(maxWidth: width, fontSize: 16),
+              child: SkeletonText(maxWidth: width, fontSize: fontSize),
             ),
           ],
         ),

@@ -241,6 +241,7 @@ class _TextbooksPageState extends ConsumerState<TextbooksPage> {
       );
     }
 
+    final campusId = ref.watch(myCampusIdProvider);
     final textbooks = ref.watch(textbooksProvider(CampusScope.member));
     final categories = ref.watch(
       textbookCategoriesProvider(CampusScope.member),
@@ -250,14 +251,15 @@ class _TextbooksPageState extends ConsumerState<TextbooksPage> {
         ? ref.watch(orderProvider(widget.editOrderId!))
         : const AsyncData<TextbookOrder?>(null);
 
+    final orderWaiting =
+        _editing &&
+        (_awaitingFreshOrder ||
+            editOrder.isLoading ||
+            editOrder.isRefreshing ||
+            !editOrder.hasUsableValue);
     // 수정 모드: 새로고침이 끝난 최신 서버 신청으로만 초기 수량을 채운다.
     final order = editOrder.hasUsableValue ? editOrder.requireValue : null;
-    final canPrefill =
-        _editing &&
-        order != null &&
-        !_awaitingFreshOrder &&
-        !editOrder.isLoading &&
-        !editOrder.isRefreshing;
+    final canPrefill = _editing && !orderWaiting && order != null;
     if (canPrefill && (_prefilledFor != order.id || !_editDirty)) {
       _prefilledFor = order.id;
       _editQuantities = {for (final i in order.items) i.textbookId: i.quantity};
@@ -268,16 +270,16 @@ class _TextbooksPageState extends ConsumerState<TextbooksPage> {
 
     final watched = [textbooks, categories, round, if (_editing) editOrder];
     final error = watched.where((v) => v.hasError && !v.isLoading).firstOrNull;
-    final roundReady = round.hasUsableValue && round.requireValue != null;
-    final booksReady = textbooks.hasUsableValue && categories.hasUsableValue;
-    // 수정할 신청을 최신 값으로 채우기 전에는 0권으로 보이지 않게 잠근다.
-    final editLocked =
-        _editing &&
-        (_awaitingFreshOrder ||
-            editOrder.isLoading ||
-            editOrder.isRefreshing ||
-            !editOrder.hasUsableValue ||
-            _prefilledFor != order?.id);
+    final roundReady =
+        campusId != null && round.hasUsableValue && round.requireValue != null;
+    final booksReady =
+        campusId != null &&
+        textbooks.hasUsableValue &&
+        categories.hasUsableValue;
+    final prefillPending =
+        _editing && (orderWaiting || (order != null && _prefilledFor != order.id));
+    // 수정할 신청을 최신 값으로 채우고 회차를 확인하기 전에는 편집을 잠근다.
+    final editLocked = _editing && (prefillPending || !roundReady);
     final refreshing =
         watched.any((v) => v.isBackgroundRefreshing) ||
         (_editing && _awaitingFreshOrder);
@@ -296,7 +298,17 @@ class _TextbooksPageState extends ConsumerState<TextbooksPage> {
       );
     }
 
-    if (round.hasUsableValue && round.requireValue == null) {
+    if (_editing && !orderWaiting && order == null) {
+      _prefilledFor = null;
+      _editQuantities = {};
+      _editDirty = false;
+      return RefreshOverlay(
+        refreshing: refreshing,
+        child: const EmptyView(message: '신청 내역을 찾을 수 없습니다.'),
+      );
+    }
+
+    if (campusId != null && round.hasUsableValue && round.requireValue == null) {
       return RefreshOverlay(
         refreshing: refreshing,
         child: const EmptyView(message: '현재 신청 가능한 회차가 없습니다.'),
@@ -304,14 +316,14 @@ class _TextbooksPageState extends ConsumerState<TextbooksPage> {
     }
 
     final currentRound = roundReady ? round.requireValue! : null;
-    final books = textbooks.hasUsableValue
+    final books = campusId != null && textbooks.hasUsableValue
         ? textbooks.requireValue
         : const <Textbook>[];
 
     final Map<String, int> quantities;
     if (_editing) {
       quantities = _editQuantities;
-    } else if (!textbooks.hasUsableValue) {
+    } else if (campusId == null || !textbooks.hasUsableValue) {
       quantities = const {};
     } else {
       final activeIds = {
@@ -331,14 +343,8 @@ class _TextbooksPageState extends ConsumerState<TextbooksPage> {
       }
     }
 
-    if (_editing && !editLocked) {
-      if (order == null) {
-        return RefreshOverlay(
-          refreshing: refreshing,
-          child: const EmptyView(message: '신청 내역을 찾을 수 없습니다.'),
-        );
-      }
-      if (currentRound != null && !order.canMemberEdit(currentRound)) {
+    if (_editing && !editLocked && order != null && currentRound != null) {
+      if (!order.canMemberEdit(currentRound)) {
         return RefreshOverlay(
           refreshing: refreshing,
           child: EmptyView(
@@ -354,9 +360,9 @@ class _TextbooksPageState extends ConsumerState<TextbooksPage> {
     }
 
     final List<Widget> content;
-    if (!booksReady) {
+    if (!booksReady || editLocked) {
       if (widget.categoryId != null) {
-        final catName = categories.hasUsableValue
+        final catName = campusId != null && categories.hasUsableValue
             ? categories.requireValue
                   .where((c) => c.id == widget.categoryId)
                   .firstOrNull
@@ -702,18 +708,29 @@ class _TextbookTilePlaceholder extends StatelessWidget {
         child: Row(
           children: [
             Expanded(
-              child: SkeletonRegion(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    SkeletonText(maxWidth: 160, fontSize: 16, announce: false),
-                    SizedBox(height: 4),
-                    SkeletonText(maxWidth: 84, fontSize: 17, announce: false),
-                  ],
-                ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SkeletonText(maxWidth: 160, fontSize: 16, announce: false),
+                  SizedBox(height: 4),
+                  SkeletonText(maxWidth: 84, fontSize: 17, announce: false),
+                ],
               ),
             ),
-            QuantityStepper(value: 0, loading: true, onChanged: null),
+            SizedBox(width: 12),
+            SizedBox(
+              height: 44,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SkeletonBox(width: 28, height: 28, radius: 8, announce: false),
+                  SizedBox(width: 10),
+                  SkeletonBox(width: 24, height: 18, announce: false),
+                  SizedBox(width: 10),
+                  SkeletonBox(width: 28, height: 28, radius: 8, announce: false),
+                ],
+              ),
+            ),
           ],
         ),
       ),

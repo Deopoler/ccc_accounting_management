@@ -23,7 +23,8 @@ class HomePage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final profileAsync = ref.watch(currentProfileProvider);
-    final profile = profileAsync.value;
+    final profile =
+        profileAsync.hasUsableValue ? profileAsync.requireValue : null;
     final refreshing =
         ref.watch(myOrdersProvider).isBackgroundRefreshing ||
         ref.watch(currentRoundProvider).isBackgroundRefreshing ||
@@ -167,6 +168,7 @@ class _TextbookSummaryCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final campusId = ref.watch(myCampusIdProvider);
     final orders = ref.watch(myOrdersProvider);
     final round = ref.watch(currentRoundProvider);
 
@@ -186,7 +188,8 @@ class _TextbookSummaryCard extends ConsumerWidget {
           ref.invalidate(currentRoundProvider);
         },
       );
-    } else if (!orders.hasUsableValue ||
+    } else if (campusId == null ||
+        !orders.hasUsableValue ||
         !round.hasUsableValue ||
         round.requireValue == null) {
       body = const _CardPlaceholder(
@@ -355,6 +358,7 @@ class _EventSummaryCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final campusId = ref.watch(myCampusIdProvider);
     final events = ref.watch(eventsProvider(CampusScope.member));
     final payments = ref.watch(myEventPaymentsProvider);
     final theme = Theme.of(context);
@@ -375,7 +379,9 @@ class _EventSummaryCard extends ConsumerWidget {
           ref.invalidate(myEventPaymentsProvider);
         },
       );
-    } else if (!events.hasUsableValue || !payments.hasUsableValue) {
+    } else if (campusId == null ||
+        !events.hasUsableValue ||
+        !payments.hasUsableValue) {
       body = const _CardPlaceholder(
         firstLabel: '완납',
         secondLabel: '미납',

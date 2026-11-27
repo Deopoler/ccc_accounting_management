@@ -329,12 +329,16 @@ class _AdminDepositsPageState extends ConsumerState<AdminDepositsPage> {
       }
     });
 
+    final activeCampusId = ref.watch(adminCampusIdProvider);
     final depositsAsync = ref.watch(bankDepositsProvider(_filter));
     final countsAsync = ref.watch(depositCountsProvider);
-    final counts = countsAsync.asData?.value;
+    final depositsReady = activeCampusId != null && depositsAsync.hasUsableValue;
+    final countsReady = activeCampusId != null && countsAsync.hasUsableValue;
+    final countsError = countsAsync.hasError && !countsAsync.isLoading;
+    final counts = countsReady ? countsAsync.requireValue : null;
     final refreshing =
-        depositsAsync.isBackgroundRefreshing ||
-        (countsAsync.isRefreshing && counts != null);
+        (activeCampusId != null && depositsAsync.isBackgroundRefreshing) ||
+        (countsReady && countsAsync.isRefreshing);
     final unparsedWithRawCount = counts?.unparsedWithRaw ?? 0;
 
     final Widget listSection;
@@ -343,7 +347,7 @@ class _AdminDepositsPageState extends ConsumerState<AdminDepositsPage> {
         error: depositsAsync.error!,
         onRetry: _refreshAll,
       );
-    } else if (!depositsAsync.hasUsableValue) {
+    } else if (!depositsReady) {
       listSection = SkeletonList.cards(
         count: 3,
         spacing: 10,
@@ -357,85 +361,93 @@ class _AdminDepositsPageState extends ConsumerState<AdminDepositsPage> {
         for (final d in _extraItems)
           if (seen.add(d.id)) d,
       ];
-      final totalInFilter = counts?.countFor(_filter);
-      final hasMore =
-          !_reachedEnd &&
-          firstPage.length >= depositPageSize &&
-          (totalInFilter == null || loaded.length < totalInFilter);
-      final visible = loaded
-          .where((d) => _matchesSearch(d, _search.text))
-          .toList();
-      final isEmptyCampus =
-          counts != null && counts.all == 0 && loaded.isEmpty;
+      if (loaded.isEmpty && counts == null && !countsError) {
+        listSection = SkeletonList.cards(
+          count: 2,
+          spacing: 10,
+          itemBuilder: (_, _) => const _DepositCardPlaceholder(),
+        );
+      } else {
+        final totalInFilter = counts?.countFor(_filter);
+        final hasMore =
+            !_reachedEnd &&
+            firstPage.length >= depositPageSize &&
+            (totalInFilter == null || loaded.length < totalInFilter);
+        final visible = loaded
+            .where((d) => _matchesSearch(d, _search.text))
+            .toList();
+        final isEmptyCampus =
+            counts != null && counts.all == 0 && loaded.isEmpty;
 
-      listSection = Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (isEmptyCampus)
-            EmptyView(
-              icon: Icons.account_balance_wallet_outlined,
-              message:
-                  '수집된 입금 내역이 아직 없습니다.\n'
-                  '설정에서 자동 입금 확인을 켜고 알림 전달을 연결해 주세요.',
-              action: OutlinedButton(
-                onPressed: () => context.go(AppRoutes.adminSettings),
-                child: const Text('설정으로 이동'),
-              ),
-            )
-          else if (visible.isEmpty)
-            EmptyView(
-              icon: Icons.check_circle_outline,
-              message: _filter == DepositFilter.needsReview &&
-                      _search.text.trim().isEmpty
-                  ? '확인이 필요한 입금이 없습니다.'
-                  : hasMore
-                  ? '불러온 ${loaded.length}건 중 조건에 맞는 입금 내역이 없습니다.'
-                  : '조건에 맞는 입금 내역이 없습니다.',
-            )
-          else
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                SectionTitle(
-                  _search.text.trim().isEmpty &&
-                          totalInFilter != null &&
-                          totalInFilter > loaded.length
-                      ? '입금 ${visible.length} / $totalInFilter건'
-                      : '입금 ${visible.length}건',
+        listSection = Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (isEmptyCampus)
+              EmptyView(
+                icon: Icons.account_balance_wallet_outlined,
+                message:
+                    '수집된 입금 내역이 아직 없습니다.\n'
+                    '설정에서 자동 입금 확인을 켜고 알림 전달을 연결해 주세요.',
+                action: OutlinedButton(
+                  onPressed: () => context.go(AppRoutes.adminSettings),
+                  child: const Text('설정으로 이동'),
                 ),
-                for (final d in visible) ...[
-                  _DepositCard(
-                    deposit: d,
-                    busy: _busy.contains(d.id),
-                    onLink: () => _openLinkDialog(d),
-                    onUndo: () => _undo(d),
-                    onClearDuplicate: () => _clearDuplicate(d),
-                    onIgnore: () => _ignore(d, ignore: true),
-                    onUnignore: () => _ignore(d, ignore: false),
-                    onRematch: () => _rematch(d),
-                    onReparse: () => _reparseOne(d),
+              )
+            else if (visible.isEmpty)
+              EmptyView(
+                icon: Icons.check_circle_outline,
+                message: _filter == DepositFilter.needsReview &&
+                        _search.text.trim().isEmpty
+                    ? '확인이 필요한 입금이 없습니다.'
+                    : hasMore
+                    ? '불러온 ${loaded.length}건 중 조건에 맞는 입금 내역이 없습니다.'
+                    : '조건에 맞는 입금 내역이 없습니다.',
+              )
+            else
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  SectionTitle(
+                    _search.text.trim().isEmpty &&
+                            totalInFilter != null &&
+                            totalInFilter > loaded.length
+                        ? '입금 ${visible.length} / $totalInFilter건'
+                        : '입금 ${visible.length}건',
                   ),
-                  const SizedBox(height: 10),
+                  for (final d in visible) ...[
+                    _DepositCard(
+                      deposit: d,
+                      busy: _busy.contains(d.id),
+                      onLink: () => _openLinkDialog(d),
+                      onUndo: () => _undo(d),
+                      onClearDuplicate: () => _clearDuplicate(d),
+                      onIgnore: () => _ignore(d, ignore: true),
+                      onUnignore: () => _ignore(d, ignore: false),
+                      onRematch: () => _rematch(d),
+                      onReparse: () => _reparseOne(d),
+                    ),
+                    const SizedBox(height: 10),
+                  ],
                 ],
-              ],
-            ),
-          if (hasMore) ...[
-            const SizedBox(height: 4),
-            Center(
-              child: OutlinedButton(
-                onPressed: _loadingMore ? null : () => _loadMore(loaded),
-                child: Text(
-                  _loadingMore
-                      ? '불러오는 중...'
-                      : totalInFilter != null
-                      ? '더 보기 (${loaded.length} / $totalInFilter)'
-                      : '더 보기',
+              ),
+            if (hasMore) ...[
+              const SizedBox(height: 4),
+              Center(
+                child: OutlinedButton(
+                  onPressed: _loadingMore ? null : () => _loadMore(loaded),
+                  child: Text(
+                    _loadingMore
+                        ? '불러오는 중...'
+                        : totalInFilter != null
+                        ? '더 보기 (${loaded.length} / $totalInFilter)'
+                        : '더 보기',
+                  ),
                 ),
               ),
-            ),
+            ],
           ],
-        ],
-      );
+        );
+      }
     }
 
     return RefreshOverlay(
@@ -528,7 +540,7 @@ class _AdminDepositsPageState extends ConsumerState<AdminDepositsPage> {
                         ),
                         if (unparsedWithRawCount > 0)
                           OutlinedButton.icon(
-                            onPressed: _bulkReparsing
+                            onPressed: _bulkReparsing || !depositsReady
                                 ? null
                                 : _reparseAllUnparsed,
                             icon: const Icon(Icons.replay, size: 18),

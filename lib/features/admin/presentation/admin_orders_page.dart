@@ -262,50 +262,44 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
     final roundList = ref.watch(adminRoundsProvider);
     final textbooks = ref.watch(textbooksProvider(CampusScope.admin));
 
-    final roundError = (currentRoundAsync.hasError && !currentRoundAsync.isLoading)
+    final currentRoundError =
+        (currentRoundAsync.hasError && !currentRoundAsync.isLoading)
         ? currentRoundAsync.error
-        : (roundList.hasError && !roundList.isLoading)
-        ? roundList.error
         : null;
+    final roundsListError =
+        (roundList.hasError && !roundList.isLoading) ? roundList.error : null;
     final roundReady =
+        activeCampusId != null &&
         currentRoundAsync.hasUsableValue &&
-        currentRoundAsync.requireValue != null &&
-        activeCampusId != null;
+        currentRoundAsync.requireValue != null;
 
-    if (currentRoundAsync.hasUsableValue &&
-        (currentRoundAsync.requireValue == null || activeCampusId == null)) {
+    if (activeCampusId != null &&
+        currentRoundAsync.hasUsableValue &&
+        currentRoundAsync.requireValue == null) {
       return RefreshOverlay(
         refreshing: currentRoundAsync.isBackgroundRefreshing,
         child: const EmptyView(message: '신청 회차가 없습니다.'),
       );
     }
 
-    // Start fetching orders for the current round concurrently with fetchRounds.
-    final RoundList? rounds;
-    if (roundReady) {
-      final currentRound = currentRoundAsync.requireValue!;
-      rounds =
-          roundList.hasValue &&
-              !roundList.hasError &&
-              roundList.requireValue?.campusId == activeCampusId
-          ? roundList.requireValue!
-          : RoundList(
-              campusId: activeCampusId,
-              current: currentRound,
-              all: [currentRound],
-            );
-    } else {
-      rounds = null;
-    }
+    final currentRound = roundReady ? currentRoundAsync.requireValue! : null;
+    final roundsLoaded =
+        roundReady &&
+        roundList.hasValue &&
+        !roundList.hasError &&
+        roundList.requireValue?.campusId == activeCampusId;
+    final RoundList? rounds = roundsLoaded ? roundList.requireValue! : null;
 
-    final selected = rounds == null ? null : _selected(rounds);
+    final OrderRound? selected = rounds != null
+        ? _selected(rounds)
+        : (_allRounds ? null : currentRound);
     final roundId = selected?.id;
     final AsyncValue<List<TextbookOrder>>? orders = roundReady
         ? ref.watch(adminOrdersProvider(roundId))
         : null;
-    final books = textbooks.hasUsableValue
-        ? textbooks.requireValue
-        : const <Textbook>[];
+    final textbooksReady = activeCampusId != null && textbooks.hasUsableValue;
+    final textbooksError = textbooks.hasError && !textbooks.isLoading;
+    final books = textbooksReady ? textbooks.requireValue : const <Textbook>[];
     final filter = OrderFilter(
       textbookId: _textbookId,
       status: _status,
@@ -329,9 +323,9 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
         (orders?.isBackgroundRefreshing ?? false);
 
     final Widget bodySection;
-    if (roundError != null) {
+    if (currentRoundError != null) {
       bodySection = ErrorView(
-        error: roundError,
+        error: currentRoundError,
         onRetry: () {
           ref.invalidate(adminCurrentRoundProvider);
           ref.invalidate(adminRoundsProvider);
@@ -401,14 +395,21 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
               children: [
                 _Filters(
                   rounds: rounds,
+                  currentRound: currentRound,
                   selected: selected,
+                  allRounds: _allRounds,
+                  roundError: currentRoundError != null,
+                  roundsListError: roundsListError != null && currentRound != null,
+                  onRetryRounds: () => ref.invalidate(adminRoundsProvider),
                   onRoundChanged: (r) => setState(() {
                     _allRounds = r == null;
                     if (r != null) _roundId = r.id;
                     _picked.clear();
                   }),
                   textbooks: books,
-                  textbooksLoaded: textbooks.hasUsableValue,
+                  textbooksEnabled: textbooksReady || textbooksError,
+                  textbooksError: textbooksError,
+                  onRetryTextbooks: () => ref.invalidate(textbooksProvider),
                   textbookId: _textbookId,
                   onTextbookChanged: (v) => setState(() => _textbookId = v),
                   status: _status,
@@ -437,10 +438,17 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
 class _Filters extends StatelessWidget {
   const _Filters({
     required this.rounds,
+    required this.currentRound,
     required this.selected,
+    required this.allRounds,
+    required this.roundError,
+    required this.roundsListError,
+    required this.onRetryRounds,
     required this.onRoundChanged,
     required this.textbooks,
-    required this.textbooksLoaded,
+    required this.textbooksEnabled,
+    required this.textbooksError,
+    required this.onRetryTextbooks,
     required this.textbookId,
     required this.onTextbookChanged,
     required this.status,
@@ -453,10 +461,17 @@ class _Filters extends StatelessWidget {
   });
 
   final RoundList? rounds;
+  final OrderRound? currentRound;
   final OrderRound? selected;
+  final bool allRounds;
+  final bool roundError;
+  final bool roundsListError;
+  final VoidCallback onRetryRounds;
   final ValueChanged<OrderRound?> onRoundChanged;
   final List<Textbook> textbooks;
-  final bool textbooksLoaded;
+  final bool textbooksEnabled;
+  final bool textbooksError;
+  final VoidCallback onRetryTextbooks;
   final String? textbookId;
   final ValueChanged<String?> onTextbookChanged;
   final OrderStatus? status;
@@ -471,15 +486,35 @@ class _Filters extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.colors;
     // 카드 없이 둔다. (입력칸이 회색 면이라 회색 카드와 겹치지 않게)
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _RoundNavigator(
           rounds: rounds,
+          currentRound: currentRound,
           selected: selected,
+          allRounds: allRounds,
+          roundError: roundError,
           onChanged: onRoundChanged,
         ),
+        if (roundsListError) ...[
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              Icon(Icons.error_outline, size: 16, color: c.error),
+              const SizedBox(width: 6),
+              Flexible(
+                child: Text(
+                  '지난 회차 목록을 불러오지 못했습니다.',
+                  style: TextStyle(fontSize: 13, color: c.error),
+                ),
+              ),
+              TextButton(onPressed: onRetryRounds, child: const Text('다시 시도')),
+            ],
+          ),
+        ],
         const SizedBox(height: 12),
         // 모바일에서는 고정 너비면 글자가 잘리므로 한 줄씩 꽉 채운다.
         LayoutBuilder(
@@ -490,10 +525,11 @@ class _Filters extends StatelessWidget {
             return Wrap(
               spacing: 12,
               runSpacing: 12,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: [
                 DropdownMenu<String?>(
                   width: w(240),
-                  enabled: textbooksLoaded,
+                  enabled: textbooksEnabled,
                   label: const Text('교재'),
                   // 교재가 많으므로 입력해서 찾을 수 있게 한다.
                   enableFilter: true,
@@ -527,6 +563,22 @@ class _Filters extends StatelessWidget {
                     ),
                   ),
                 ),
+                if (textbooksError)
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.error_outline, size: 16, color: c.error),
+                      const SizedBox(width: 6),
+                      Text(
+                        '교재 목록을 불러오지 못했습니다.',
+                        style: TextStyle(fontSize: 13, color: c.error),
+                      ),
+                      TextButton(
+                        onPressed: onRetryTextbooks,
+                        child: const Text('다시 시도'),
+                      ),
+                    ],
+                  ),
               ],
             );
           },
@@ -580,23 +632,31 @@ class _Filters extends StatelessWidget {
 class _RoundNavigator extends StatelessWidget {
   const _RoundNavigator({
     required this.rounds,
+    required this.currentRound,
     required this.selected,
+    required this.allRounds,
+    required this.roundError,
     required this.onChanged,
   });
 
   final RoundList? rounds;
+  final OrderRound? currentRound;
 
   /// null 이면 전체 회차.
   final OrderRound? selected;
+  final bool allRounds;
+  final bool roundError;
 
   /// null 이면 전체 회차.
   final ValueChanged<OrderRound?> onChanged;
 
-  bool get _all => rounds != null && selected == null;
+  bool get _all => currentRound != null && allRounds;
 
   /// 최신순 목록에서 고른 회차의 위치
   int get _index =>
-      rounds == null || _all ? 0 : rounds!.all.indexWhere((r) => r.id == selected!.id);
+      rounds == null || _all || selected == null
+      ? 0
+      : rounds!.all.indexWhere((r) => r.id == selected!.id);
 
   Future<void> _pickDate(BuildContext context) async {
     final r = rounds;
@@ -630,8 +690,96 @@ class _RoundNavigator extends StatelessWidget {
     final c = context.colors;
     final theme = Theme.of(context);
     final r = rounds;
+    final cur = currentRound;
     final index = _index;
-    final isCurrent = r != null && !_all && selected!.id == r.current.id;
+    final isCurrent =
+        cur != null && !_all && selected != null && selected!.id == cur.id;
+
+    Widget centerContent;
+    if (roundError) {
+      centerContent = Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Text(
+          '회차 정보를 불러올 수 없습니다.',
+          textAlign: TextAlign.center,
+          style: TextStyle(fontSize: 14, color: c.error),
+        ),
+      );
+    } else if (cur == null) {
+      centerContent = const Padding(
+        padding: EdgeInsets.symmetric(vertical: 6),
+        child: SkeletonRegion(
+          child: Column(
+            children: [
+              SkeletonText(
+                maxWidth: 140,
+                fontSize: 16,
+                alignment: Alignment.center,
+                announce: false,
+              ),
+              SizedBox(height: 2),
+              SkeletonText(
+                maxWidth: 180,
+                fontSize: 13,
+                alignment: Alignment.center,
+                announce: false,
+              ),
+            ],
+          ),
+        ),
+      );
+    } else {
+      final title = _all ? '전체 회차' : selected!.label;
+      final sub = _all
+          ? '모든 회차의 신청'
+          : isCurrent
+          ? '이번 회차 · ${selected!.deadlineLabel} 마감'
+          : r != null
+          ? r.describe(selected!)
+          : '이번 회차 · ${selected!.deadlineLabel} 마감';
+      final inner = Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Column(
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Flexible(
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      title,
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ),
+                if (r != null) ...[
+                  const SizedBox(width: 6),
+                  Icon(
+                    Icons.calendar_month_outlined,
+                    size: 18,
+                    color: c.textSecondary,
+                  ),
+                ],
+              ],
+            ),
+            Text(sub, style: TextStyle(fontSize: 13, color: c.textSecondary)),
+          ],
+        ),
+      );
+      centerContent = r == null
+          ? inner
+          : Tooltip(
+              message: '달력에서 회차 찾기',
+              child: InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: () => _pickDate(context),
+                child: inner,
+              ),
+            );
+    }
 
     return Column(
       // stretch 면 아래 최대 너비가 무시된다.
@@ -648,79 +796,7 @@ class _RoundNavigator extends StatelessWidget {
                     ? null
                     : () => onChanged(r.all[index + 1]),
               ),
-              Expanded(
-                child: r == null
-                    ? const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 6),
-                        child: SkeletonRegion(
-                          child: Column(
-                            children: [
-                              SkeletonText(
-                                maxWidth: 140,
-                                fontSize: 16,
-                                alignment: Alignment.center,
-                                announce: false,
-                              ),
-                              SizedBox(height: 2),
-                              SkeletonText(
-                                maxWidth: 180,
-                                fontSize: 13,
-                                alignment: Alignment.center,
-                                announce: false,
-                              ),
-                            ],
-                          ),
-                        ),
-                      )
-                    : Tooltip(
-                        message: '달력에서 회차 찾기',
-                        child: InkWell(
-                          borderRadius: BorderRadius.circular(12),
-                          onTap: () => _pickDate(context),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 6),
-                            child: Column(
-                              children: [
-                                Row(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Flexible(
-                                      child: FittedBox(
-                                        fit: BoxFit.scaleDown,
-                                        child: Text(
-                                          _all ? '전체 회차' : selected!.label,
-                                          style: theme.textTheme.titleMedium
-                                              ?.copyWith(
-                                                fontWeight: FontWeight.w700,
-                                              ),
-                                        ),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 6),
-                                    Icon(
-                                      Icons.calendar_month_outlined,
-                                      size: 18,
-                                      color: c.textSecondary,
-                                    ),
-                                  ],
-                                ),
-                                Text(
-                                  _all
-                                      ? '모든 회차의 신청'
-                                      : isCurrent
-                                      ? '이번 회차 · ${selected!.deadlineLabel} 마감'
-                                      : r.describe(selected!),
-                                  style: TextStyle(
-                                    fontSize: 13,
-                                    color: c.textSecondary,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-              ),
+              Expanded(child: centerContent),
               IconButton(
                 tooltip: '다음 회차',
                 icon: const Icon(Icons.chevron_right),
@@ -737,18 +813,18 @@ class _RoundNavigator extends StatelessWidget {
           spacing: 8,
           runSpacing: 8,
           children: [
-            if (r != null && !isCurrent)
+            if (cur != null && !isCurrent)
               ActionChip(
                 avatar: const Icon(Icons.today, size: 18),
                 label: const Text('이번 회차로'),
-                onPressed: () => onChanged(r.current),
+                onPressed: () => onChanged(r?.current ?? cur),
               ),
             FilterChip(
               label: const Text('전체 회차'),
               selected: _all,
-              onSelected: r == null
+              onSelected: cur == null
                   ? null
-                  : (v) => onChanged(v ? null : r.current),
+                  : (v) => onChanged(v ? null : (r?.current ?? cur)),
             ),
           ],
         ),

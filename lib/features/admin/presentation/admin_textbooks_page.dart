@@ -229,18 +229,23 @@ class AdminTextbooksPage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final activeCampusId = ref.watch(adminCampusIdProvider);
     final textbooks = ref.watch(textbooksProvider(CampusScope.admin));
     final categories = ref.watch(textbookCategoriesProvider(CampusScope.admin));
     final refreshing =
         textbooks.isBackgroundRefreshing || categories.isBackgroundRefreshing;
-    final catsReady = categories.hasUsableValue;
-    final booksReady = textbooks.hasUsableValue;
+    final catsError = categories.hasError && !categories.isLoading;
+    final booksError = textbooks.hasError && !textbooks.isLoading;
+    final catsReady = activeCampusId != null && categories.hasUsableValue;
+    final booksReady = activeCampusId != null && textbooks.hasUsableValue;
     final cats = catsReady ? categories.requireValue : const <TextbookCategory>[];
     final books = booksReady ? textbooks.requireValue : const <Textbook>[];
     final groups = (catsReady && booksReady)
         ? groupByCategory(cats, books, includeEmpty: true)
         : const <CategoryGroup>[];
-    final ordered = catsReady ? cats : const <TextbookCategory>[];
+    final ordered = catsReady
+        ? sortTextbookCategories(cats)
+        : const <TextbookCategory>[];
     final theme = Theme.of(context);
 
     return RefreshOverlay(
@@ -270,8 +275,7 @@ class AdminTextbooksPage extends ConsumerWidget {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  if (!categories.hasError)
-                    const SkeletonBox(width: 28, height: 18),
+                  if (!catsError) const SkeletonBox(width: 28, height: 18),
                   const Spacer(),
                   OutlinedButton.icon(
                     onPressed: null,
@@ -281,7 +285,7 @@ class AdminTextbooksPage extends ConsumerWidget {
                 ],
               ),
             ),
-          if (categories.hasError && !categories.isLoading)
+          if (catsError)
             ErrorView(
               error: categories.error!,
               onRetry: () => ref.invalidate(textbookCategoriesProvider),
@@ -315,6 +319,8 @@ class AdminTextbooksPage extends ConsumerWidget {
                           ? Text(
                               '교재 ${books.where((t) => t.categoryId == c.id).length}종',
                             )
+                          : booksError
+                          ? const Text('-')
                           : const SkeletonText(maxWidth: 64, fontSize: 13),
                       trailing: Row(
                         mainAxisSize: MainAxisSize.min,
@@ -372,13 +378,13 @@ class AdminTextbooksPage extends ConsumerWidget {
               child: Row(
                 children: [
                   Text(
-                    '교재',
+                    booksReady ? '교재 ${books.length}종' : '교재',
                     style: theme.textTheme.titleMedium?.copyWith(
                       fontWeight: FontWeight.w600,
                     ),
                   ),
                   const SizedBox(width: 8),
-                  if (!textbooks.hasError)
+                  if (!booksReady && !booksError)
                     const SkeletonBox(width: 28, height: 18),
                   const Spacer(),
                   FilledButton.icon(
@@ -389,10 +395,15 @@ class AdminTextbooksPage extends ConsumerWidget {
                 ],
               ),
             ),
-          if (textbooks.hasError && !textbooks.isLoading)
+          if (booksError)
             ErrorView(
               error: textbooks.error!,
               onRetry: () => ref.invalidate(textbooksProvider),
+            )
+          else if (catsError)
+            Text(
+              '카테고리를 불러오지 못해 교재를 표시할 수 없습니다.',
+              style: theme.textTheme.bodyMedium,
             )
           else if (!catsReady || !booksReady)
             SkeletonList.cards(

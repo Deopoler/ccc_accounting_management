@@ -1088,7 +1088,7 @@ void main() {
     expect(find.text('선택 0권'), findsNothing);
     expect(find.byType(LoadingView), findsNothing);
     expect(find.bySemanticsLabel('불러오는 중'), findsWidgets);
-    expect(tester.widget<IconButton>(plusButton).onPressed, isNull);
+    expect(find.byTooltip('더하기'), findsNothing);
     expect(
       tester
           .widget<FilledButton>(find.widgetWithText(FilledButton, '수정하기'))

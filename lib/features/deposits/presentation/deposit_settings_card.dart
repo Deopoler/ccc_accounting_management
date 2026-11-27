@@ -8,6 +8,7 @@ import '../../../core/utils/formatters.dart';
 import '../../../core/widgets/feedback.dart';
 import '../../../core/widgets/skeleton.dart';
 import '../../../core/widgets/state_views.dart';
+import '../../campus/presentation/campus_providers.dart';
 import '../domain/bank_deposit.dart';
 import 'deposit_providers.dart';
 
@@ -16,12 +17,15 @@ class DepositSettingsCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final activeCampusId = ref.watch(adminCampusIdProvider);
     final settingsAsync = ref.watch(depositSettingsProvider);
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(20),
         child: AsyncValueView<CampusDepositSettings?>(
-          value: settingsAsync,
+          value: activeCampusId == null
+              ? const AsyncLoading<CampusDepositSettings?>()
+              : settingsAsync,
           showRefreshIndicator: false,
           loading: const _DepositSettingsPlaceholder(),
           onRetry: () => ref.invalidate(depositSettingsProvider),

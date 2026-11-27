@@ -213,6 +213,7 @@ class _AdminEventDetailPageState extends ConsumerState<AdminEventDetailPage> {
       }
     });
 
+    final activeCampusId = ref.watch(adminCampusIdProvider);
     final event = ref.watch(eventProvider(_id));
     final payments = ref.watch(eventPaymentsProvider(_id));
     final refreshing =
@@ -225,7 +226,7 @@ class _AdminEventDetailPageState extends ConsumerState<AdminEventDetailPage> {
       );
     }
 
-    final eventReady = event.hasUsableValue;
+    final eventReady = activeCampusId != null && event.hasUsableValue;
     final e = eventReady ? event.requireValue : null;
     if (eventReady && e == null) {
       return RefreshOverlay(
@@ -234,7 +235,8 @@ class _AdminEventDetailPageState extends ConsumerState<AdminEventDetailPage> {
       );
     }
 
-    final paymentsReady = payments.hasUsableValue;
+    final paymentsError = payments.hasError && !payments.isLoading;
+    final paymentsReady = activeCampusId != null && payments.hasUsableValue;
     final all = paymentsReady ? payments.requireValue : const <EventPayment>[];
     final summary = (e != null && paymentsReady)
         ? EventSummary.fromPayments(all, e)
@@ -369,6 +371,19 @@ class _AdminEventDetailPageState extends ConsumerState<AdminEventDetailPage> {
                               summary.outstandingAmount,
                               highlight: summary.unpaidCount > 0,
                             ),
+                          ),
+                        ] else if (paymentsError) ...[
+                          Text(
+                            '송금 현황을 불러오지 못했습니다.',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: context.colors.error,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          const LabeledValue(
+                            label: '미수금',
+                            value: FigureText('-'),
                           ),
                         ] else ...[
                           const PaymentProgressPlaceholder(),

@@ -29,6 +29,7 @@ import 'package:ccc_accounting_management/features/feedback/data/feedback_reposi
 import 'package:ccc_accounting_management/features/feedback/domain/feedback_entry.dart';
 import 'package:ccc_accounting_management/features/feedback/presentation/admin_feedback_page.dart';
 import 'package:ccc_accounting_management/features/feedback/presentation/feedback_providers.dart';
+import 'package:ccc_accounting_management/features/home/presentation/home_page.dart';
 import 'package:ccc_accounting_management/features/push/data/push_repository.dart';
 import 'package:ccc_accounting_management/features/push/presentation/push_providers.dart';
 import 'package:ccc_accounting_management/features/settings/data/settings_repository.dart';
@@ -131,11 +132,16 @@ final _eventPayment = EventPayment(
 );
 
 class _FakeAuth implements AuthRepository {
+  Completer<Profile?>? pendingProfile;
+
   @override
   String? get currentUserId => 'u1';
 
   @override
-  Future<Profile?> fetchProfile(String userId) async => _admin;
+  Future<Profile?> fetchProfile(String userId) {
+    if (pendingProfile != null) return pendingProfile!.future;
+    return Future.value(_admin);
+  }
 
   @override
   dynamic noSuchMethod(Invocation i) => super.noSuchMethod(i);
@@ -178,10 +184,19 @@ class _FakeTextbooks implements TextbookRepository {
   Completer<List<TextbookOrder>>? pendingAllOrders;
   Completer<TextbookOrder?>? pendingOrder;
 
+  List<TextbookCategory> categoriesResult = const [_category];
+  TextbookOrder? orderResult = _order;
+  final List<List<String>> reorderedCategories = [];
+
   @override
   Future<List<TextbookCategory>> fetchCategories(String campusId) {
     if (pendingCategories != null) return pendingCategories!.future;
-    return Future.value(const [_category]);
+    return Future.value(categoriesResult);
+  }
+
+  @override
+  Future<void> reorderCategories(List<String> orderedIds) async {
+    reorderedCategories.add(orderedIds);
   }
 
   @override
@@ -220,7 +235,7 @@ class _FakeTextbooks implements TextbookRepository {
   @override
   Future<TextbookOrder?> fetchOrder(String orderId) {
     if (pendingOrder != null) return pendingOrder!.future;
-    return Future.value(_order);
+    return Future.value(orderResult);
   }
 
   @override
@@ -274,6 +289,8 @@ class _FakeDeposits implements DepositRepository {
   Completer<List<BankDeposit>>? pendingDeposits;
   Completer<DepositCounts>? pendingCounts;
   Completer<CampusDepositSettings>? pendingSettings;
+  Object? depositsError;
+  DepositCounts countsResult = const DepositCounts(needsReview: 1, all: 1);
 
   @override
   Future<List<BankDeposit>> fetchDeposits(
@@ -283,6 +300,7 @@ class _FakeDeposits implements DepositRepository {
     int offset = 0,
   }) {
     if (pendingDeposits != null) return pendingDeposits!.future;
+    if (depositsError != null) return Future.error(depositsError!);
     return Future.value([
       BankDeposit(
         id: 'd1',
@@ -300,7 +318,7 @@ class _FakeDeposits implements DepositRepository {
   @override
   Future<DepositCounts> fetchDepositCounts(String campusId) {
     if (pendingCounts != null) return pendingCounts!.future;
-    return Future.value(const DepositCounts(needsReview: 1, all: 1));
+    return Future.value(countsResult);
   }
 
   @override
@@ -377,6 +395,7 @@ class _FakePushRepo implements PushRepository {
 }
 
 class _Harness {
+  final auth = _FakeAuth();
   final campuses = _FakeCampuses();
   final members = _FakeMembers();
   final textbooks = _FakeTextbooks();
@@ -401,7 +420,7 @@ class _Harness {
         retry: (_, _) => null,
         overrides: [
           currentUserIdProvider.overrideWith((ref) => 'u1'),
-          authRepositoryProvider.overrideWithValue(_FakeAuth()),
+          authRepositoryProvider.overrideWithValue(auth),
           campusRepositoryProvider.overrideWithValue(campuses),
           memberRepositoryProvider.overrideWithValue(members),
           textbookRepositoryProvider.overrideWithValue(textbooks),
@@ -475,22 +494,12 @@ void main() {
     await h.pump(tester, const TextbooksPage(editOrderId: 'o1', categoryId: 'c1'));
 
     expect(find.text('신청 내역 수정 중'), findsOneWidget);
-    expect(find.text('기초 성경공부'), findsOneWidget);
     expect(find.byType(LoadingView), findsNothing);
     expect(find.bySemanticsLabel('불러오는 중'), findsWidgets);
+    expect(find.byTooltip('더하기'), findsNothing);
+    expect(find.byTooltip('빼기'), findsNothing);
     expect(find.text('0'), findsNothing);
     expect(find.text('선택 0권'), findsNothing);
-
-    final plus = find.ancestor(
-      of: find.byTooltip('더하기'),
-      matching: find.byType(IconButton),
-    );
-    final minus = find.ancestor(
-      of: find.byTooltip('빼기'),
-      matching: find.byType(IconButton),
-    );
-    expect(tester.widget<IconButton>(plus).onPressed, isNull);
-    expect(tester.widget<IconButton>(minus).onPressed, isNull);
     expect(
       tester.widget<FilledButton>(find.widgetWithText(FilledButton, '수정하기')).onPressed,
       isNull,
@@ -499,6 +508,11 @@ void main() {
     h.textbooks.pendingOrder!.complete(_order);
     await tester.pumpAndSettle();
 
+    final plus = find.ancestor(
+      of: find.byTooltip('더하기'),
+      matching: find.byType(IconButton),
+    );
+    expect(find.text('기초 성경공부'), findsOneWidget);
     expect(find.text('선택 2권'), findsOneWidget);
     expect(find.text('24,000원'), findsOneWidget);
     expect(tester.widget<IconButton>(plus).onPressed, isNotNull);
@@ -779,5 +793,166 @@ void main() {
       isNull,
     );
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('TextbooksPage 수정 모드에서 currentRoundProvider 로딩 중에는 입금확인 주문을 편집할 수 없다', (
+    tester,
+  ) async {
+    final h = _Harness();
+    h.textbooks.pendingRound = Completer<OrderRound>();
+    h.textbooks.pendingOrder = Completer<TextbookOrder?>();
+
+    await h.pump(tester, const TextbooksPage(editOrderId: 'o_paid', categoryId: 'c1'));
+
+    final paidOrder = TextbookOrder(
+      id: 'o_paid',
+      userId: 'u1',
+      roundId: _round.id,
+      round: _round,
+      status: OrderStatus.paid,
+      totalPrice: 24000,
+      createdAt: _order.createdAt,
+      items: _order.items,
+      member: _order.member,
+    );
+    h.textbooks.pendingOrder!.complete(paidOrder);
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.bySemanticsLabel('불러오는 중'), findsWidgets);
+    expect(find.byTooltip('더하기'), findsNothing);
+    expect(find.text('기초 성경공부'), findsNothing);
+    expect(
+      tester.widget<FilledButton>(find.widgetWithText(FilledButton, '수정하기')).onPressed,
+      isNull,
+    );
+
+    h.textbooks.pendingRound!.complete(_round);
+    await tester.pumpAndSettle();
+
+    expect(find.text('입금확인되었거나 마감된 신청은 수정할 수 없습니다.'), findsOneWidget);
+  });
+
+  testWidgets('TextbooksPage 수정 모드에서 새로고침된 주문이 null 이 되면 잠금 스켈레톤에 갇히지 않고 빈 화면을 보인다', (
+    tester,
+  ) async {
+    final h = _Harness();
+    await h.pump(tester, const TextbooksPage(editOrderId: 'o1', categoryId: 'c1'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('선택 2권'), findsOneWidget);
+    expect(
+      tester.widget<FilledButton>(find.widgetWithText(FilledButton, '수정하기')).onPressed,
+      isNotNull,
+    );
+
+    h.textbooks.orderResult = null;
+    ProviderScope.containerOf(
+      tester.element(find.byType(TextbooksPage)),
+    ).invalidate(orderProvider('o1'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('신청 내역을 찾을 수 없습니다.'), findsOneWidget);
+    expect(find.bySemanticsLabel('불러오는 중'), findsNothing);
+  });
+
+  testWidgets('프로필 로딩으로 campusId 가 아직 null 인 동안 각 화면은 빈 상태나 0건 대신 스켈레톤을 보인다', (
+    tester,
+  ) async {
+    final h = _Harness();
+    h.auth.pendingProfile = Completer<Profile?>();
+
+    await h.pump(tester, const TextbooksPage());
+    expect(find.byType(EmptyView), findsNothing);
+    expect(find.byType(LoadingView), findsNothing);
+    expect(find.bySemanticsLabel('불러오는 중'), findsWidgets);
+    expect(find.text('0원'), findsNothing);
+
+    await h.pump(tester, const MyOrdersPage());
+    expect(find.byType(EmptyView), findsNothing);
+    expect(find.byType(LoadingView), findsNothing);
+    expect(find.bySemanticsLabel('불러오는 중'), findsWidgets);
+
+    await h.pump(tester, const AdminOrdersPage());
+    expect(find.byType(EmptyView), findsNothing);
+    expect(find.text('신청 회차가 없습니다.'), findsNothing);
+    expect(find.text('0건'), findsNothing);
+    expect(find.text('0원'), findsNothing);
+    expect(find.bySemanticsLabel('불러오는 중'), findsWidgets);
+
+    await h.pump(tester, const AdminEventDetailPage(eventId: 'e1'));
+    expect(find.byType(EmptyView), findsNothing);
+    expect(find.text('0/0명'), findsNothing);
+    expect(find.bySemanticsLabel('불러오는 중'), findsWidgets);
+
+    await h.pump(tester, const HomePage());
+    expect(find.byType(EmptyView), findsNothing);
+    expect(find.text('0건'), findsNothing);
+    expect(find.text('0원'), findsNothing);
+    expect(find.bySemanticsLabel('불러오는 중'), findsWidgets);
+
+    h.auth.pendingProfile!.complete(_admin);
+    await tester.pumpAndSettle();
+
+    expect(find.text('홍길동님, 안녕하세요'), findsOneWidget);
+  });
+
+  testWidgets('AdminDepositsPage 에서 입금 목록이 로딩 중이거나 오류일 때는 해석 실패 일괄 재실행 버튼을 비활성화한다', (
+    tester,
+  ) async {
+    final h = _Harness();
+    h.deposits.countsResult = const DepositCounts(
+      needsReview: 1,
+      unparsedWithRaw: 2,
+      all: 3,
+    );
+    h.deposits.pendingDeposits = Completer<List<BankDeposit>>();
+
+    await h.pump(tester, const AdminDepositsPage());
+
+    final bulkBtn = find.ancestor(
+      of: find.text('해석 실패 일괄 재실행 (2)'),
+      matching: find.byWidgetPredicate((w) => w is OutlinedButton),
+    );
+    expect(tester.widget<OutlinedButton>(bulkBtn).onPressed, isNull);
+
+    h.deposits.pendingDeposits!.completeError(Exception('boom'));
+    await tester.pumpAndSettle();
+    expect(tester.widget<OutlinedButton>(bulkBtn).onPressed, isNull);
+
+    h.deposits.pendingDeposits = null;
+    ProviderScope.containerOf(
+      tester.element(find.byType(AdminDepositsPage)),
+    ).invalidate(bankDepositsProvider(DepositFilter.needsReview));
+    await tester.pumpAndSettle();
+
+    expect(tester.widget<OutlinedButton>(bulkBtn).onPressed, isNotNull);
+  });
+
+  testWidgets('AdminTextbooksPage 는 카테고리를 sortOrder 와 이름 순으로 정렬해 표시하고 재정렬 요청에도 반영한다', (
+    tester,
+  ) async {
+    final h = _Harness();
+    h.textbooks.categoriesResult = const [
+      TextbookCategory(id: 'c3', name: '다과목', sortOrder: 1),
+      TextbookCategory(id: 'c1', name: '가과목', sortOrder: 0),
+      TextbookCategory(id: 'c2', name: '나과목', sortOrder: 1),
+    ];
+
+    await h.pump(tester, const AdminTextbooksPage());
+    await tester.pumpAndSettle();
+
+    final y1 = tester.getTopLeft(find.text('가과목')).dy;
+    final y2 = tester.getTopLeft(find.text('나과목')).dy;
+    final y3 = tester.getTopLeft(find.text('다과목')).dy;
+    expect(y1, lessThan(y2));
+    expect(y2, lessThan(y3));
+
+    await tester.tap(find.byTooltip('다과목 위로 이동'));
+    await tester.pumpAndSettle();
+
+    expect(h.textbooks.reorderedCategories, [
+      ['c1', 'c3', 'c2'],
+    ]);
   });
 }

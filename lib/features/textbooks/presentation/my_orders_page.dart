@@ -9,6 +9,7 @@ import '../../../core/widgets/feedback.dart';
 import '../../../core/widgets/responsive.dart';
 import '../../../core/widgets/skeleton.dart';
 import '../../../core/widgets/state_views.dart';
+import '../../campus/presentation/campus_providers.dart';
 import '../../deposits/presentation/deposit_providers.dart';
 import '../../push/presentation/signup_push_card.dart';
 import '../../settings/presentation/bank_account_card.dart';
@@ -22,6 +23,7 @@ class MyOrdersPage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final campusId = ref.watch(myCampusIdProvider);
     final orders = ref.watch(myOrdersProvider);
     final round = ref.watch(currentRoundProvider);
 
@@ -45,7 +47,7 @@ class MyOrdersPage extends ConsumerWidget {
       );
     }
 
-    if (!orders.hasUsableValue || !round.hasUsableValue) {
+    if (campusId == null || !orders.hasUsableValue || !round.hasUsableValue) {
       return RefreshOverlay(
         refreshing: refreshing,
         child: ScrollPageBody(
