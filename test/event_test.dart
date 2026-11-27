@@ -25,6 +25,20 @@ EventPayment _payment(String id, {bool paid = false, int? amount}) =>
 void main() {
   final today = DateTime(2026, 9, 29);
 
+  test('Event.fromJson: campus_id 를 읽고 없으면 빈 문자열로 둔다', () {
+    final withCampus = Event.fromJson({
+      'id': 'e1',
+      'campus_id': 'k',
+      'title': '수련회',
+      'amount': 10000,
+      'due_date': null,
+      'description': '',
+      'created_at': '2026-09-01T00:00:00Z',
+    });
+    expect(withCampus.campusId, 'k');
+    expect(_event('a').campusId, '');
+  });
+
   test('D-day 계산', () {
     expect(dDayLabel(_event('a', due: '2026-10-02').daysLeft(today)), 'D-3');
     expect(dDayLabel(_event('a', due: '2026-09-29').daysLeft(today)), 'D-Day');

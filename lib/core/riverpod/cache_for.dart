@@ -17,8 +17,8 @@ extension CacheFor on Ref {
     bool userScoped = true,
     CampusScope? campusScope,
   }) {
-    if (userScoped && read(currentUserIdProvider) == null) return null;
-    if (campusScope != null && read(campusIdProvider(campusScope)) == null) {
+    if (userScoped && watch(currentUserIdProvider) == null) return null;
+    if (campusScope != null && watch(campusIdProvider(campusScope)) == null) {
       return null;
     }
 

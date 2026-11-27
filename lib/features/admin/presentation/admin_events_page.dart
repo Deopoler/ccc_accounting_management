@@ -40,6 +40,10 @@ class AdminEventsPage extends ConsumerWidget {
     final events = ref.watch(eventsProvider(CampusScope.admin));
     final summaries = ref.watch(eventSummariesProvider);
 
+    if ((events.isLoading && !events.hasUsableValue) ||
+        (summaries.isLoading && !summaries.hasUsableValue)) {
+      return const LoadingView();
+    }
     if (events.hasError || summaries.hasError) {
       return ErrorView(
         error: (events.error ?? summaries.error)!,

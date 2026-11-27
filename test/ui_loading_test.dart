@@ -6,6 +6,7 @@ import 'package:ccc_accounting_management/core/router/app_router.dart';
 import 'package:ccc_accounting_management/core/theme/app_theme.dart';
 import 'package:ccc_accounting_management/core/widgets/state_views.dart';
 import 'package:ccc_accounting_management/features/admin/data/member_repository.dart';
+import 'package:ccc_accounting_management/features/admin/presentation/admin_order_providers.dart';
 import 'package:ccc_accounting_management/features/admin/presentation/member_providers.dart';
 import 'package:ccc_accounting_management/features/auth/data/auth_repository.dart';
 import 'package:ccc_accounting_management/features/auth/domain/profile.dart';
@@ -13,6 +14,9 @@ import 'package:ccc_accounting_management/features/auth/presentation/auth_provid
 import 'package:ccc_accounting_management/features/campus/data/campus_repository.dart';
 import 'package:ccc_accounting_management/features/campus/domain/campus.dart';
 import 'package:ccc_accounting_management/features/campus/presentation/campus_providers.dart';
+import 'package:ccc_accounting_management/features/deposits/data/deposit_repository.dart';
+import 'package:ccc_accounting_management/features/deposits/domain/bank_deposit.dart';
+import 'package:ccc_accounting_management/features/deposits/presentation/deposit_providers.dart';
 import 'package:ccc_accounting_management/features/events/data/event_repository.dart';
 import 'package:ccc_accounting_management/features/events/domain/event.dart';
 import 'package:ccc_accounting_management/features/events/presentation/event_providers.dart';
@@ -29,6 +33,7 @@ import 'package:ccc_accounting_management/features/textbooks/domain/textbook_cat
 import 'package:ccc_accounting_management/features/textbooks/domain/textbook_order.dart';
 import 'package:ccc_accounting_management/features/textbooks/presentation/textbook_providers.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/misc.dart' show Override;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:intl/intl.dart';
@@ -134,16 +139,7 @@ class _FakeTextbooks implements TextbookRepository {
     'u1': [_order('o1', 'u1', '기존 교재')],
     'u2': [_order('o2', 'u2', 'u2 전용 교재')],
   };
-  Completer<List<TextbookOrder>>? pendingMyOrders;
-  int myOrdersFetches = 0;
-  final List<Map<String, int>> placedOrders = [];
-
-  @override
-  Future<List<TextbookCategory>> fetchCategories(String campusId) async =>
-      const [TextbookCategory(id: 'c1', name: '성경공부', sortOrder: 0)];
-
-  @override
-  Future<List<Textbook>> fetchTextbooks(String campusId) async => [
+  List<Textbook> books = [
     Textbook(
       id: 'b1',
       title: '기초 교재',
@@ -154,12 +150,42 @@ class _FakeTextbooks implements TextbookRepository {
       sortOrder: 0,
     ),
   ];
+  List<TextbookOrder> allOrders = [_order('o1', 'u1', '기존 교재')];
+  int editOrderQty = 3;
+  int fetchOrderCalls = 0;
+  Completer<TextbookOrder?>? pendingFetchOrder;
+  Completer<List<TextbookOrder>>? pendingMyOrders;
+  int myOrdersFetches = 0;
+  final List<Map<String, int>> placedOrders = [];
+
+  @override
+  Future<List<TextbookCategory>> fetchCategories(String campusId) async =>
+      const [TextbookCategory(id: 'c1', name: '성경공부', sortOrder: 0)];
+
+  @override
+  Future<List<Textbook>> fetchTextbooks(String campusId) async => books;
 
   @override
   Future<OrderRound> fetchCurrentRound({String? campusId}) async => _round;
 
   @override
   Future<List<OrderRound>> fetchRounds(String campusId) async => [_round];
+
+  @override
+  Future<List<TextbookOrder>> fetchAllOrders(
+    String campusId, {
+    String? roundId,
+  }) async => roundId == null
+      ? List<TextbookOrder>.of(allOrders)
+      : allOrders.where((o) => o.roundId == roundId).toList();
+
+  @override
+  Future<void> updateOrderStatus(String orderId, OrderStatus status) async {
+    allOrders = [
+      for (final o in allOrders)
+        o.id == orderId ? o.copyWith(status: status) : o,
+    ];
+  }
 
   @override
   Future<List<TextbookOrder>> fetchMyOrders(String userId) {
@@ -173,8 +199,15 @@ class _FakeTextbooks implements TextbookRepository {
   }
 
   @override
-  Future<TextbookOrder?> fetchOrder(String orderId) async =>
-      _order(orderId, 'u1', '수정 대상 교재', qty: 3);
+  Future<TextbookOrder?> fetchOrder(String orderId) {
+    fetchOrderCalls++;
+    final pending = pendingFetchOrder;
+    if (pending != null) {
+      pendingFetchOrder = null;
+      return pending.future;
+    }
+    return Future.value(_order(orderId, 'u1', '수정 대상 교재', qty: editOrderQty));
+  }
 
   @override
   Future<String> placeOrder(Map<String, int> quantities) async {
@@ -188,15 +221,31 @@ class _FakeTextbooks implements TextbookRepository {
 
 class _FakeEvents implements EventRepository {
   Completer<List<Event>>? pendingEvents;
+  Map<String, List<Event>> eventsByCampus = const {};
+  Map<String, List<EventPayment>> paymentsByEvent = const {};
+  int fetchEventsCalls = 0;
+  int fetchEventCalls = 0;
 
   @override
   Future<List<Event>> fetchEvents(String campusId) {
+    fetchEventsCalls++;
     final pending = pendingEvents;
     if (pending != null) {
       pendingEvents = null;
       return pending.future;
     }
-    return Future.value(const []);
+    return Future.value(eventsByCampus[campusId] ?? const []);
+  }
+
+  @override
+  Future<Event?> fetchEvent(String id) async {
+    fetchEventCalls++;
+    for (final list in eventsByCampus.values) {
+      for (final e in list) {
+        if (e.id == id) return e;
+      }
+    }
+    return null;
   }
 
   @override
@@ -205,6 +254,44 @@ class _FakeEvents implements EventRepository {
   @override
   Future<Map<String, EventPayment>> fetchMyPayments(String userId) async =>
       const {};
+
+  @override
+  Future<List<EventPayment>> fetchPayments(String eventId) async =>
+      paymentsByEvent[eventId] ?? const [];
+
+  @override
+  Future<void> setPaid(String paymentId, {required bool isPaid}) async {}
+
+  @override
+  dynamic noSuchMethod(Invocation i) => super.noSuchMethod(i);
+}
+
+class _FakeDeposits implements DepositRepository {
+  List<BankDeposit> firstPage = const [];
+  List<BankDeposit> secondPage = const [];
+  DepositCounts counts = DepositCounts.empty;
+  UnpaidLinkTargets unpaidTargets = UnpaidLinkTargets.empty;
+  int unpaidFetches = 0;
+
+  @override
+  Future<List<BankDeposit>> fetchDeposits(
+    String campusId, {
+    DepositFilter filter = DepositFilter.all,
+    int limit = 50,
+    int offset = 0,
+  }) async {
+    if (offset == 0) return List<BankDeposit>.of(firstPage);
+    return List<BankDeposit>.of(secondPage);
+  }
+
+  @override
+  Future<DepositCounts> fetchDepositCounts(String campusId) async => counts;
+
+  @override
+  Future<UnpaidLinkTargets> fetchUnpaidLinkTargets(String campusId) async {
+    unpaidFetches++;
+    return unpaidTargets;
+  }
 
   @override
   dynamic noSuchMethod(Invocation i) => super.noSuchMethod(i);
@@ -242,6 +329,17 @@ class _FakePushRepo implements PushRepository {
   Future<void> delete(String endpoint) async {}
 }
 
+class _TestCampusNotifier extends Notifier<String?> {
+  @override
+  String? build() => 'k';
+
+  void setCampus(String? campusId) => state = campusId;
+}
+
+final _testCampusProvider = NotifierProvider<_TestCampusNotifier, String?>(
+  _TestCampusNotifier.new,
+);
+
 class _Harness {
   _Harness({Profile? initialProfile})
     : auth = _FakeAuth()..profile = initialProfile ?? _profile('u1');
@@ -250,12 +348,14 @@ class _Harness {
   final _FakeMembers members = _FakeMembers();
   final _FakeTextbooks textbooks = _FakeTextbooks();
   final _FakeEvents events = _FakeEvents();
+  final _FakeDeposits deposits = _FakeDeposits();
   final _FakeSettings settings = _FakeSettings();
   final _FakeCampuses campuses = _FakeCampuses();
 
   Future<ProviderContainer> pumpApp(
     WidgetTester tester, {
     Size size = const Size(1280, 800),
+    List<Override> extraOverrides = const [],
   }) async {
     tester.view.physicalSize = size * 2;
     tester.view.devicePixelRatio = 2;
@@ -272,9 +372,11 @@ class _Harness {
           memberRepositoryProvider.overrideWithValue(members),
           textbookRepositoryProvider.overrideWithValue(textbooks),
           eventRepositoryProvider.overrideWithValue(events),
+          depositRepositoryProvider.overrideWithValue(deposits),
           settingsRepositoryProvider.overrideWithValue(settings),
           pushBrowserProvider.overrideWithValue(_FakePushBrowser()),
           pushRepositoryProvider.overrideWithValue(_FakePushRepo()),
+          ...extraOverrides,
         ],
         child: Consumer(
           builder: (context, ref, _) {
@@ -607,5 +709,554 @@ void main() {
     eventsCompleter.complete(const []);
     await tester.pumpAndSettle();
     expect(find.textContaining('기존 교재'), findsOneWidget);
+  });
+
+  testWidgets('관리자 이벤트 상세에서 캠퍼스를 바꾸면 목록으로 이동하고 이전 캠퍼스 이벤트를 노출하지 않는다', (
+    tester,
+  ) async {
+    final h = _Harness();
+    h.events.eventsByCampus = {
+      'k': [
+        Event(
+          id: 'e-k',
+          campusId: 'k',
+          title: 'KAIST 수련회',
+          amount: 10000,
+          dueDate: null,
+          description: '',
+          createdAt: DateTime(2026, 11, 1),
+        ),
+      ],
+      's': [
+        Event(
+          id: 'e-s',
+          campusId: 's',
+          title: '서울대 수련회',
+          amount: 20000,
+          dueDate: null,
+          description: '',
+          createdAt: DateTime(2026, 11, 2),
+        ),
+      ],
+    };
+    h.events.paymentsByEvent = {
+      'e-k': const [
+        EventPayment(
+          id: 'p-k',
+          eventId: 'e-k',
+          userId: 'm1',
+          isPaid: false,
+          paidAt: null,
+          member: EventMember(studentId: '20240001', name: 'KAIST 회원'),
+        ),
+      ],
+    };
+    final container = await h.pumpApp(tester);
+    final router = container.read(routerProvider);
+    final eventsCallsBefore = h.events.fetchEventsCalls;
+
+    router.go('/admin/events/e-k');
+    await tester.pumpAndSettle();
+    expect(find.text('KAIST 수련회'), findsOneWidget);
+    expect(find.text('KAIST 회원'), findsOneWidget);
+    // 상세 화면은 목록(fetchEvents)으로 소속을 확인하지 않는다. 목록 조회 1회는 중첩 경로의
+    // 상위 화면(이벤트 관리 목록)이 함께 만들어지며 생긴다.
+    expect(h.events.fetchEventsCalls, lessThanOrEqualTo(eventsCallsBefore + 1));
+    expect(h.events.fetchEventCalls, 1);
+
+    container.read(centralCampusOverrideProvider.notifier).select('s');
+    await tester.pumpAndSettle();
+
+    expect(find.text('서울대 수련회'), findsOneWidget);
+    expect(find.text('KAIST 수련회'), findsNothing);
+    expect(await container.read(eventProvider('e-k').future), isNull);
+    expect(await container.read(eventPaymentsProvider('e-k').future), isEmpty);
+  });
+
+  testWidgets('AdminEventDetailPage 는 다른 탭에 있을 때 캠퍼스 전환으로 이동하지 않고 null 경유 전환도 감지한다', (
+    tester,
+  ) async {
+    final h = _Harness();
+    h.events.eventsByCampus = {
+      'k': [
+        Event(
+          id: 'e-k',
+          campusId: 'k',
+          title: 'KAIST 수련회',
+          amount: 10000,
+          dueDate: null,
+          description: '',
+          createdAt: DateTime(2026, 11, 1),
+        ),
+      ],
+      's': [
+        Event(
+          id: 'e-s',
+          campusId: 's',
+          title: '서울대 수련회',
+          amount: 20000,
+          dueDate: null,
+          description: '',
+          createdAt: DateTime(2026, 11, 2),
+        ),
+      ],
+    };
+    final container = await h.pumpApp(
+      tester,
+      extraOverrides: [
+        adminCampusIdProvider.overrideWith(
+          (ref) => ref.watch(_testCampusProvider),
+        ),
+      ],
+    );
+    final router = container.read(routerProvider);
+
+    // 다른 탭(/home)으로 이동해 이벤트 상세가 offstage 일 때 캠퍼스를 바꿔도 /home 을 유지한다.
+    router.go('/admin/events/e-k');
+    await tester.pumpAndSettle();
+    router.go('/home');
+    await tester.pumpAndSettle();
+    container.read(_testCampusProvider.notifier).setCampus('s');
+    await tester.pumpAndSettle();
+    expect(router.routerDelegate.currentConfiguration.uri.path, '/home');
+
+    // 이벤트 상세가 현재 화면일 때 null 을 거쳐 다른 캠퍼스로 바뀌면 목록으로 이동한다.
+    router.go('/admin/events/e-s');
+    await tester.pumpAndSettle();
+    expect(find.text('서울대 수련회'), findsOneWidget);
+
+    container.read(_testCampusProvider.notifier).setCampus(null);
+    await tester.pumpAndSettle();
+    expect(
+      router.routerDelegate.currentConfiguration.uri.path,
+      '/admin/events/e-s',
+    );
+
+    container.read(_testCampusProvider.notifier).setCampus('k');
+    await tester.pumpAndSettle();
+    expect(
+      router.routerDelegate.currentConfiguration.uri.path,
+      '/admin/events',
+    );
+  });
+
+  testWidgets('unpaidLinkTargetsProvider 는 캐시되지 않고 다이얼로그 오픈 및 상태 변경 시 갱신된다', (
+    tester,
+  ) async {
+    final h = _Harness();
+    h.deposits.firstPage = [
+      BankDeposit(
+        id: 'd1',
+        campusId: 'k',
+        bankCode: 'toss',
+        status: DepositStatus.unmatched,
+        depositorName: '홍길동',
+        amount: 5000,
+        depositedAt: DateTime(2026, 11, 10, 12),
+        receivedAt: DateTime(2026, 11, 10, 12),
+      ),
+    ];
+    h.deposits.counts = const DepositCounts(needsReview: 1, all: 1);
+    h.deposits.unpaidTargets = UnpaidLinkTargets(
+      orders: [
+        UnpaidOrderTarget(
+          orderId: 'o1',
+          memberName: '홍길동',
+          studentId: '20240001',
+          roundLabel: '11/1',
+          itemsSummary: '기초 교재 ×1',
+          amount: 5000,
+          createdAt: DateTime(2026, 11, 1),
+        ),
+      ],
+      eventPayments: const [],
+    );
+
+    final container = await h.pumpApp(tester);
+    final router = container.read(routerProvider);
+    router.go('/admin/deposits');
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.widgetWithText(OutlinedButton, '대상 연결'));
+    await tester.pumpAndSettle();
+    expect(h.deposits.unpaidFetches, 1);
+
+    await tester.tap(find.widgetWithText(TextButton, '취소'));
+    await tester.pumpAndSettle();
+    expect(container.exists(unpaidLinkTargetsProvider), isFalse);
+
+    await tester.tap(find.widgetWithText(OutlinedButton, '대상 연결'));
+    await tester.pumpAndSettle();
+    expect(h.deposits.unpaidFetches, 2);
+
+    // 다이얼로그가 열려 있는 동안 주문 상태를 바꾸면 미납 대상이 즉시 무효화되어 다시 불러온다.
+    final ordersSub = container.listen(adminOrdersProvider(_round.id), (_, _) {});
+    addTearDown(ordersSub.close);
+    await container.read(adminOrdersProvider(_round.id).future);
+    await container
+        .read(adminOrdersProvider(_round.id).notifier)
+        .setStatus('o1', OrderStatus.paid);
+    await tester.pumpAndSettle();
+    expect(h.deposits.unpaidFetches, 3);
+  });
+
+  testWidgets('adminOrdersProvider 한 인스턴스 변경 시 다른 회차 캐시도 무효화된다', (
+    tester,
+  ) async {
+    final h = _Harness();
+    final container = await h.pumpApp(tester);
+
+    final roundSub = container.listen(adminOrdersProvider(_round.id), (_, _) {});
+    final allSub = container.listen(adminOrdersProvider(null), (_, _) {});
+    addTearDown(roundSub.close);
+    addTearDown(allSub.close);
+
+    expect(
+      (await container.read(adminOrdersProvider(_round.id).future))
+          .single
+          .status,
+      OrderStatus.requested,
+    );
+    expect(
+      (await container.read(adminOrdersProvider(null).future)).single.status,
+      OrderStatus.requested,
+    );
+
+    await container
+        .read(adminOrdersProvider(_round.id).notifier)
+        .setStatus('o1', OrderStatus.paid);
+    expect(
+      (await container.read(adminOrdersProvider(null).future)).single.status,
+      OrderStatus.paid,
+    );
+
+    await container
+        .read(adminOrdersProvider(null).notifier)
+        .setStatus('o1', OrderStatus.requested);
+    expect(
+      (await container.read(adminOrdersProvider(_round.id).future))
+          .single
+          .status,
+      OrderStatus.requested,
+    );
+  });
+
+  testWidgets('비활성 또는 삭제된 교재는 새 신청 장바구니에서 정리되어 합계와 제출에 포함되지 않는다', (
+    tester,
+  ) async {
+    final h = _Harness();
+    h.textbooks.books = [
+      Textbook(
+        id: 'b1',
+        title: '활성 교재',
+        price: 5000,
+        isActive: true,
+        createdAt: DateTime(2026),
+        categoryId: 'c1',
+        sortOrder: 0,
+      ),
+      Textbook(
+        id: 'b-off',
+        title: '비활성 교재',
+        price: 7000,
+        isActive: false,
+        createdAt: DateTime(2026),
+        categoryId: 'c1',
+        sortOrder: 1,
+      ),
+    ];
+
+    final container = await h.pumpApp(tester);
+    container.read(textbookCartProvider.notifier)
+      ..setQuantity('b1', 1)
+      ..setQuantity('b-off', 2)
+      ..setQuantity('b-deleted', 3);
+
+    final router = container.read(routerProvider);
+    router.go('/textbooks?category=c1');
+    await tester.pumpAndSettle();
+
+    expect(find.text('선택 1권'), findsOneWidget);
+    expect(find.text('비활성 교재'), findsNothing);
+    expect(container.read(textbookCartProvider), {'b1': 1});
+  });
+
+  testWidgets('입금 내역 화면 재진입 시 첫 페이지 새로고침이 추가 페이지를 초기화하고 중복을 막는다', (
+    tester,
+  ) async {
+    BankDeposit dep(int i, {String? name}) => BankDeposit(
+      id: 'd$i',
+      campusId: 'k',
+      bankCode: 'toss',
+      status: DepositStatus.unmatched,
+      depositorName: name ?? '입금자$i',
+      amount: 5000,
+      depositedAt: DateTime(2026, 11, 10, 12),
+      receivedAt: DateTime(2026, 11, 10, 12),
+    );
+
+    final h = _Harness();
+    h.deposits.firstPage = [for (var i = 0; i < depositPageSize; i++) dep(i)];
+    h.deposits.secondPage = [dep(50), dep(51)];
+    h.deposits.counts = const DepositCounts(needsReview: 52, all: 52);
+
+    final container = await h.pumpApp(tester);
+    final router = container.read(routerProvider);
+    router.go('/admin/deposits');
+    await tester.pumpAndSettle();
+
+    final loadMore = find.text('더 보기 (50 / 52)');
+    await tester.ensureVisible(loadMore);
+    await tester.pumpAndSettle();
+    await tester.tap(loadMore);
+    await tester.pumpAndSettle();
+    expect(find.text('입금자50'), findsOneWidget);
+    expect(find.text('입금자51'), findsOneWidget);
+
+    // 다른 탭을 다녀오는 동안 첫 페이지가 갱신되어 d50 이 첫 페이지로 올라왔다.
+    router.go('/home');
+    await tester.pumpAndSettle();
+    h.deposits.firstPage = [dep(50, name: '갱신입금자50')];
+    h.deposits.counts = const DepositCounts(needsReview: 1, all: 1);
+
+    router.go('/admin/deposits');
+    await tester.pumpAndSettle();
+    expect(find.text('갱신입금자50'), findsOneWidget);
+    expect(find.text('입금자50'), findsNothing);
+    expect(find.text('입금자51'), findsNothing);
+  });
+
+  testWidgets('교재 신청 수정은 탭 전환 시 유지되고 취소 시 초기화·브랜치 리셋되며 재진입 시 최신 주문 로드 전까지 잠긴다', (
+    tester,
+  ) async {
+    final h = _Harness();
+    final container = await h.pumpApp(tester);
+    final router = container.read(routerProvider);
+
+    router.go('/textbooks?edit=o1&category=c1');
+    await tester.pumpAndSettle();
+    expect(find.text('선택 3권'), findsOneWidget);
+    final initialFetches = h.textbooks.fetchOrderCalls;
+
+    await tester.tap(find.byTooltip('더하기'));
+    await tester.pumpAndSettle();
+    expect(find.text('선택 4권'), findsOneWidget);
+
+    // 임시 탭 전환 후 복귀해도 제출 전 수정 수량은 유지된다.
+    router.go('/home');
+    await tester.pumpAndSettle();
+    router.go('/textbooks?edit=o1&category=c1');
+    await tester.pumpAndSettle();
+    expect(find.text('선택 4권'), findsOneWidget);
+
+    // 수정 취소 시 /my-orders 로 이동하고 교재 탭 브랜치도 /textbooks 로 초기화된다.
+    await tester.tap(find.widgetWithText(TextButton, '수정 취소'));
+    await tester.pumpAndSettle();
+    expect(router.routerDelegate.currentConfiguration.uri.path, '/my-orders');
+
+    // 재진입 시 최신 주문 응답이 오기 전에는 캐시 수량으로 확정하지 않고 편집을 막는다.
+    final editCompleter = Completer<TextbookOrder?>();
+    h.textbooks.editOrderQty = 2;
+    h.textbooks.pendingFetchOrder = editCompleter;
+    router.go('/textbooks?edit=o1&category=c1');
+    await tester.pump();
+    await tester.pump();
+
+    final plusButton = find.ancestor(
+      of: find.byTooltip('더하기'),
+      matching: find.byType(IconButton),
+    );
+    expect(find.text('선택 3권'), findsNothing);
+    expect(tester.widget<IconButton>(plusButton).onPressed, isNull);
+    expect(
+      tester
+          .widget<FilledButton>(find.widgetWithText(FilledButton, '수정하기'))
+          .onPressed,
+      isNull,
+    );
+
+    editCompleter.complete(_order('o1', 'u1', '수정 대상 교재', qty: 2));
+    await tester.pumpAndSettle();
+
+    expect(h.textbooks.fetchOrderCalls, greaterThan(initialFetches));
+    expect(find.text('선택 2권'), findsOneWidget);
+    expect(tester.widget<IconButton>(plusButton).onPressed, isNotNull);
+  });
+
+  testWidgets('입금 연결 다이얼로그는 최신 미납 목록에 모든 대상이 있는 후보만 연결 가능하고 사라진 선택을 정리한다', (
+    tester,
+  ) async {
+    final h = _Harness();
+    h.deposits.firstPage = [
+      BankDeposit(
+        id: 'd-multi',
+        campusId: 'k',
+        bankCode: 'toss',
+        status: DepositStatus.ambiguous,
+        depositorName: '홍길동',
+        amount: 10000,
+        depositedAt: DateTime(2026, 11, 10, 12),
+        receivedAt: DateTime(2026, 11, 10, 12),
+        candidates: const [
+          DepositCandidate(
+            kind: 'orders',
+            userId: 'u1',
+            label: '멀티 후보',
+            amount: 10000,
+            orderIds: ['o1', 'o2'],
+          ),
+          DepositCandidate(
+            kind: 'event',
+            userId: 'u1',
+            label: '완납 이벤트 후보',
+            amount: 10000,
+            eventId: 'e1',
+            eventPaymentId: 'ep-paid',
+          ),
+        ],
+      ),
+    ];
+    h.deposits.counts = const DepositCounts(needsReview: 1, all: 1);
+    h.deposits.unpaidTargets = UnpaidLinkTargets(
+      orders: [
+        UnpaidOrderTarget(
+          orderId: 'o1',
+          memberName: '홍길동',
+          studentId: '20240001',
+          roundLabel: '11/1',
+          itemsSummary: '교재A ×1',
+          amount: 5000,
+          createdAt: DateTime(2026, 11, 1),
+        ),
+      ],
+      eventPayments: const [],
+    );
+
+    final container = await h.pumpApp(tester);
+    final router = container.read(routerProvider);
+    router.go('/admin/deposits');
+    await tester.pumpAndSettle();
+
+    // o2 와 ep-paid 가 미납 목록에 없으므로 두 후보 모두 연결 불가(숨김)여야 한다.
+    await tester.tap(find.widgetWithText(OutlinedButton, '대상 연결'));
+    await tester.pumpAndSettle();
+    expect(find.text('추천 후보'), findsNothing);
+    expect(find.text('멀티 후보'), findsNothing);
+    expect(find.text('완납 이벤트 후보'), findsNothing);
+
+    // 수동 선택한 o1 이 미납 목록 새로고침으로 사라지면 선택이 정리되고 연결 버튼이 비활성화된다.
+    await tester.tap(find.byType(CheckboxListTile));
+    await tester.pumpAndSettle();
+    expect(find.text('선택 합계 5,000원 (1건)'), findsOneWidget);
+    expect(
+      tester.widget<FilledButton>(find.widgetWithText(FilledButton, '연결')).onPressed,
+      isNotNull,
+    );
+
+    h.deposits.unpaidTargets = UnpaidLinkTargets.empty;
+    container.invalidate(unpaidLinkTargetsProvider);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('선택 합계'), findsNothing);
+    expect(
+      tester.widget<FilledButton>(find.widgetWithText(FilledButton, '연결')).onPressed,
+      isNull,
+    );
+
+    await tester.tap(find.widgetWithText(TextButton, '취소'));
+    await tester.pumpAndSettle();
+
+    // o1(5,000원) + o2(7,000원)가 모두 미납이면 최신 합계 12,000원으로 후보가 열리고 불일치 확인이 뜬다.
+    h.deposits.unpaidTargets = UnpaidLinkTargets(
+      orders: [
+        UnpaidOrderTarget(
+          orderId: 'o1',
+          memberName: '홍길동',
+          studentId: '20240001',
+          roundLabel: '11/1',
+          itemsSummary: '교재A ×1',
+          amount: 5000,
+          createdAt: DateTime(2026, 11, 1),
+        ),
+        UnpaidOrderTarget(
+          orderId: 'o2',
+          memberName: '홍길동',
+          studentId: '20240001',
+          roundLabel: '11/8',
+          itemsSummary: '교재B ×1',
+          amount: 7000,
+          createdAt: DateTime(2026, 11, 8),
+        ),
+      ],
+      eventPayments: const [],
+    );
+    await tester.tap(find.widgetWithText(OutlinedButton, '대상 연결'));
+    await tester.pumpAndSettle();
+    expect(find.text('추천 후보'), findsOneWidget);
+    expect(find.text('멀티 후보'), findsOneWidget);
+    expect(find.text('12,000원'), findsOneWidget);
+    expect(find.text('완납 이벤트 후보'), findsNothing);
+
+    await tester.tap(find.widgetWithText(OutlinedButton, '연결'));
+    await tester.pumpAndSettle();
+    expect(find.text('금액 불일치 확인'), findsOneWidget);
+    expect(find.textContaining('12,000원'), findsOneWidget);
+  });
+
+  testWidgets('백그라운드 새로고침 실패 후 재시도 시 ErrorView 대신 LoadingView 를 표시한다', (
+    tester,
+  ) async {
+    var calls = 0;
+    final retryCompleter = Completer<String>();
+    final sampleProvider = FutureProvider.autoDispose<String>((ref) async {
+      calls++;
+      if (calls == 1) return '초기값';
+      if (calls == 2) throw Exception('일시 오류');
+      return retryCompleter.future;
+    });
+
+    late ProviderContainer container;
+    await tester.pumpWidget(
+      ProviderScope(
+        retry: (_, _) => null,
+        child: MaterialApp(
+          theme: AppTheme.light(),
+          home: Scaffold(
+            body: Consumer(
+              builder: (context, ref, _) {
+                container = ProviderScope.containerOf(context);
+                final value = ref.watch(sampleProvider);
+                return AsyncValueView<String>(
+                  value: value,
+                  onRetry: () => ref.invalidate(sampleProvider),
+                  data: Text.new,
+                );
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('초기값'), findsOneWidget);
+
+    // 백그라운드 새로고침이 실패하면 hasValue 와 hasError 가 동시에 참이지만 hasUsableValue 는 거짓이다.
+    container.invalidate(sampleProvider);
+    await tester.pumpAndSettle();
+    final errored = container.read(sampleProvider);
+    expect(errored.hasValue, isTrue);
+    expect(errored.hasError, isTrue);
+    expect(errored.hasUsableValue, isFalse);
+    expect(find.byType(ErrorView), findsOneWidget);
+
+    // 다시 시도 중에는 ErrorView 가 고정되지 않고 LoadingView 가 표시된다.
+    await tester.tap(find.text('다시 시도'));
+    await tester.pump();
+    await tester.pump();
+    expect(find.byType(LoadingView), findsOneWidget);
+    expect(find.byType(ErrorView), findsNothing);
+
+    retryCompleter.complete('복구됨');
+    await tester.pumpAndSettle();
+    expect(find.text('복구됨'), findsOneWidget);
   });
 }

@@ -62,7 +62,9 @@ class _AdminFeedbackPageState extends ConsumerState<AdminFeedbackPage> {
             ],
           ),
           const SizedBox(height: 16),
-          if (list.hasError)
+          if (list.isLoading && !list.hasUsableValue)
+            const LoadingView()
+          else if (list.hasError)
             ErrorView(
               error: list.error!,
               onRetry: () => ref.invalidate(feedbackListProvider(filter)),

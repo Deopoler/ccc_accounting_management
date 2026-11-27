@@ -48,7 +48,6 @@ final unpaidLinkTargetsProvider =
       final userId = ref.watch(currentUserIdProvider);
       final campusId = ref.watch(adminCampusIdProvider);
       if (userId == null || campusId == null) return UnpaidLinkTargets.empty;
-      ref.cacheFor(defaultCacheDuration, campusScope: CampusScope.admin);
       return ref
           .watch(depositRepositoryProvider)
           .fetchUnpaidLinkTargets(campusId);

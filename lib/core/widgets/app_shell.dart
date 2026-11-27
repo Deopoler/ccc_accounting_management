@@ -42,17 +42,27 @@ class _AppShellState extends ConsumerState<AppShell> {
     _recordTextbooksUri();
   }
 
+  Uri get _currentUri => widget.uri ?? Uri.parse(widget.location);
+
+  static bool _sameRevalidationTarget(Uri a, Uri b) =>
+      a.path == b.path &&
+      a.queryParameters['edit'] == b.queryParameters['edit'];
+
   @override
   void didUpdateWidget(covariant AppShell oldWidget) {
     super.didUpdateWidget(oldWidget);
     _recordTextbooksUri();
-    if (oldWidget.location != widget.location) {
-      final target = widget.location;
+    final oldUri = oldWidget.uri ?? Uri.parse(oldWidget.location);
+    final targetUri = _currentUri;
+    if (!_sameRevalidationTarget(oldUri, targetUri)) {
+      // 새 화면이 그려지기 전에 이미 불러온 것만 골라 둔다(첫 방문은 다시 받지 않는다).
+      final loaded = loadedRouteProviders(ref, targetUri);
+      if (loaded.isEmpty) return;
       // Wait for TickerMode on the newly active IndexedStack branch to resume
       // before invalidating, so Riverpod refreshes in-place instead of disposing.
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && widget.location == target) {
-          revalidateRoute(ref, target);
+        if (mounted && _sameRevalidationTarget(_currentUri, targetUri)) {
+          revalidateProviders(ref, loaded);
         }
       });
     }

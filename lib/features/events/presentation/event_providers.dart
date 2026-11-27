@@ -4,6 +4,7 @@ import '../../../core/riverpod/cache_for.dart';
 import '../../../core/supabase/supabase_providers.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../../campus/presentation/campus_providers.dart';
+import '../../deposits/presentation/deposit_providers.dart';
 import '../data/event_repository.dart';
 import '../domain/event.dart';
 
@@ -25,9 +26,12 @@ final eventProvider = FutureProvider.autoDispose.family<Event?, String>((
   id,
 ) async {
   final userId = ref.watch(currentUserIdProvider);
-  if (userId == null) return null;
+  final campusId = ref.watch(adminCampusIdProvider);
+  if (userId == null || campusId == null) return null;
   ref.cacheFor(defaultCacheDuration, campusScope: CampusScope.admin);
-  return ref.watch(eventRepositoryProvider).fetchEvent(id);
+  final event = await ref.watch(eventRepositoryProvider).fetchEvent(id);
+  if (event == null || event.campusId != campusId) return null;
+  return event;
 });
 
 final eventSummariesProvider =
@@ -62,15 +66,36 @@ class EventPaymentsNotifier extends AsyncNotifier<List<EventPayment>> {
   @override
   Future<List<EventPayment>> build() async {
     final userId = ref.watch(currentUserIdProvider);
-    if (userId == null) return const [];
+    final campusId = ref.watch(adminCampusIdProvider);
+    if (userId == null || campusId == null) return const [];
     ref.cacheFor(defaultCacheDuration, campusScope: CampusScope.admin);
-    return ref.watch(eventRepositoryProvider).fetchPayments(eventId);
+    (Object, StackTrace)? paymentsError;
+    final eventFuture = ref.read(eventProvider(eventId).future);
+    final paymentsFuture = ref
+        .watch(eventRepositoryProvider)
+        .fetchPayments(eventId)
+        .then<List<EventPayment>?>(
+          (v) => v,
+          onError: (Object err, StackTrace st) {
+            paymentsError = (err, st);
+            return null;
+          },
+        );
+    final event = await eventFuture;
+    if (event == null || event.campusId != campusId) return const [];
+    final payments = await paymentsFuture;
+    if (paymentsError case (final err, final st)) {
+      Error.throwWithStackTrace(err, st);
+    }
+    return payments ?? const [];
   }
 
   Future<void> setPaid(String paymentId, {required bool isPaid}) async {
     await ref.read(eventRepositoryProvider).setPaid(paymentId, isPaid: isPaid);
+    if (!ref.mounted) return;
+    ref.invalidate(unpaidLinkTargetsProvider);
     final current = state.value;
-    if (!ref.mounted || current == null) return;
+    if (current == null) return;
     state = AsyncData([
       for (final p in current)
         p.id == paymentId ? p.copyWith(isPaid: isPaid) : p,
@@ -81,8 +106,10 @@ class EventPaymentsNotifier extends AsyncNotifier<List<EventPayment>> {
     await ref
         .read(eventRepositoryProvider)
         .setAmountOverride(paymentId, amount);
+    if (!ref.mounted) return;
+    ref.invalidate(unpaidLinkTargetsProvider);
     final current = state.value;
-    if (!ref.mounted || current == null) return;
+    if (current == null) return;
     state = AsyncData([
       for (final p in current)
         p.id == paymentId ? p.copyWith(amountOverride: () => amount) : p,

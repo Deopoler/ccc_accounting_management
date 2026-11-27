@@ -95,11 +95,11 @@ class ErrorView extends StatelessWidget {
 /// Helpers for distinguishing safe in-place refreshes from scope-change reloads.
 extension AsyncValueDisplay<T> on AsyncValue<T> {
   /// True when data is safe to render without flashing another user's or
-  /// campus's previous state during a dependency reload.
-  bool get hasUsableValue => hasValue && !isReloading;
+  /// campus's previous state during a dependency reload or after an error.
+  bool get hasUsableValue => hasValue && !hasError && !isReloading;
 
   /// True when refreshing already-visible data in the background.
-  bool get isBackgroundRefreshing => isRefreshing && hasValue;
+  bool get isBackgroundRefreshing => isRefreshing && hasValue && !hasError;
 }
 
 /// Overlays a thin progress bar at the top edge without shifting [child].
@@ -158,15 +158,21 @@ class AsyncValueView<T> extends StatelessWidget {
   Widget build(BuildContext context) {
     final keepingData =
         value.hasValue &&
+        !value.hasError &&
         (value.isRefreshing || (skipLoadingOnReload && value.isReloading));
-    final content = value.when(
-      skipLoadingOnReload: skipLoadingOnReload,
-      skipLoadingOnRefresh: true,
-      data: (d) =>
-          (isEmpty?.call(d) ?? false) ? (empty ?? const EmptyView()) : data(d),
-      error: (e, _) => ErrorView(error: e, onRetry: onRetry),
-      loading: () => const LoadingView(),
-    );
+    final Widget content;
+    if (value.isLoading && !keepingData) {
+      content = const LoadingView();
+    } else if (value.hasError && !keepingData) {
+      content = ErrorView(error: value.error!, onRetry: onRetry);
+    } else if (value.hasValue) {
+      final d = value.requireValue;
+      content = (isEmpty?.call(d) ?? false)
+          ? (empty ?? const EmptyView())
+          : data(d);
+    } else {
+      content = const LoadingView();
+    }
     if (!showRefreshIndicator) return content;
     return RefreshOverlay(
       refreshing: value.isLoading && keepingData,

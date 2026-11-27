@@ -62,6 +62,24 @@ class _BankAccountFormState extends ConsumerState<_BankAccountForm> {
   bool _saving = false;
 
   @override
+  void didUpdateWidget(covariant _BankAccountForm oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (_saving) return;
+    if (oldWidget.initial.bankName != widget.initial.bankName &&
+        _bank.text == oldWidget.initial.bankName) {
+      _bank.text = widget.initial.bankName;
+    }
+    if (oldWidget.initial.accountNumber != widget.initial.accountNumber &&
+        _number.text == oldWidget.initial.accountNumber) {
+      _number.text = widget.initial.accountNumber;
+    }
+    if (oldWidget.initial.holder != widget.initial.holder &&
+        _holder.text == oldWidget.initial.holder) {
+      _holder.text = widget.initial.holder;
+    }
+  }
+
+  @override
   void dispose() {
     _bank.dispose();
     _number.dispose();

@@ -35,6 +35,17 @@ class OrderRound {
   /// `10/8(수) 오전 9시`
   String get deadlineLabel =>
       '${DateFormat('M/d(E)').format(deadline)} ${timeLabel(deadline)}';
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is OrderRound &&
+          id == other.id &&
+          start == other.start &&
+          deadline == other.deadline;
+
+  @override
+  int get hashCode => Object.hash(id, start, deadline);
 }
 
 /// 관리 중인 캠퍼스의 회차 목록.

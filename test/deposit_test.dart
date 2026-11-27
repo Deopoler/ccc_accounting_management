@@ -309,6 +309,9 @@ class _FakeEvents implements EventRepository {
   final List<EventPayment> payments;
 
   @override
+  Future<List<Event>> fetchEvents(String campusId) async => [event];
+
+  @override
   Future<Event?> fetchEvent(String id) async => event;
 
   @override
@@ -1095,6 +1098,7 @@ void main() {
 
       final event = Event(
         id: 'e1',
+        campusId: 'k',
         title: '겨울 수련회',
         amount: 30000,
         dueDate: null,

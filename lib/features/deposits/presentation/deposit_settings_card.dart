@@ -21,6 +21,7 @@ class DepositSettingsCard extends ConsumerWidget {
         padding: const EdgeInsets.all(20),
         child: AsyncValueView<CampusDepositSettings?>(
           value: settingsAsync,
+          showRefreshIndicator: false,
           onRetry: () => ref.invalidate(depositSettingsProvider),
           isEmpty: (s) => s == null,
           empty: const EmptyView(message: '캠퍼스 정보를 불러오지 못했습니다.'),
