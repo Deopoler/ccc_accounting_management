@@ -253,4 +253,25 @@ void main() {
     expect(on(DateTime(2025, 1, 1)), 'a'); // 첫 회차보다 앞
     expect(roundOnDate(const [], DateTime(2026, 1, 1)), isNull);
   });
+
+  test('OrderRound 값 동등성: id, start, deadline 이 같으면 같다', () {
+    final a = OrderRound(
+      id: 'r1',
+      start: DateTime(2026, 9, 30, 9),
+      deadline: DateTime(2026, 10, 7, 9),
+    );
+    final b = OrderRound(
+      id: 'r1',
+      start: DateTime(2026, 9, 30, 9),
+      deadline: DateTime(2026, 10, 7, 9),
+    );
+    final c = OrderRound(
+      id: 'r1',
+      start: DateTime(2026, 9, 30, 9),
+      deadline: DateTime(2026, 10, 8, 9),
+    );
+    expect(a, equals(b));
+    expect(a.hashCode, equals(b.hashCode));
+    expect(a, isNot(equals(c)));
+  });
 }

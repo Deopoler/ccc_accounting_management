@@ -40,8 +40,15 @@ class _AdminEventDetailPageState extends ConsumerState<AdminEventDetailPage> {
   EventPaymentSort _sort = EventPaymentSort.studentId;
   final _search = TextEditingController();
   final Set<String> _busy = {};
+  String? _lastCampusId;
 
   String get _id => widget.eventId;
+
+  @override
+  void initState() {
+    super.initState();
+    _lastCampusId = ref.read(adminCampusIdProvider);
+  }
 
   @override
   void dispose() {
@@ -191,9 +198,17 @@ class _AdminEventDetailPageState extends ConsumerState<AdminEventDetailPage> {
 
   @override
   Widget build(BuildContext context) {
-    ref.listen<String?>(adminCampusIdProvider, (prev, next) {
-      if (prev != null && next != null && prev != next) {
-        GoRouter.maybeOf(context)?.go(AppRoutes.adminEvents);
+    ref.listen<String?>(adminCampusIdProvider, (_, next) {
+      if (next == null) return;
+      final prev = _lastCampusId;
+      _lastCampusId = next;
+      if (prev != null && prev != next) {
+        final router = GoRouter.maybeOf(context);
+        if (router != null &&
+            router.routerDelegate.currentConfiguration.uri.path ==
+                AppRoutes.adminEventDetail(_id)) {
+          router.go(AppRoutes.adminEvents);
+        }
       }
     });
 

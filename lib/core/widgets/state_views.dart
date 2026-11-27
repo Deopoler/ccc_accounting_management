@@ -95,11 +95,11 @@ class ErrorView extends StatelessWidget {
 /// Helpers for distinguishing safe in-place refreshes from scope-change reloads.
 extension AsyncValueDisplay<T> on AsyncValue<T> {
   /// True when data is safe to render without flashing another user's or
-  /// campus's previous state during a dependency reload.
-  bool get hasUsableValue => hasValue && !isReloading;
+  /// campus's previous state during a dependency reload or after an error.
+  bool get hasUsableValue => hasValue && !hasError && !isReloading;
 
   /// True when refreshing already-visible data in the background.
-  bool get isBackgroundRefreshing => isRefreshing && hasValue;
+  bool get isBackgroundRefreshing => isRefreshing && hasValue && !hasError;
 }
 
 /// Overlays a thin progress bar at the top edge without shifting [child].
@@ -158,6 +158,7 @@ class AsyncValueView<T> extends StatelessWidget {
   Widget build(BuildContext context) {
     final keepingData =
         value.hasValue &&
+        !value.hasError &&
         (value.isRefreshing || (skipLoadingOnReload && value.isReloading));
     final Widget content;
     if (value.isLoading && !keepingData) {

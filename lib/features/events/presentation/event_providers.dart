@@ -29,13 +29,9 @@ final eventProvider = FutureProvider.autoDispose.family<Event?, String>((
   final campusId = ref.watch(adminCampusIdProvider);
   if (userId == null || campusId == null) return null;
   ref.cacheFor(defaultCacheDuration, campusScope: CampusScope.admin);
-  final campusEvents = await ref
-      .watch(eventRepositoryProvider)
-      .fetchEvents(campusId);
-  for (final event in campusEvents) {
-    if (event.id == id) return event;
-  }
-  return null;
+  final event = await ref.watch(eventRepositoryProvider).fetchEvent(id);
+  if (event == null || event.campusId != campusId) return null;
+  return event;
 });
 
 final eventSummariesProvider =
@@ -73,10 +69,25 @@ class EventPaymentsNotifier extends AsyncNotifier<List<EventPayment>> {
     final campusId = ref.watch(adminCampusIdProvider);
     if (userId == null || campusId == null) return const [];
     ref.cacheFor(defaultCacheDuration, campusScope: CampusScope.admin);
-    final repo = ref.watch(eventRepositoryProvider);
-    final campusEvents = await repo.fetchEvents(campusId);
-    if (!campusEvents.any((e) => e.id == eventId)) return const [];
-    return repo.fetchPayments(eventId);
+    (Object, StackTrace)? paymentsError;
+    final eventFuture = ref.read(eventProvider(eventId).future);
+    final paymentsFuture = ref
+        .watch(eventRepositoryProvider)
+        .fetchPayments(eventId)
+        .then<List<EventPayment>?>(
+          (v) => v,
+          onError: (Object err, StackTrace st) {
+            paymentsError = (err, st);
+            return null;
+          },
+        );
+    final event = await eventFuture;
+    if (event == null || event.campusId != campusId) return const [];
+    final payments = await paymentsFuture;
+    if (paymentsError case (final err, final st)) {
+      Error.throwWithStackTrace(err, st);
+    }
+    return payments ?? const [];
   }
 
   Future<void> setPaid(String paymentId, {required bool isPaid}) async {

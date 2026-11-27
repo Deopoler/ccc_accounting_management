@@ -38,22 +38,31 @@ class _TextbooksPageState extends ConsumerState<TextbooksPage> {
   Map<String, int> _editQuantities = {};
   String? _prefilledFor;
   bool _editDirty = false;
-  bool _wasActive = true;
+  bool _awaitingFreshOrder = false;
   bool _submitting = false;
   final _search = TextEditingController();
 
   bool get _editing => widget.editOrderId != null;
 
   @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    final active = TickerMode.valuesOf(context).enabled;
-    if (_editing && _wasActive && !active) {
-      _editQuantities = {};
-      _prefilledFor = null;
-      _editDirty = false;
+  void initState() {
+    super.initState();
+    final editId = widget.editOrderId;
+    if (editId != null && ref.exists(orderProvider(editId))) {
+      final current = ref.read(orderProvider(editId));
+      if (current.hasValue || current.hasError || current.isLoading) {
+        _awaitingFreshOrder = true;
+        if (!current.isLoading) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            final latest = ref.read(orderProvider(editId));
+            if (!latest.isLoading) {
+              ref.invalidate(orderProvider(editId));
+            }
+          });
+        }
+      }
     }
-    _wasActive = active;
   }
 
   @override
@@ -63,12 +72,21 @@ class _TextbooksPageState extends ConsumerState<TextbooksPage> {
   }
 
   void _cancelEdit() {
+    final router = GoRouter.maybeOf(context);
+    _search.clear();
     setState(() {
       _editQuantities = {};
       _prefilledFor = null;
       _editDirty = false;
+      _awaitingFreshOrder = false;
     });
-    context.go(AppRoutes.myOrders);
+    if (router != null) {
+      // Reset branch 1 stack to /textbooks before switching to /my-orders.
+      router.go(AppRoutes.textbooks);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        router.go(AppRoutes.myOrders);
+      });
+    }
   }
 
   /// 카테고리 이동. 수정 모드면 edit 쿼리를 유지한다.
@@ -149,17 +167,20 @@ class _TextbooksPageState extends ConsumerState<TextbooksPage> {
     }
   }
 
-  List<Widget> _tiles(List<Textbook> textbooks, Map<String, int> quantities) =>
-      [
-        for (final t in textbooks) ...[
-          _TextbookTile(
-            textbook: t,
-            quantity: quantities[t.id] ?? 0,
-            onChanged: (v) => _setQuantity(t.id, v),
-          ),
-          const SizedBox(height: 8),
-        ],
-      ];
+  List<Widget> _tiles(
+    List<Textbook> textbooks,
+    Map<String, int> quantities, {
+    bool enabled = true,
+  }) => [
+    for (final t in textbooks) ...[
+      _TextbookTile(
+        textbook: t,
+        quantity: quantities[t.id] ?? 0,
+        onChanged: enabled ? (v) => _setQuantity(t.id, v) : null,
+      ),
+      const SizedBox(height: 8),
+    ],
+  ];
 
   int _count(Map<String, int> quantities) =>
       quantities.values.fold(0, (a, b) => a + b);
@@ -186,6 +207,17 @@ class _TextbooksPageState extends ConsumerState<TextbooksPage> {
       },
     );
 
+    if (_editing) {
+      ref.listen<AsyncValue<TextbookOrder?>>(
+        orderProvider(widget.editOrderId!),
+        (_, next) {
+          if (_awaitingFreshOrder && !next.isLoading) {
+            setState(() => _awaitingFreshOrder = false);
+          }
+        },
+      );
+    }
+
     final textbooks = ref.watch(textbooksProvider(CampusScope.member));
     final categories = ref.watch(
       textbookCategoriesProvider(CampusScope.member),
@@ -195,13 +227,21 @@ class _TextbooksPageState extends ConsumerState<TextbooksPage> {
         ? ref.watch(orderProvider(widget.editOrderId!))
         : const AsyncData<TextbookOrder?>(null);
 
-    // 수정 모드: 편집 전까지는 서버 신청 수량으로 채운다.
+    // 수정 모드: 새로고침이 끝난 최신 서버 신청으로만 초기 수량을 채운다.
     final order = editOrder.hasUsableValue ? editOrder.requireValue : null;
-    if (_editing && order != null && (!_editDirty || _prefilledFor != order.id)) {
+    final canPrefill =
+        _editing &&
+        order != null &&
+        !_awaitingFreshOrder &&
+        !editOrder.isLoading &&
+        !editOrder.isRefreshing;
+    if (canPrefill && (_prefilledFor != order.id || !_editDirty)) {
       _prefilledFor = order.id;
       _editQuantities = {for (final i in order.items) i.textbookId: i.quantity};
     }
-    final rawCart = _editing ? const <String, int>{} : ref.watch(textbookCartProvider);
+    final rawCart = _editing
+        ? const <String, int>{}
+        : ref.watch(textbookCartProvider);
 
     final loading = [textbooks, categories, round, editOrder];
     if (loading.any((v) => v.isLoading && !v.hasUsableValue)) {
@@ -223,7 +263,15 @@ class _TextbooksPageState extends ConsumerState<TextbooksPage> {
       return const LoadingView();
     }
 
-    final refreshing = loading.any((v) => v.isBackgroundRefreshing);
+    final editLocked =
+        _editing &&
+        (_awaitingFreshOrder ||
+            editOrder.isLoading ||
+            editOrder.isRefreshing ||
+            _prefilledFor != order?.id);
+    final refreshing =
+        loading.any((v) => v.isBackgroundRefreshing) ||
+        (_editing && _awaitingFreshOrder);
     final currentRound = round.requireValue!;
     final books = textbooks.requireValue;
 
@@ -289,7 +337,7 @@ class _TextbooksPageState extends ConsumerState<TextbooksPage> {
         if (group == null)
           const EmptyView(message: '이 카테고리에는 신청 가능한 교재가 없습니다.')
         else
-          ..._tiles(group.textbooks, quantities),
+          ..._tiles(group.textbooks, quantities, enabled: !editLocked),
       ];
     } else if (query.isNotEmpty) {
       final hits = visible
@@ -301,7 +349,7 @@ class _TextbooksPageState extends ConsumerState<TextbooksPage> {
         if (hits.isEmpty)
           const EmptyView(message: '검색 결과가 없습니다.')
         else
-          ..._tiles(hits, quantities),
+          ..._tiles(hits, quantities, enabled: !editLocked),
       ];
     } else {
       content = [
@@ -357,7 +405,7 @@ class _TextbooksPageState extends ConsumerState<TextbooksPage> {
             total: _total(books, quantities),
             label: _editing ? '수정하기' : '신청하기',
             submitting: _submitting,
-            onSubmit: selectedCount == 0
+            onSubmit: selectedCount == 0 || editLocked
                 ? null
                 : () => _submit(books, quantities),
           ),
@@ -430,7 +478,7 @@ class _TextbookTile extends StatelessWidget {
 
   final Textbook textbook;
   final int quantity;
-  final ValueChanged<int> onChanged;
+  final ValueChanged<int>? onChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -445,8 +493,8 @@ class _TextbookTile extends StatelessWidget {
             : BorderSide.none,
       ),
       child: InkWell(
-        onTap: textbook.isActive
-            ? () => onChanged(quantity == 0 ? 1 : 0)
+        onTap: onChanged != null && textbook.isActive
+            ? () => onChanged!(quantity == 0 ? 1 : 0)
             : null,
         child: Padding(
           padding: const EdgeInsets.fromLTRB(20, 14, 12, 14),

@@ -12,17 +12,44 @@ import '../../features/settings/presentation/settings_providers.dart';
 import '../../features/textbooks/presentation/textbook_providers.dart';
 import 'routes.dart';
 
-/// Silently refreshes already-loaded providers for [uri] on re-entry.
-/// Skips providers still loading so first visits do not double-fetch.
-void revalidateRoute(WidgetRef ref, Uri uri) {
-  void refreshIfLoaded(ProviderBase<AsyncValue<Object?>> provider) {
-    if (!ref.exists(provider)) return;
-    final state = ref.read(provider);
-    if (state.hasValue && !state.isLoading) {
-      ref.invalidate(provider);
+/// [uri] 화면이 쓰는 provider 중 지금 이미 불러온 것.
+///
+/// 화면에 들어가기 직전(새 화면이 그려지기 전)에 불러야, 이번 방문에서 처음 만든 provider 를
+/// 다시 받는 일(첫 방문 중복 요청)이 없다.
+Set<ProviderBase<AsyncValue<Object?>>> loadedRouteProviders(
+  WidgetRef ref,
+  Uri uri,
+) {
+  final loaded = <ProviderBase<AsyncValue<Object?>>>{};
+  _visitRouteProviders(ref, uri, (provider) {
+    if (ref.exists(provider) && ref.read(provider).hasValue) {
+      loaded.add(provider);
     }
-  }
+  });
+  return loaded;
+}
 
+/// [providers] 중 아직 살아 있고 불러오는 중이 아닌 것을 조용히 다시 받는다.
+void revalidateProviders(
+  WidgetRef ref,
+  Iterable<ProviderBase<AsyncValue<Object?>>> providers,
+) {
+  for (final provider in providers) {
+    if (!ref.exists(provider)) continue;
+    final state = ref.read(provider);
+    if (state.hasValue && !state.isLoading) ref.invalidate(provider);
+  }
+}
+
+/// Silently refreshes already-loaded providers for [uri].
+void revalidateRoute(WidgetRef ref, Uri uri) =>
+    revalidateProviders(ref, loadedRouteProviders(ref, uri));
+
+void _visitRouteProviders(
+  WidgetRef ref,
+  Uri uri,
+  void Function(ProviderBase<AsyncValue<Object?>> provider) refreshIfLoaded,
+) {
   final segments = uri.pathSegments;
   if (segments.length == 3 &&
       segments[0] == 'admin' &&

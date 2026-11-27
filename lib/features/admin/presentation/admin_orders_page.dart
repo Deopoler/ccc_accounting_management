@@ -283,7 +283,9 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
 
     // Start fetching orders for the current round concurrently with fetchRounds.
     final rounds =
-        roundList.hasValue && roundList.requireValue?.campusId == activeCampusId
+        roundList.hasValue &&
+            !roundList.hasError &&
+            roundList.requireValue?.campusId == activeCampusId
         ? roundList.requireValue!
         : RoundList(
             campusId: activeCampusId,
@@ -311,6 +313,7 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
         currentRoundAsync.isBackgroundRefreshing ||
         (roundList.isLoading &&
             roundList.hasValue &&
+            !roundList.hasError &&
             roundList.value?.campusId == activeCampusId) ||
         textbooks.isBackgroundRefreshing ||
         orders.isBackgroundRefreshing;

@@ -1098,6 +1098,7 @@ void main() {
 
       final event = Event(
         id: 'e1',
+        campusId: 'k',
         title: '겨울 수련회',
         amount: 30000,
         dueDate: null,

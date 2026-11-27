@@ -190,6 +190,7 @@ final _orders = [
 final _events = [
   Event(
     id: 'e1',
+    campusId: 'k',
     title: '$_longTitle 겨울 수련회',
     amount: 1500000,
     dueDate: DateTime(_now.year, _now.month, _now.day + 3),
@@ -198,6 +199,7 @@ final _events = [
   ),
   Event(
     id: 'e2',
+    campusId: 'k',
     title: '지난 모임',
     amount: 5000,
     dueDate: DateTime(2026, 1, 1),
