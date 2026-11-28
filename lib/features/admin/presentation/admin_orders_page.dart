@@ -397,9 +397,17 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
       }
 
       final ids = [for (final o in recheckedTargets) o.id];
+      final confirmedReceivedIds = {
+        for (final o in recheckedTargets)
+          if (o.receivedAt != null) o.id,
+      };
       await switch (field) {
         OrderBulkField.paid => notifier.bulkSetPaid(ids, paid: value),
-        OrderBulkField.shipped => notifier.bulkSetShipped(ids, shipped: value),
+        OrderBulkField.shipped => notifier.bulkSetShipped(
+          ids,
+          shipped: value,
+          confirmedReceivedIds: value ? const {} : confirmedReceivedIds,
+        ),
         OrderBulkField.received => notifier.bulkSetReceived(
           ids,
           received: value,

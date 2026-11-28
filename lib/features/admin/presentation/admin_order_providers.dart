@@ -188,13 +188,20 @@ class AdminOrdersNotifier extends AsyncNotifier<List<TextbookOrder>> {
     affectsUnpaid: true,
   );
 
-  Future<void> bulkSetShipped(List<String> ids, {required bool shipped}) =>
-      _bulk(
-        ids,
-        () => ref
-            .read(textbookRepositoryProvider)
-            .setShippedMany(ids, shipped: shipped),
-      );
+  Future<void> bulkSetShipped(
+    List<String> ids, {
+    required bool shipped,
+    Set<String> confirmedReceivedIds = const {},
+  }) => _bulk(
+    ids,
+    () => ref
+        .read(textbookRepositoryProvider)
+        .setShippedMany(
+          ids,
+          shipped: shipped,
+          confirmedReceivedIds: confirmedReceivedIds,
+        ),
+  );
 
   /// 수령은 행마다 RPC 로 처리한다. (서버가 배송 여부 / 권한을 행마다 검사)
   Future<void> bulkSetReceived(List<String> ids, {required bool received}) =>

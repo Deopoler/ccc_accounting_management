@@ -15,6 +15,7 @@ class OrderStatusConflictException extends AppException {
 }
 
 const _orderStatusConflictCode = 'P0009';
+const _partialConflictMessage = '일부 적용됐을 수 있음, 새로고침 후 다시 확인해 주세요.';
 
 /// 배송 처리 후 서버에 저장된 값.
 typedef ShipmentState = ({
@@ -319,21 +320,75 @@ class TextbookRepository {
   }
 
   /// 여러 신청의 배송 여부를 한 번에 바꾼다. 시각 기록 / 수령 초기화는 트리거가 한다.
-  Future<void> setShippedMany(List<String> orderIds, {required bool shipped}) =>
-      _updateMany(orderIds, {'is_shipped': shipped});
+  /// 배송 해제 시 [confirmedReceivedIds] 에 없는 행은 수령 전(`received_at is null`)만 갱신해
+  /// 재조회 직후 회원이 확인한 수령 기록을 지우지 않는다.
+  /// 이미 목표 배송 상태인 행은 성공으로 간주하고, 그 외 미갱신 행이 있으면 충돌 오류를 던진다.
+  Future<void> setShippedMany(
+    List<String> orderIds, {
+    required bool shipped,
+    Set<String> confirmedReceivedIds = const {},
+  }) async {
+    final uniqueIds = orderIds.toSet().toList();
+    if (uniqueIds.isEmpty) return;
 
-  Future<void> _updateMany(
-    List<String> orderIds,
-    Map<String, Object> values,
-  ) async {
-    if (orderIds.isEmpty) return;
-    final rows = await _client
+    final updatedIds = <String>{};
+    if (shipped) {
+      final rows = await _client
+          .from('textbook_orders')
+          .update({'is_shipped': true})
+          .inFilter('id', uniqueIds)
+          .eq('is_shipped', false)
+          .select('id');
+      for (final row in rows) {
+        updatedIds.add(row['id'] as String);
+      }
+    } else {
+      final unreceivedIds = [
+        for (final id in uniqueIds)
+          if (!confirmedReceivedIds.contains(id)) id,
+      ];
+      final receivedIds = [
+        for (final id in uniqueIds)
+          if (confirmedReceivedIds.contains(id)) id,
+      ];
+      if (unreceivedIds.isNotEmpty) {
+        final rows = await _client
+            .from('textbook_orders')
+            .update({'is_shipped': false})
+            .inFilter('id', unreceivedIds)
+            .eq('is_shipped', true)
+            .isFilter('received_at', null)
+            .select('id');
+        for (final row in rows) {
+          updatedIds.add(row['id'] as String);
+        }
+      }
+      if (receivedIds.isNotEmpty) {
+        final rows = await _client
+            .from('textbook_orders')
+            .update({'is_shipped': false})
+            .inFilter('id', receivedIds)
+            .eq('is_shipped', true)
+            .select('id');
+        for (final row in rows) {
+          updatedIds.add(row['id'] as String);
+        }
+      }
+    }
+
+    final missingIds = [
+      for (final id in uniqueIds)
+        if (!updatedIds.contains(id)) id,
+    ];
+    if (missingIds.isEmpty) return;
+
+    final alreadyAtTarget = await _client
         .from('textbook_orders')
-        .update(values)
-        .inFilter('id', orderIds)
-        .select('id');
-    if (rows.length != orderIds.length) {
-      throw const AppException('일부 신청을 처리하지 못했습니다. 목록을 새로 불러와 확인해 주세요.');
+        .select('id')
+        .inFilter('id', missingIds)
+        .eq('is_shipped', shipped);
+    if (alreadyAtTarget.length != missingIds.length) {
+      throw const OrderStatusConflictException(_partialConflictMessage);
     }
   }
 

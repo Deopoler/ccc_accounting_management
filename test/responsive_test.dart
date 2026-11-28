@@ -294,6 +294,7 @@ class _FakeTextbooks implements TextbookRepository {
   Future<void> setShippedMany(
     List<String> ids, {
     required bool shipped,
+    Set<String> confirmedReceivedIds = const {},
   }) async => _calls.add('shipped $shipped ${ids.join(',')}');
   @override
   Future<void> shiftOrders(List<String> ids, int offset) async =>

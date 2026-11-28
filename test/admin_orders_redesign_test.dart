@@ -102,6 +102,7 @@ class _FakeOrdersRepo implements TextbookRepository {
   Object? updateStatusError;
   Object? updateManyStatusError;
   Object? setShippedError;
+  VoidCallback? beforeSetShippedMany;
   int fetchAllCalls = 0;
   final List<String> calls = [];
 
@@ -264,12 +265,54 @@ class _FakeOrdersRepo implements TextbookRepository {
   Future<void> setShippedMany(
     List<String> orderIds, {
     required bool shipped,
+    Set<String> confirmedReceivedIds = const {},
   }) async {
-    calls.add('shippedMany $shipped ${orderIds.join(',')}');
+    calls.add(
+      'shippedMany $shipped ${orderIds.join(',')} confirmed=${confirmedReceivedIds.join(',')}',
+    );
+    final hook = beforeSetShippedMany;
+    if (hook != null) {
+      beforeSetShippedMany = null;
+      hook();
+    }
+    final uniqueIds = orderIds.toSet().toList();
+    if (uniqueIds.isEmpty) return;
+
+    final updatedIds = <String>{};
     orders = [
       for (final o in orders)
-        orderIds.contains(o.id) ? o.copyWith(isShipped: shipped) : o,
+        if (uniqueIds.contains(o.id) &&
+            o.isShipped == !shipped &&
+            (shipped ||
+                o.receivedAt == null ||
+                confirmedReceivedIds.contains(o.id)))
+          () {
+            updatedIds.add(o.id);
+            return o.copyWith(
+              isShipped: shipped,
+              shippedAt: () => shipped ? DateTime(2026, 11, 21, 14) : null,
+              receivedAt: () => shipped ? o.receivedAt : null,
+              receivedBy: () => shipped ? o.receivedBy : null,
+            );
+          }()
+        else
+          o,
     ];
+
+    final missingIds = [
+      for (final id in uniqueIds)
+        if (!updatedIds.contains(id)) id,
+    ];
+    if (missingIds.isEmpty) return;
+
+    final alreadyAtTarget = orders
+        .where((o) => missingIds.contains(o.id) && o.isShipped == shipped)
+        .length;
+    if (alreadyAtTarget != missingIds.length) {
+      throw const OrderStatusConflictException(
+        '일부 적용됐을 수 있음, 새로고침 후 다시 확인해 주세요.',
+      );
+    }
   }
 
   @override
@@ -1121,6 +1164,159 @@ void main() {
       await tester.pumpAndSettle();
       expect(repo2.calls, isEmpty);
       expect(find.textContaining('변경됨, 다시 확인'), findsOneWidget);
+    });
+
+    testWidgets('일괄 배송 해제 직전 수령 확인된 행은 건너뛰어 수령 기록을 보존하고 충돌 안내 후 새로고침한다', (
+      tester,
+    ) async {
+      final repo = _FakeOrdersRepo([
+        _makeOrder(
+          id: 'o1',
+          status: OrderStatus.paid,
+          name: '홍길동',
+          isShipped: true,
+        ),
+        _makeOrder(
+          id: 'o2',
+          status: OrderStatus.paid,
+          name: '김철수',
+          isShipped: true,
+        ),
+      ]);
+      await _pumpOrders(tester, repo);
+
+      await tester.tap(find.byType(Checkbox).first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(OutlinedButton, '배송'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('배송 해제').last);
+      await tester.pumpAndSettle();
+      expect(find.text('배송 해제 (2건)'), findsOneWidget);
+      expect(find.textContaining('수령 기록'), findsNothing);
+
+      // 확인 후 재조회와 실제 DB UPDATE 사이에 o2 회원이 수령 확인한 경합을 재현한다.
+      repo.beforeSetShippedMany = () {
+        repo.orders = [
+          repo.orders[0],
+          _makeOrder(
+            id: 'o2',
+            status: OrderStatus.paid,
+            name: '김철수',
+            isShipped: true,
+            isReceived: true,
+            receivedBy: 'u-o2',
+          ),
+        ];
+      };
+      final callsBefore = repo.fetchAllCalls;
+
+      await tester.tap(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.widgetWithText(FilledButton, '배송 해제'),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // o1 만 해제되고 o2 는 수령 기록이 그대로 유지된다.
+      final o1 = repo.orders.firstWhere((o) => o.id == 'o1');
+      final o2 = repo.orders.firstWhere((o) => o.id == 'o2');
+      expect(o1.isShipped, isFalse);
+      expect(o2.isShipped, isTrue);
+      expect(o2.receivedAt, isNotNull);
+      expect(o2.receivedBy, 'u-o2');
+      expect(find.textContaining('일부 적용됐을 수 있음, 새로고침'), findsOneWidget);
+      // 확인 후 재조회 + 충돌 후 새로고침
+      expect(repo.fetchAllCalls, greaterThanOrEqualTo(callsBefore + 2));
+    });
+
+    testWidgets('일괄 배송 해제 시 이미 목표 상태인 행은 충돌로 보지 않고, 경고 후 확인한 수령 행은 정상 해제한다', (
+      tester,
+    ) async {
+      // 1) 이미 목표 배송 상태(isShipped=false)가 된 행이 섞여 있어도 성공 처리
+      final repo1 = _FakeOrdersRepo([
+        _makeOrder(
+          id: 'o1',
+          status: OrderStatus.paid,
+          name: '홍길동',
+          isShipped: true,
+        ),
+        _makeOrder(
+          id: 'o2',
+          status: OrderStatus.paid,
+          name: '김철수',
+          isShipped: true,
+        ),
+      ]);
+      await _pumpOrders(tester, repo1);
+
+      await tester.tap(find.byType(Checkbox).first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(OutlinedButton, '배송'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('배송 해제').last);
+      await tester.pumpAndSettle();
+
+      repo1.beforeSetShippedMany = () {
+        repo1.orders = [
+          repo1.orders[0],
+          _makeOrder(
+            id: 'o2',
+            status: OrderStatus.paid,
+            name: '김철수',
+            isShipped: false,
+          ),
+        ];
+      };
+      await tester.tap(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.widgetWithText(FilledButton, '배송 해제'),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('일부 적용됐을 수 있음'), findsNothing);
+      expect(find.text('2건을 배송 해제했습니다.'), findsOneWidget);
+      expect(repo1.orders.every((o) => !o.isShipped), isTrue);
+
+      // 2) 확인창에서 수령 기록 초기화를 경고받고 승인한 행은 정상 해제
+      final repo2 = _FakeOrdersRepo([
+        _makeOrder(
+          id: 'o1',
+          status: OrderStatus.paid,
+          name: '홍길동',
+          isShipped: true,
+          isReceived: true,
+          receivedBy: 'u-o1',
+        ),
+        _makeOrder(
+          id: 'o2',
+          status: OrderStatus.paid,
+          name: '김철수',
+          isShipped: true,
+        ),
+      ]);
+      await _pumpOrders(tester, repo2);
+
+      await tester.tap(find.byType(Checkbox).first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(OutlinedButton, '배송'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('배송 해제').last);
+      await tester.pumpAndSettle();
+      expect(find.textContaining('수령 기록 1건도 함께 초기화됩니다.'), findsOneWidget);
+
+      await tester.tap(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.widgetWithText(FilledButton, '배송 해제'),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(repo2.calls, ['shippedMany false o1,o2 confirmed=o1']);
+      expect(repo2.orders.every((o) => !o.isShipped && o.receivedAt == null), isTrue);
     });
   });
 
