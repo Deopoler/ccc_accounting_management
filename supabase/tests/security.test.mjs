@@ -85,6 +85,7 @@ describe('스키마 회귀 검사', () => {
       'public.admin_shift_textbook_orders',
       'public.admin_undo_deposit',
       'public.admin_update_deposit_settings',
+      'public.admin_update_order_status',
       'public.cancel_textbook_order',
       'public.confirm_textbook_received',
       'public.get_order_round',

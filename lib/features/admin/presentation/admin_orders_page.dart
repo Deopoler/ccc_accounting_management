@@ -28,6 +28,37 @@ import 'widgets/admin_order_widgets.dart';
 /// 이 너비보다 좁으면 (모바일) 필터를 고정 너비 대신 폭에 맞춘다.
 const _compactWidth = 600.0;
 
+typedef _OrderRowFingerprint = ({
+  OrderStatus status,
+  bool isShipped,
+  DateTime? receivedAt,
+  String? receivedBy,
+  String? confirmedDepositId,
+  bool isAutoConfirmed,
+});
+
+_OrderRowFingerprint _fingerprint(TextbookOrder o) => (
+  status: o.status,
+  isShipped: o.isShipped,
+  receivedAt: o.receivedAt,
+  receivedBy: o.receivedBy,
+  confirmedDepositId: o.confirmedDepositId,
+  isAutoConfirmed: o.isAutoConfirmed,
+);
+
+bool _sameTargetSnapshots(
+  List<TextbookOrder> before,
+  List<TextbookOrder> after,
+) {
+  if (before.length != after.length) return false;
+  final expected = {for (final o in before) o.id: _fingerprint(o)};
+  if (expected.length != after.length) return false;
+  for (final o in after) {
+    if (expected[o.id] != _fingerprint(o)) return false;
+  }
+  return true;
+}
+
 class AdminOrdersPage extends ConsumerStatefulWidget {
   const AdminOrdersPage({super.key, this.tab});
 
@@ -147,9 +178,7 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
             .where((o) => o.id == freshOrder.id)
             .firstOrNull;
         if (currentOrder == null ||
-            currentOrder.status != freshOrder.status ||
-            currentOrder.isAutoConfirmed != freshOrder.isAutoConfirmed ||
-            currentOrder.confirmedDepositId != freshOrder.confirmedDepositId) {
+            _fingerprint(currentOrder) != _fingerprint(freshOrder)) {
           showErrorSnack(context, const OrderStatusConflictException());
           return;
         }
@@ -179,22 +208,49 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
       _busy.add(order.id);
     });
     try {
+      final notifier = ref.read(adminOrdersProvider(round).notifier);
+      final freshRows = await notifier.refetchFresh();
+      if (!mounted) return;
+      final freshOrder = freshRows.where((o) => o.id == order.id).firstOrNull;
+      if (freshOrder == null ||
+          freshOrder.status != order.status ||
+          freshOrder.isShipped != order.isShipped ||
+          freshOrder.receivedAt != order.receivedAt ||
+          freshOrder.receivedBy != order.receivedBy) {
+        showErrorSnack(context, const OrderStatusConflictException());
+        return;
+      }
+
       // 회원이 이미 수령 확인한 건은 해제하면 수령 기록도 지워지므로 한 번 더 묻는다.
-      if (!shipped && order.receivedAt != null) {
+      if (!shipped && freshOrder.receivedAt != null) {
         final ok = await showConfirmDialog(
           context,
           title: '배송 해제',
           message:
-              '${order.member?.name ?? '회원'}님이 이미 수령 확인한 신청입니다.\n'
+              '${freshOrder.member?.name ?? '회원'}님이 이미 수령 확인한 신청입니다.\n'
               '배송을 해제하면 수령 기록도 함께 초기화됩니다.',
           confirmLabel: '배송 해제',
           destructive: true,
         );
         if (!ok || !mounted) return;
+
+        final recheckedRows = await notifier.refetchFresh();
+        if (!mounted) return;
+        final currentOrder = recheckedRows
+            .where((o) => o.id == freshOrder.id)
+            .firstOrNull;
+        if (currentOrder == null ||
+            _fingerprint(currentOrder) != _fingerprint(freshOrder)) {
+          showErrorSnack(context, const OrderStatusConflictException());
+          return;
+        }
       }
-      await ref
-          .read(adminOrdersProvider(round).notifier)
-          .setShipped(order.id, shipped: shipped);
+
+      await notifier.setShipped(
+        freshOrder.id,
+        shipped: shipped,
+        expectedReceived: freshOrder.receivedAt != null,
+      );
     } catch (e) {
       if (mounted) showErrorSnack(context, e);
     } finally {
@@ -218,22 +274,45 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
       _busy.add(order.id);
     });
     try {
+      final notifier = ref.read(adminOrdersProvider(round).notifier);
+      final freshRows = await notifier.refetchFresh();
+      if (!mounted) return;
+      final freshOrder = freshRows.where((o) => o.id == order.id).firstOrNull;
+      if (freshOrder == null ||
+          freshOrder.status != order.status ||
+          freshOrder.isShipped != order.isShipped ||
+          freshOrder.receivedAt != order.receivedAt ||
+          freshOrder.receivedBy != order.receivedBy) {
+        showErrorSnack(context, const OrderStatusConflictException());
+        return;
+      }
+
       // 회원 본인이 확인한 기록을 지울 때만 한 번 더 묻는다.
-      if (!received && !order.receivedByAdmin) {
+      if (!received && !freshOrder.receivedByAdmin) {
         final ok = await showConfirmDialog(
           context,
           title: '수령 해제',
           message:
-              '${order.member?.name ?? '회원'}님이 직접 수령 확인한 신청입니다.\n'
+              '${freshOrder.member?.name ?? '회원'}님이 직접 수령 확인한 신청입니다.\n'
               '수령 기록을 지우시겠습니까?',
           confirmLabel: '수령 해제',
           destructive: true,
         );
         if (!ok || !mounted) return;
+
+        final recheckedRows = await notifier.refetchFresh();
+        if (!mounted) return;
+        final currentOrder = recheckedRows
+            .where((o) => o.id == freshOrder.id)
+            .firstOrNull;
+        if (currentOrder == null ||
+            _fingerprint(currentOrder) != _fingerprint(freshOrder)) {
+          showErrorSnack(context, const OrderStatusConflictException());
+          return;
+        }
       }
-      await ref
-          .read(adminOrdersProvider(round).notifier)
-          .setReceived(order.id, received: received);
+
+      await notifier.setReceived(freshOrder.id, received: received);
     } catch (e) {
       if (mounted) showErrorSnack(context, e);
     } finally {
@@ -312,10 +391,7 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
       final recheckedRows = await notifier.refetchFresh();
       if (!mounted) return;
       final recheckedTargets = computeTargets(recheckedRows);
-      final expectedIds = {for (final o in targets) o.id};
-      final actualIds = {for (final o in recheckedTargets) o.id};
-      if (actualIds.length != expectedIds.length ||
-          !actualIds.containsAll(expectedIds)) {
+      if (!_sameTargetSnapshots(targets, recheckedTargets)) {
         showErrorSnack(context, const OrderStatusConflictException());
         return;
       }
@@ -381,10 +457,7 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
       final recheckedRows = await notifier.refetchFresh();
       if (!mounted) return;
       final recheckedTargets = computeTargets(recheckedRows);
-      final expectedIds = {for (final o in targets) o.id};
-      final actualIds = {for (final o in recheckedTargets) o.id};
-      if (actualIds.length != expectedIds.length ||
-          !actualIds.containsAll(expectedIds)) {
+      if (!_sameTargetSnapshots(targets, recheckedTargets)) {
         showErrorSnack(context, const OrderStatusConflictException());
         return;
       }

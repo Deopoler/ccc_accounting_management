@@ -52,6 +52,7 @@ TextbookOrder _makeOrder({
   int unitPrice = 10000,
   bool isShipped = false,
   bool isReceived = false,
+  String? receivedBy,
   String? confirmedDepositId,
   bool isAutoConfirmed = false,
 }) => TextbookOrder(
@@ -74,7 +75,7 @@ TextbookOrder _makeOrder({
   isShipped: isShipped,
   shippedAt: isShipped ? DateTime(2026, 11, 21, 14) : null,
   receivedAt: isReceived ? DateTime(2026, 11, 22, 16) : null,
-  receivedBy: isReceived ? 'admin-1' : null,
+  receivedBy: isReceived ? (receivedBy ?? 'admin-1') : null,
   confirmedDepositId: confirmedDepositId,
   isAutoConfirmed: isAutoConfirmed,
 );
@@ -100,6 +101,7 @@ class _FakeOrdersRepo implements TextbookRepository {
   Completer<void>? pendingUpdateStatus;
   Object? updateStatusError;
   Object? updateManyStatusError;
+  Object? setShippedError;
   int fetchAllCalls = 0;
   final List<String> calls = [];
 
@@ -200,6 +202,62 @@ class _FakeOrdersRepo implements TextbookRepository {
       for (final o in orders)
         orderIds.contains(o.id) ? o.copyWith(status: status) : o,
     ];
+  }
+
+  @override
+  Future<ShipmentState> setShipped(
+    String orderId, {
+    required bool shipped,
+    required bool expectedReceived,
+  }) async {
+    calls.add('setShipped $orderId shipped=$shipped expectedReceived=$expectedReceived');
+    if (setShippedError != null) {
+      final err = setShippedError!;
+      setShippedError = null;
+      throw err;
+    }
+    final idx = orders.indexWhere(
+      (o) =>
+          o.id == orderId &&
+          o.isShipped == !shipped &&
+          (o.receivedAt != null) == expectedReceived,
+    );
+    if (idx < 0) {
+      throw const OrderStatusConflictException();
+    }
+    final nextShippedAt = shipped ? DateTime(2026, 11, 21, 14) : null;
+    orders[idx] = orders[idx].copyWith(
+      isShipped: shipped,
+      shippedAt: () => nextShippedAt,
+      receivedAt: () => shipped ? orders[idx].receivedAt : null,
+      receivedBy: () => shipped ? orders[idx].receivedBy : null,
+    );
+    final updated = orders[idx];
+    return (
+      isShipped: updated.isShipped,
+      shippedAt: updated.shippedAt,
+      receivedAt: updated.receivedAt,
+      receivedBy: updated.receivedBy,
+    );
+  }
+
+  @override
+  Future<DateTime?> setReceived(
+    String orderId, {
+    required bool received,
+  }) async {
+    calls.add('setReceived $orderId received=$received');
+    final at = received ? DateTime(2026, 11, 22, 16) : null;
+    orders = [
+      for (final o in orders)
+        o.id == orderId
+            ? o.copyWith(
+                receivedAt: () => at,
+                receivedBy: () => at == null ? null : 'admin-1',
+              )
+            : o,
+    ];
+    return at;
   }
 
   @override
@@ -872,6 +930,196 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(repo.calls, isEmpty);
+      expect(find.textContaining('변경됨, 다시 확인'), findsOneWidget);
+    });
+
+    testWidgets('배송/수령 토글 전 재조회로 변경된 상태를 감지해 중단하고, 확인 중 변경도 중단한다', (
+      tester,
+    ) async {
+      // 1) 배송 해제 전 서버에서 회원이 수령 확인한 경우 -> 사전 재조회로 중단
+      final repo1 = _FakeOrdersRepo([
+        _makeOrder(
+          id: 'o1',
+          status: OrderStatus.paid,
+          name: '홍길동',
+          isShipped: true,
+        ),
+      ]);
+      await _pumpOrders(tester, repo1);
+
+      repo1.orders = [
+        _makeOrder(
+          id: 'o1',
+          status: OrderStatus.paid,
+          name: '홍길동',
+          isShipped: true,
+          isReceived: true,
+          receivedBy: 'u-o1',
+        ),
+      ];
+      await tester.tap(find.bySemanticsLabel('홍길동 배송'));
+      await tester.pumpAndSettle();
+      expect(repo1.calls, isEmpty);
+      expect(find.textContaining('변경됨, 다시 확인'), findsOneWidget);
+
+      // 2) 수령 해제 전 서버에서 확인자(receivedBy)가 바뀐 경우 -> 사전 재조회로 중단
+      final repo2 = _FakeOrdersRepo([
+        _makeOrder(
+          id: 'o1',
+          status: OrderStatus.paid,
+          name: '홍길동',
+          isShipped: true,
+          isReceived: true,
+          receivedBy: 'admin-1',
+        ),
+      ]);
+      await _pumpOrders(tester, repo2);
+
+      repo2.orders = [
+        _makeOrder(
+          id: 'o1',
+          status: OrderStatus.paid,
+          name: '홍길동',
+          isShipped: true,
+          isReceived: true,
+          receivedBy: 'u-o1',
+        ),
+      ];
+      await tester.tap(find.bySemanticsLabel('홍길동 수령'));
+      await tester.pumpAndSettle();
+      expect(repo2.calls, isEmpty);
+      expect(find.textContaining('변경됨, 다시 확인'), findsOneWidget);
+
+      // 3) 회원 수령 해제 확인창이 열린 사이 배송이 해제되면 확인 후 재조회로 중단
+      final repo3 = _FakeOrdersRepo([
+        _makeOrder(
+          id: 'o1',
+          status: OrderStatus.paid,
+          name: '홍길동',
+          isShipped: true,
+          isReceived: true,
+          receivedBy: 'u-o1',
+        ),
+      ]);
+      await _pumpOrders(tester, repo3);
+
+      await tester.tap(find.bySemanticsLabel('홍길동 수령'));
+      await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsOneWidget);
+      expect(find.text('수령 해제'), findsWidgets);
+
+      repo3.orders = [
+        _makeOrder(
+          id: 'o1',
+          status: OrderStatus.paid,
+          name: '홍길동',
+          isShipped: false,
+        ),
+      ];
+      await tester.tap(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.widgetWithText(FilledButton, '수령 해제'),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(repo3.calls, isEmpty);
+      expect(find.textContaining('변경됨, 다시 확인'), findsOneWidget);
+    });
+
+    testWidgets('배송 CAS 충돌 시 스낵바를 띄우고 최신 목록으로 새로고침한다', (tester) async {
+      final repo = _FakeOrdersRepo([
+        _makeOrder(id: 'o1', status: OrderStatus.paid, name: '홍길동'),
+      ]);
+      await _pumpOrders(tester, repo);
+
+      repo.setShippedError = const OrderStatusConflictException();
+      final callsBefore = repo.fetchAllCalls;
+
+      await tester.tap(find.bySemanticsLabel('홍길동 배송'));
+      await tester.pumpAndSettle();
+
+      expect(repo.calls, ['setShipped o1 shipped=true expectedReceived=false']);
+      expect(find.textContaining('변경됨, 다시 확인'), findsOneWidget);
+      // 사전 재조회 + CAS 충돌 후 재조회
+      expect(repo.fetchAllCalls, greaterThanOrEqualTo(callsBefore + 2));
+    });
+
+    testWidgets('일괄 처리 확인창이 열린 사이 같은 id 의 세부 상태(입금 연결/수령)가 바뀌면 중단한다', (
+      tester,
+    ) async {
+      // 1) 일괄 입금확인 해제: 같은 id 지만 확인창 열린 사이 자동 입금이 연결됨
+      final repo1 = _FakeOrdersRepo([
+        _makeOrder(id: 'o1', status: OrderStatus.paid, name: '홍길동'),
+      ]);
+      await _pumpOrders(tester, repo1);
+
+      await tester.tap(find.byType(Checkbox).first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(OutlinedButton, '입금확인'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('입금확인 해제').last);
+      await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsOneWidget);
+      expect(find.textContaining('입금 연결 해제'), findsNothing);
+
+      repo1.orders = [
+        _makeOrder(
+          id: 'o1',
+          status: OrderStatus.paid,
+          name: '홍길동',
+          confirmedDepositId: 'dep-9',
+          isAutoConfirmed: true,
+        ),
+      ];
+      await tester.tap(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.widgetWithText(FilledButton, '입금확인 해제'),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(repo1.calls, isEmpty);
+      expect(find.textContaining('변경됨, 다시 확인'), findsOneWidget);
+
+      // 2) 일괄 배송 해제: 같은 id 지만 확인창 열린 사이 회원이 수령 확인함
+      final repo2 = _FakeOrdersRepo([
+        _makeOrder(
+          id: 'o1',
+          status: OrderStatus.paid,
+          name: '홍길동',
+          isShipped: true,
+        ),
+      ]);
+      await _pumpOrders(tester, repo2);
+
+      await tester.tap(find.byType(Checkbox).first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(OutlinedButton, '배송'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('배송 해제').last);
+      await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsOneWidget);
+      expect(find.textContaining('수령 기록'), findsNothing);
+
+      repo2.orders = [
+        _makeOrder(
+          id: 'o1',
+          status: OrderStatus.paid,
+          name: '홍길동',
+          isShipped: true,
+          isReceived: true,
+          receivedBy: 'u-o1',
+        ),
+      ];
+      await tester.tap(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.widgetWithText(FilledButton, '배송 해제'),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(repo2.calls, isEmpty);
       expect(find.textContaining('변경됨, 다시 확인'), findsOneWidget);
     });
   });

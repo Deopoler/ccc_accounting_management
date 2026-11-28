@@ -14,6 +14,8 @@ class OrderStatusConflictException extends AppException {
   ]);
 }
 
+const _orderStatusConflictCode = 'P0009';
+
 /// 배송 처리 후 서버에 저장된 값.
 typedef ShipmentState = ({
   bool isShipped,
@@ -247,18 +249,25 @@ class TextbookRepository {
   }
 
   /// 배송 완료 체크/해제. 배송 시각은 서버 트리거가 기록하고, 해제하면 수령 기록도 지워진다.
-  /// 서버에 저장된 배송/수령 값을 돌려준다.
+  /// 기대한 배송/수령 상태와 다르면 [OrderStatusConflictException] 을 던진다.
   Future<ShipmentState> setShipped(
     String orderId, {
     required bool shipped,
+    required bool expectedReceived,
   }) async {
-    final rows = await _client
+    var query = _client
         .from('textbook_orders')
         .update({'is_shipped': shipped})
         .eq('id', orderId)
-        .select('is_shipped, shipped_at, received_at, received_by');
+        .eq('is_shipped', !shipped);
+    query = expectedReceived
+        ? query.not('received_at', 'is', null)
+        : query.isFilter('received_at', null);
+    final rows = await query.select(
+      'is_shipped, shipped_at, received_at, received_by',
+    );
     if (rows.isEmpty) {
-      throw const AppException('권한이 없거나 이미 삭제된 항목입니다.');
+      throw const OrderStatusConflictException();
     }
     final row = rows.first;
     DateTime? time(String key) =>
@@ -281,25 +290,31 @@ class TextbookRepository {
 
   // ---------------------------------------------------------------- 관리자 일괄 처리
 
-  /// 여러 신청의 상태를 한 번에 바꾼다. (한 번의 update 라 전부 성공하거나 전부 실패)
+  /// 여러 신청의 상태를 RPC 트랜잭션으로 한 번에 바꾼다. 하나라도 충돌하면 전부 롤백된다.
   Future<void> updateOrdersStatus(
     List<String> orderIds,
     OrderStatus status, {
     required Set<OrderStatus> from,
   }) async {
-    if (orderIds.isEmpty) return;
+    final uniqueIds = orderIds.toSet().toList();
+    if (uniqueIds.isEmpty) return;
     if (from.isEmpty) {
       throw const OrderStatusConflictException();
     }
-    final uniqueIds = orderIds.toSet().toList();
-    final rows = await _client
-        .from('textbook_orders')
-        .update({'status': status.name})
-        .inFilter('id', uniqueIds)
-        .inFilter('status', [for (final s in from) s.name])
-        .select('id');
-    if (rows.length != uniqueIds.length) {
-      throw const OrderStatusConflictException();
+    try {
+      await _client.rpc<int>(
+        'admin_update_order_status',
+        params: {
+          'p_ids': uniqueIds,
+          'p_from': [for (final s in from) s.name],
+          'p_to': status.name,
+        },
+      );
+    } on PostgrestException catch (e) {
+      if (e.code == _orderStatusConflictCode) {
+        throw const OrderStatusConflictException();
+      }
+      rethrow;
     }
   }
 

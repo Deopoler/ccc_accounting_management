@@ -126,11 +126,34 @@ class AdminOrdersNotifier extends AsyncNotifier<List<TextbookOrder>> {
   }
 
   /// 배송 완료 체크/해제. 서버가 기록한 시각으로 해당 행만 바꾼다.
-  Future<void> setShipped(String orderId, {required bool shipped}) async {
+  Future<void> setShipped(
+    String orderId, {
+    required bool shipped,
+    required bool expectedReceived,
+  }) async {
     final affectedRounds = _roundIdsFor([orderId]);
-    final saved = await ref
-        .read(textbookRepositoryProvider)
-        .setShipped(orderId, shipped: shipped);
+    final ShipmentState saved;
+    try {
+      saved = await ref
+          .read(textbookRepositoryProvider)
+          .setShipped(
+            orderId,
+            shipped: shipped,
+            expectedReceived: expectedReceived,
+          );
+    } on OrderStatusConflictException {
+      if (ref.mounted) {
+        _invalidateOtherInstances(affectedRounds);
+        try {
+          await refetchFresh();
+        } on StaleContextException {
+          // 캠퍼스가 바뀌었으면 이전 캠퍼스 상태를 덮어쓰지 않는다.
+        } catch (_) {
+          if (ref.mounted) ref.invalidateSelf();
+        }
+      }
+      rethrow;
+    }
     if (!ref.mounted) return;
     _invalidateOtherInstances(affectedRounds);
     final current = state.value;
