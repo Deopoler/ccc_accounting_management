@@ -25,7 +25,8 @@ class BankAccountSection extends ConsumerWidget {
       showRefreshIndicator: false,
       loading: const BankAccountFormPlaceholder(),
       onRetry: () => ref.invalidate(bankAccountProvider),
-      data: (a) => BankAccountForm(initial: a),
+      // 캠퍼스가 바뀌면 입력 중이던 값을 버리고 새 캠퍼스 계좌로 폼을 새로 만든다.
+      data: (a) => BankAccountForm(key: ValueKey(activeCampusId), initial: a),
     );
   }
 }
