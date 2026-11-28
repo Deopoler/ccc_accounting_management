@@ -624,7 +624,7 @@ void main() {
     expect(find.text('미납'), findsOneWidget);
   });
 
-  testWidgets('AdminOrdersPage 로딩 중에는 필터/통계/집계표 틀을 그리고 내보내기/회차이동을 비활성화한다', (
+  testWidgets('AdminOrdersPage 로딩 중에는 상태 칩/집계 아코디언 스켈레톤을 그리고 변경 컨트롤을 비활성화한다', (
     tester,
   ) async {
     final h = _Harness();
@@ -635,19 +635,24 @@ void main() {
     await h.pump(tester, const AdminOrdersPage());
 
     expect(find.text('전체 상태'), findsOneWidget);
+    expect(find.text('취소 제외'), findsOneWidget);
     expect(find.text('전체 배송'), findsOneWidget);
     expect(find.text('교재별 집계 (취소 제외)'), findsOneWidget);
     expect(find.byType(LoadingView), findsNothing);
     expect(find.bySemanticsLabel('불러오는 중'), findsWidgets);
     expect(find.text('0건'), findsNothing);
     expect(find.text('0원'), findsNothing);
+    expect(find.text('0권'), findsNothing);
+    expect(find.widgetWithText(OutlinedButton, '이전 회차로'), findsNothing);
 
     final prevBtn = find.ancestor(
       of: find.byTooltip('이전 회차'),
       matching: find.byType(IconButton),
     );
+    final deadlineChip = find.widgetWithText(ActionChip, '마감 변경');
     final exportBtn = find.widgetWithText(OutlinedButton, 'CSV 내보내기');
     expect(tester.widget<IconButton>(prevBtn).onPressed, isNull);
+    expect(tester.widget<ActionChip>(deadlineChip).onPressed, isNull);
     expect(tester.widget<OutlinedButton>(exportBtn).onPressed, isNull);
 
     h.textbooks.pendingRound!.complete(_round);
@@ -657,6 +662,8 @@ void main() {
 
     expect(find.text('신청 1건'), findsOneWidget);
     expect(find.text('24,000원'), findsWidgets);
+    expect(find.text('총 2권 · 24,000원'), findsOneWidget);
+    expect(tester.widget<ActionChip>(deadlineChip).onPressed, isNotNull);
     expect(tester.widget<OutlinedButton>(exportBtn).onPressed, isNotNull);
   });
 
@@ -1206,6 +1213,25 @@ void main() {
     for (final cb in tester.widgetList<Checkbox>(find.byType(Checkbox))) {
       expect(cb.onChanged, isNull);
     }
+    for (final menu in tester.widgetList<PopupMenuButton<OrderStatus>>(
+      find.byType(PopupMenuButton<OrderStatus>),
+    )) {
+      expect(menu.enabled, isFalse);
+    }
+    expect(
+      tester
+          .widget<ActionChip>(find.widgetWithText(ActionChip, '마감 변경'))
+          .onPressed,
+      isNull,
+    );
+    expect(
+      tester
+          .widget<OutlinedButton>(
+            find.widgetWithText(OutlinedButton, 'CSV 내보내기'),
+          )
+          .onPressed,
+      isNull,
+    );
   });
 
   testWidgets('AdminDepositsPage 에서 일괄 재해석과 개별 입금 처리가 서로 잠긴다', (tester) async {

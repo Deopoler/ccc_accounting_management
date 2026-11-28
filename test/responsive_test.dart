@@ -285,8 +285,11 @@ class _FakeTextbooks implements TextbookRepository {
     String? roundId,
   }) async => _orders;
   @override
-  Future<void> updateOrdersStatus(List<String> ids, OrderStatus status) async =>
-      _calls.add('status ${status.name} ${ids.join(',')}');
+  Future<void> updateOrdersStatus(
+    List<String> ids,
+    OrderStatus status, {
+    required Set<OrderStatus> from,
+  }) async => _calls.add('status ${status.name} ${ids.join(',')}');
   @override
   Future<void> setShippedMany(
     List<String> ids, {
@@ -656,18 +659,15 @@ void main() {
           const AdminOrdersPage(),
           true,
         );
-        // 선택 전에는 처리 버튼을 쓸 수 없다.
-        expect(
-          tester
-              .widget<OutlinedButton>(
-                find.widgetWithText(OutlinedButton, '이전 회차로'),
-              )
-              .onPressed,
-          isNull,
-        );
+        // 선택 전에는 일괄 처리 버튼이 나타나지 않는다.
+        expect(find.widgetWithText(OutlinedButton, '이전 회차로'), findsNothing);
+        expect(find.widgetWithText(OutlinedButton, '입금확인'), findsNothing);
+        expect(find.widgetWithText(OutlinedButton, '배송'), findsNothing);
+        expect(find.widgetWithText(OutlinedButton, '수령'), findsNothing);
 
         await pickAll(tester);
         expect(find.text('5건 선택'), findsOneWidget);
+        expect(find.widgetWithText(OutlinedButton, '이전 회차로'), findsOneWidget);
         // 배송: 취소 건 빼고 아직 배송 안 된 o1, o2
         await tapAndConfirm(tester, '배송', '배송 체크', '배송 체크 (2건)');
         // 입금확인: o1 만
@@ -880,6 +880,7 @@ void main() {
       0,
       reason: '넘친 폭 ${position.maxScrollExtent}',
     );
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('데스크톱 신청 현황은 표, 모바일은 카드', (tester) async {
@@ -891,6 +892,7 @@ void main() {
       true,
     );
     expect(find.byType(DataTable), findsOneWidget);
+    expect(tester.takeException(), isNull);
     await _pump(
       tester,
       _sizes['모바일']!,
@@ -899,6 +901,7 @@ void main() {
       true,
     );
     expect(find.byType(DataTable), findsNothing);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('교재 신청: 카테고리를 오가도 고른 수량이 유지된다 (실제 라우터)', (tester) async {

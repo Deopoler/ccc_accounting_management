@@ -6,26 +6,26 @@ import '../../../core/router/routes.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/download/download.dart';
 import '../../../core/utils/formatters.dart';
-import '../../../core/widgets/app_widgets.dart';
 import '../../../core/widgets/feedback.dart';
 import '../../../core/widgets/responsive.dart';
 import '../../../core/widgets/skeleton.dart';
 import '../../../core/widgets/state_views.dart';
 import '../../campus/presentation/campus_providers.dart';
 import '../../deposits/presentation/deposit_providers.dart';
+import '../../textbooks/data/textbook_repository.dart';
 import '../../textbooks/domain/order_filter.dart';
 import '../../textbooks/domain/order_round.dart';
 import '../../textbooks/domain/textbook.dart';
 import '../../textbooks/domain/textbook_order.dart';
 import '../../textbooks/presentation/round_deadline_form.dart';
 import '../../textbooks/presentation/textbook_providers.dart';
-import '../../textbooks/presentation/widgets/order_widgets.dart';
 import '../domain/csv_exports.dart';
 import 'admin_order_providers.dart';
 import 'admin_section_tabs.dart';
 import 'admin_textbooks_page.dart';
+import 'widgets/admin_order_widgets.dart';
 
-/// 이 너비보다 좁으면 (모바일) 필터 / 집계 카드를 고정 너비 대신 폭에 맞춘다.
+/// 이 너비보다 좁으면 (모바일) 필터를 고정 너비 대신 폭에 맞춘다.
 const _compactWidth = 600.0;
 
 class AdminOrdersPage extends ConsumerStatefulWidget {
@@ -54,9 +54,19 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
   DeliveryStatus? _delivery;
   final _search = TextEditingController();
   final Set<String> _busy = {};
+  bool _opRunning = false;
 
   /// 선택한 신청 id. 선택 막대에서 한 번에 처리한다.
   final Set<String> _picked = {};
+
+  bool get _isBusy => _opRunning || _busy.isNotEmpty;
+
+  OrderFilter get _currentFilter => OrderFilter(
+    textbookId: _textbookId,
+    status: _status,
+    delivery: _delivery,
+    query: _search.text,
+  );
 
   @override
   void didUpdateWidget(covariant AdminOrdersPage oldWidget) {
@@ -90,16 +100,71 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
     TextbookOrder order,
     OrderStatus status,
   ) async {
-    if (order.status == status) return;
-    setState(() => _busy.add(order.id));
+    if (_isBusy || order.status == status) return;
+    setState(() {
+      _opRunning = true;
+      _busy.add(order.id);
+    });
     try {
-      await ref
-          .read(adminOrdersProvider(round).notifier)
-          .setStatus(order.id, status);
+      final notifier = ref.read(adminOrdersProvider(round).notifier);
+      final freshRows = await notifier.refetchFresh();
+      if (!mounted) return;
+      final freshOrder = freshRows.where((o) => o.id == order.id).firstOrNull;
+      if (freshOrder == null || freshOrder.status != order.status) {
+        showErrorSnack(context, const OrderStatusConflictException());
+        return;
+      }
+
+      final needsConfirm =
+          freshOrder.status == OrderStatus.paid ||
+          status == OrderStatus.cancelled;
+      if (needsConfirm) {
+        final who = freshOrder.member?.name ?? '회원';
+        final hasLinkedDeposit =
+            freshOrder.isAutoConfirmed || freshOrder.confirmedDepositId != null;
+        final depositNote =
+            freshOrder.status == OrderStatus.paid && hasLinkedDeposit
+            ? '\n연결된 입금 내역의 입금 연결 해제가 함께 처리됩니다.'
+            : '';
+        final title = status == OrderStatus.cancelled ? '신청 취소' : '입금확인 해제';
+        final confirmLabel = status == OrderStatus.cancelled
+            ? '신청 취소'
+            : '${status.label}으로 변경';
+        final ok = await showConfirmDialog(
+          context,
+          title: title,
+          message:
+              '$who님의 신청(${formatWon(freshOrder.totalPrice)})을 '
+              '${freshOrder.status.label}에서 ${status.label} 상태로 변경합니다.$depositNote',
+          confirmLabel: confirmLabel,
+          destructive: true,
+        );
+        if (!ok || !mounted) return;
+
+        final recheckedRows = await notifier.refetchFresh();
+        if (!mounted) return;
+        final currentOrder = recheckedRows
+            .where((o) => o.id == freshOrder.id)
+            .firstOrNull;
+        if (currentOrder == null ||
+            currentOrder.status != freshOrder.status ||
+            currentOrder.isAutoConfirmed != freshOrder.isAutoConfirmed ||
+            currentOrder.confirmedDepositId != freshOrder.confirmedDepositId) {
+          showErrorSnack(context, const OrderStatusConflictException());
+          return;
+        }
+      }
+
+      await notifier.setStatus(freshOrder.id, status, from: freshOrder.status);
     } catch (e) {
       if (mounted) showErrorSnack(context, e);
     } finally {
-      if (mounted) setState(() => _busy.remove(order.id));
+      if (mounted) {
+        setState(() {
+          _opRunning = false;
+          _busy.remove(order.id);
+        });
+      }
     }
   }
 
@@ -108,29 +173,37 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
     TextbookOrder order,
     bool shipped,
   ) async {
-    if (order.isShipped == shipped) return;
-    // 회원이 이미 수령 확인한 건은 해제하면 수령 기록도 지워지므로 한 번 더 묻는다.
-    if (!shipped && order.receivedAt != null) {
-      final ok = await showConfirmDialog(
-        context,
-        title: '배송 해제',
-        message:
-            '${order.member?.name ?? '회원'}님이 이미 수령 확인한 신청입니다.\n'
-            '배송을 해제하면 수령 기록도 함께 초기화됩니다.',
-        confirmLabel: '배송 해제',
-        destructive: true,
-      );
-      if (!ok || !mounted) return;
-    }
-    setState(() => _busy.add(order.id));
+    if (_isBusy || order.isShipped == shipped) return;
+    setState(() {
+      _opRunning = true;
+      _busy.add(order.id);
+    });
     try {
+      // 회원이 이미 수령 확인한 건은 해제하면 수령 기록도 지워지므로 한 번 더 묻는다.
+      if (!shipped && order.receivedAt != null) {
+        final ok = await showConfirmDialog(
+          context,
+          title: '배송 해제',
+          message:
+              '${order.member?.name ?? '회원'}님이 이미 수령 확인한 신청입니다.\n'
+              '배송을 해제하면 수령 기록도 함께 초기화됩니다.',
+          confirmLabel: '배송 해제',
+          destructive: true,
+        );
+        if (!ok || !mounted) return;
+      }
       await ref
           .read(adminOrdersProvider(round).notifier)
           .setShipped(order.id, shipped: shipped);
     } catch (e) {
       if (mounted) showErrorSnack(context, e);
     } finally {
-      if (mounted) setState(() => _busy.remove(order.id));
+      if (mounted) {
+        setState(() {
+          _opRunning = false;
+          _busy.remove(order.id);
+        });
+      }
     }
   }
 
@@ -139,105 +212,184 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
     TextbookOrder order,
     bool received,
   ) async {
-    if ((order.receivedAt != null) == received) return;
-    // 회원 본인이 확인한 기록을 지울 때만 한 번 더 묻는다.
-    if (!received && !order.receivedByAdmin) {
-      final ok = await showConfirmDialog(
-        context,
-        title: '수령 해제',
-        message:
-            '${order.member?.name ?? '회원'}님이 직접 수령 확인한 신청입니다.\n'
-            '수령 기록을 지우시겠습니까?',
-        confirmLabel: '수령 해제',
-        destructive: true,
-      );
-      if (!ok || !mounted) return;
-    }
-    setState(() => _busy.add(order.id));
+    if (_isBusy || (order.receivedAt != null) == received) return;
+    setState(() {
+      _opRunning = true;
+      _busy.add(order.id);
+    });
     try {
+      // 회원 본인이 확인한 기록을 지울 때만 한 번 더 묻는다.
+      if (!received && !order.receivedByAdmin) {
+        final ok = await showConfirmDialog(
+          context,
+          title: '수령 해제',
+          message:
+              '${order.member?.name ?? '회원'}님이 직접 수령 확인한 신청입니다.\n'
+              '수령 기록을 지우시겠습니까?',
+          confirmLabel: '수령 해제',
+          destructive: true,
+        );
+        if (!ok || !mounted) return;
+      }
       await ref
           .read(adminOrdersProvider(round).notifier)
           .setReceived(order.id, received: received);
     } catch (e) {
       if (mounted) showErrorSnack(context, e);
     } finally {
-      if (mounted) setState(() => _busy.remove(order.id));
+      if (mounted) {
+        setState(() {
+          _opRunning = false;
+          _busy.remove(order.id);
+        });
+      }
     }
   }
 
-  /// 선택한 신청을 체크/해제한다. 바뀌어야 할 건수를 보여 주고 확인받는다.
-  Future<void> _bulk(
-    String? round,
-    List<TextbookOrder> picked,
-    _BulkField field,
-    bool value,
-  ) async {
-    final targets = picked
-        .where((o) => field.isTarget(o) && field.isChecked(o) != value)
-        .toList();
-    final action = '${field.label} ${value ? '체크' : '해제'}';
-    if (targets.isEmpty) {
-      showSnack(context, '선택한 신청 중 $action할 신청이 없습니다.');
-      return;
-    }
+  /// 선택한 신청을 체크/해제한다. 최신 목록을 조회해 대상을 다시 계산한 뒤 확인받는다.
+  Future<void> _bulk(String? round, OrderBulkField field, bool value) async {
+    if (_isBusy) return;
+    final pickedIds = Set<String>.of(_picked);
+    if (pickedIds.isEmpty) return;
+    final filter = _currentFilter;
 
-    // 해제하면 함께 지워지는 기록을 알린다.
-    final lost = switch ((field, value)) {
-      (_BulkField.shipped, false) =>
-        targets.where((o) => o.receivedAt != null).length,
-      (_BulkField.received, false) =>
-        targets.where((o) => !o.receivedByAdmin).length,
-      _ => 0,
-    };
-    final lostNote = lost == 0
-        ? ''
-        : field == _BulkField.shipped
-        ? '\n수령 기록 $lost건도 함께 초기화됩니다.'
-        : '\n회원이 직접 확인한 기록 $lost건도 지워집니다.';
-
-    final ok = await showConfirmDialog(
-      context,
-      title: '$action (${targets.length}건)',
-      message: '선택한 신청 중 ${targets.length}건을 $action합니다.$lostNote',
-      confirmLabel: action,
-      destructive: !value,
-    );
-    if (!ok || !mounted) return;
-
-    final ids = [for (final o in targets) o.id];
-    final notifier = ref.read(adminOrdersProvider(round).notifier);
-    setState(() => _busy.addAll(ids));
+    setState(() {
+      _opRunning = true;
+      _busy.addAll(pickedIds);
+    });
     try {
+      final notifier = ref.read(adminOrdersProvider(round).notifier);
+      final freshRows = await notifier.refetchFresh();
+      if (!mounted) return;
+
+      List<TextbookOrder> computeTargets(List<TextbookOrder> rows) => filter
+          .apply(rows)
+          .where(
+            (o) =>
+                pickedIds.contains(o.id) &&
+                field.isTarget(o) &&
+                field.isChecked(o) != value,
+          )
+          .toList();
+
+      final targets = computeTargets(freshRows);
+      final action = '${field.label} ${value ? '체크' : '해제'}';
+      if (targets.isEmpty) {
+        showSnack(context, '선택한 신청 중 $action할 신청이 없습니다.');
+        return;
+      }
+
+      // 해제하면 함께 지워지는 기록이나 입금 연결 해제를 알린다.
+      final lostNote = switch ((field, value)) {
+        (OrderBulkField.paid, false) => () {
+          final linked = targets
+              .where((o) => o.isAutoConfirmed || o.confirmedDepositId != null)
+              .length;
+          return linked == 0
+              ? ''
+              : '\n연결된 입금 $linked건의 입금 연결 해제가 함께 처리됩니다.';
+        }(),
+        (OrderBulkField.shipped, false) => () {
+          final lost = targets.where((o) => o.receivedAt != null).length;
+          return lost == 0 ? '' : '\n수령 기록 $lost건도 함께 초기화됩니다.';
+        }(),
+        (OrderBulkField.received, false) => () {
+          final lost = targets.where((o) => !o.receivedByAdmin).length;
+          return lost == 0 ? '' : '\n회원이 직접 확인한 기록 $lost건도 지워집니다.';
+        }(),
+        _ => '',
+      };
+
+      final ok = await showConfirmDialog(
+        context,
+        title: '$action (${targets.length}건)',
+        message: '선택한 신청 중 ${targets.length}건을 $action합니다.$lostNote',
+        confirmLabel: action,
+        destructive: !value,
+      );
+      if (!ok || !mounted) return;
+
+      final recheckedRows = await notifier.refetchFresh();
+      if (!mounted) return;
+      final recheckedTargets = computeTargets(recheckedRows);
+      final expectedIds = {for (final o in targets) o.id};
+      final actualIds = {for (final o in recheckedTargets) o.id};
+      if (actualIds.length != expectedIds.length ||
+          !actualIds.containsAll(expectedIds)) {
+        showErrorSnack(context, const OrderStatusConflictException());
+        return;
+      }
+
+      final ids = [for (final o in recheckedTargets) o.id];
       await switch (field) {
-        _BulkField.paid => notifier.bulkSetPaid(ids, paid: value),
-        _BulkField.shipped => notifier.bulkSetShipped(ids, shipped: value),
-        _BulkField.received => notifier.bulkSetReceived(ids, received: value),
+        OrderBulkField.paid => notifier.bulkSetPaid(ids, paid: value),
+        OrderBulkField.shipped => notifier.bulkSetShipped(ids, shipped: value),
+        OrderBulkField.received => notifier.bulkSetReceived(
+          ids,
+          received: value,
+        ),
       };
       if (mounted) showSnack(context, '${ids.length}건을 $action했습니다.');
     } catch (e) {
       if (mounted) showErrorSnack(context, e);
     } finally {
-      if (mounted) setState(() => _busy.removeAll(ids));
+      if (mounted) {
+        setState(() {
+          _opRunning = false;
+          _busy.removeAll(pickedIds);
+        });
+      }
     }
   }
 
   /// 선택한 신청을 각자 자기 회차의 이전([offset] = -1) / 다음(1) 회차로 옮긴다.
-  Future<void> _shift(List<TextbookOrder> picked, int offset) async {
-    if (picked.isEmpty) return;
-    final dir = offset < 0 ? '이전' : '다음';
-    final ok = await showConfirmDialog(
-      context,
-      title: '$dir 회차로 이동 (${picked.length}건)',
-      message:
-          '선택한 ${picked.length}건을 각 신청의 $dir 회차로 옮깁니다.'
-          '${offset > 0 ? '\n이번 회차의 다음 회차가 없으면 새로 만듭니다.' : ''}',
-      confirmLabel: '$dir 회차로 이동',
-    );
-    if (!ok || !mounted) return;
+  Future<void> _shift(String? round, int offset) async {
+    if (_isBusy) return;
+    final pickedIds = Set<String>.of(_picked);
+    if (pickedIds.isEmpty) return;
+    final filter = _currentFilter;
 
-    final ids = [for (final o in picked) o.id];
-    setState(() => _busy.addAll(ids));
+    setState(() {
+      _opRunning = true;
+      _busy.addAll(pickedIds);
+    });
     try {
+      final notifier = ref.read(adminOrdersProvider(round).notifier);
+      final freshRows = await notifier.refetchFresh();
+      if (!mounted) return;
+
+      List<TextbookOrder> computeTargets(List<TextbookOrder> rows) =>
+          filter.apply(rows).where((o) => pickedIds.contains(o.id)).toList();
+
+      final targets = computeTargets(freshRows);
+      if (targets.isEmpty) {
+        showSnack(context, '이동할 신청이 없습니다.');
+        return;
+      }
+
+      final dir = offset < 0 ? '이전' : '다음';
+      final ok = await showConfirmDialog(
+        context,
+        title: '$dir 회차로 이동 (${targets.length}건)',
+        message:
+            '선택한 ${targets.length}건을 각 신청의 $dir 회차로 옮깁니다.'
+            '${offset > 0 ? '\n이번 회차의 다음 회차가 없으면 새로 만듭니다.' : ''}',
+        confirmLabel: '$dir 회차로 이동',
+      );
+      if (!ok || !mounted) return;
+
+      final recheckedRows = await notifier.refetchFresh();
+      if (!mounted) return;
+      final recheckedTargets = computeTargets(recheckedRows);
+      final expectedIds = {for (final o in targets) o.id};
+      final actualIds = {for (final o in recheckedTargets) o.id};
+      if (actualIds.length != expectedIds.length ||
+          !actualIds.containsAll(expectedIds)) {
+        showErrorSnack(context, const OrderStatusConflictException());
+        return;
+      }
+
+      final ids = [for (final o in recheckedTargets) o.id];
       await ref.read(textbookRepositoryProvider).shiftOrders(ids, offset);
       // 옮긴 신청은 다른 회차 목록에 들어가고, 다음 회차가 새로 생겼을 수 있다.
       ref.invalidate(adminOrdersProvider);
@@ -251,7 +403,12 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
     } catch (e) {
       if (mounted) showErrorSnack(context, e);
     } finally {
-      if (mounted) setState(() => _busy.removeAll(ids));
+      if (mounted) {
+        setState(() {
+          _opRunning = false;
+          _busy.removeAll(pickedIds);
+        });
+      }
     }
   }
 
@@ -353,9 +510,7 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
         : null;
     final String? roundId = _allRounds
         ? null
-        : (rounds != null
-            ? selected?.id
-            : (_roundId ?? currentRound?.id));
+        : (rounds != null ? selected?.id : (_roundId ?? currentRound?.id));
     // 회차 목록을 불러오지 못한 상태에서 과거 회차를 선택 중이면 변경 작업을 잠근다.
     final selectionConfirmed =
         rounds != null ||
@@ -368,19 +523,35 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
     final textbooksReady = activeCampusId != null && textbooks.hasUsableValue;
     final textbooksError = textbooks.hasError && !textbooks.isLoading;
     final books = textbooksReady ? textbooks.requireValue : const <Textbook>[];
-    final filter = OrderFilter(
-      textbookId: _textbookId,
-      status: _status,
-      delivery: _delivery,
-      query: _search.text,
-    );
-    // 배송 칩의 건수는 배송 조건을 뺀 나머지 필터 기준으로 센다.
+    final filter = _currentFilter;
+
     final loaded = orders != null && orders.hasUsableValue
         ? orders.requireValue
         : null;
+    final ordersLoading =
+        currentRoundError == null &&
+        (orders == null || (orders.isLoading && !orders.hasUsableValue));
+    final ordersReady =
+        orders != null &&
+        orders.hasUsableValue &&
+        !orders.isLoading &&
+        !orders.isBackgroundRefreshing;
+    final moneyControlsEnabled =
+        activeCampusId != null &&
+        roundReady &&
+        !currentRoundAsync.isBackgroundRefreshing &&
+        selectionConfirmed &&
+        ordersReady &&
+        !_isBusy;
+
+    // 상태 칩과 배송 칩은 각각 자기 조건을 뺀 나머지 필터 기준으로 집계한다.
+    final statusSummary = loaded == null
+        ? null
+        : summarizeByStatus(filter.withStatus(null).apply(loaded));
     final deliveryCounts = loaded == null
         ? null
         : countByDelivery(filter.withDelivery(null).apply(loaded));
+
     final refreshing =
         currentRoundAsync.isBackgroundRefreshing ||
         (roundList.isLoading &&
@@ -409,19 +580,18 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
         onRetry: () => ref.invalidate(adminOrdersProvider(roundId)),
         data: (all) {
           final filtered = filter.apply(all);
-          // 필터에 가려진 신청은 처리하지 않는다.
-          final picked = filtered
-              .where((o) => _picked.contains(o.id))
-              .toList();
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              _Summary(orders: filtered, textbookId: _textbookId),
+              TextbookTallyAccordion(
+                orders: filtered,
+                textbookId: _textbookId,
+              ),
               const SizedBox(height: 16),
               SectionTitle(
                 '신청 ${filtered.length}건',
                 trailing: _ExportMenu(
-                  enabled: filtered.isNotEmpty,
+                  enabled: moneyControlsEnabled && filtered.isNotEmpty,
                   onExport: (tally) =>
                       _export(filtered, selected, tally: tally),
                 ),
@@ -431,9 +601,8 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
               else
                 _OrdersList(
                   orders: filtered,
-                  busy: _busy,
                   picked: _picked,
-                  mutationsEnabled: selectionConfirmed,
+                  mutationsEnabled: moneyControlsEnabled,
                   onPick: (o, v) => setState(
                     () => v ? _picked.add(o.id) : _picked.remove(o.id),
                   ),
@@ -444,8 +613,8 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
                   onStatus: (o, s) => _setStatus(roundId, o, s),
                   onShipped: (o, v) => _setShipped(roundId, o, v),
                   onReceived: (o, v) => _setReceived(roundId, o, v),
-                  onBulk: (f, v) => _bulk(roundId, picked, f, v),
-                  onShift: (offset) => _shift(picked, offset),
+                  onBulk: (f, v) => _bulk(roundId, f, v),
+                  onShift: (offset) => _shift(roundId, offset),
                 ),
             ],
           );
@@ -468,7 +637,9 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
                   selected: selected,
                   allRounds: _allRounds,
                   roundError: currentRoundError != null,
-                  roundsListError: roundsListError != null && currentRound != null,
+                  roundsListError:
+                      roundsListError != null && currentRound != null,
+                  deadlineEnabled: moneyControlsEnabled && currentRound != null,
                   onRetryRounds: () => ref.invalidate(adminRoundsProvider),
                   onRoundChanged: (r) => setState(() {
                     _allRounds = r == null;
@@ -482,6 +653,8 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
                   textbookId: _textbookId,
                   onTextbookChanged: (v) => setState(() => _textbookId = v),
                   status: _status,
+                  statusSummary: statusSummary,
+                  statusLoading: ordersLoading,
                   onStatusChanged: (v) => setState(() => _status = v),
                   delivery: _delivery,
                   deliveryCounts: deliveryCounts,
@@ -500,10 +673,6 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
   }
 }
 
-// ----------------------------------------------------------------------------
-// 필터
-// ----------------------------------------------------------------------------
-
 class _Filters extends StatelessWidget {
   const _Filters({
     required this.rounds,
@@ -512,6 +681,7 @@ class _Filters extends StatelessWidget {
     required this.allRounds,
     required this.roundError,
     required this.roundsListError,
+    required this.deadlineEnabled,
     required this.onRetryRounds,
     required this.onRoundChanged,
     required this.textbooks,
@@ -521,6 +691,8 @@ class _Filters extends StatelessWidget {
     required this.textbookId,
     required this.onTextbookChanged,
     required this.status,
+    required this.statusSummary,
+    required this.statusLoading,
     required this.onStatusChanged,
     required this.delivery,
     required this.deliveryCounts,
@@ -535,6 +707,7 @@ class _Filters extends StatelessWidget {
   final bool allRounds;
   final bool roundError;
   final bool roundsListError;
+  final bool deadlineEnabled;
   final VoidCallback onRetryRounds;
   final ValueChanged<OrderRound?> onRoundChanged;
   final List<Textbook> textbooks;
@@ -544,6 +717,8 @@ class _Filters extends StatelessWidget {
   final String? textbookId;
   final ValueChanged<String?> onTextbookChanged;
   final OrderStatus? status;
+  final Map<OrderStatus, StatusSummary>? statusSummary;
+  final bool statusLoading;
   final ValueChanged<OrderStatus?> onStatusChanged;
   final DeliveryStatus? delivery;
 
@@ -566,6 +741,7 @@ class _Filters extends StatelessWidget {
           selected: selected,
           allRounds: allRounds,
           roundError: roundError,
+          deadlineEnabled: deadlineEnabled,
           onChanged: onRoundChanged,
         ),
         if (roundsListError) ...[
@@ -653,22 +829,11 @@ class _Filters extends StatelessWidget {
           },
         ),
         const SizedBox(height: 12),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            ChoiceChip(
-              label: const Text('전체 상태'),
-              selected: status == null,
-              onSelected: (_) => onStatusChanged(null),
-            ),
-            for (final s in OrderStatus.values)
-              ChoiceChip(
-                label: Text(s.label),
-                selected: status == s,
-                onSelected: (_) => onStatusChanged(s),
-              ),
-          ],
+        OrderStatusSummaryChips(
+          status: status,
+          summary: statusSummary,
+          loading: statusLoading,
+          onChanged: onStatusChanged,
         ),
         const SizedBox(height: 8),
         Wrap(
@@ -705,6 +870,7 @@ class _RoundNavigator extends StatelessWidget {
     required this.selected,
     required this.allRounds,
     required this.roundError,
+    required this.deadlineEnabled,
     required this.onChanged,
   });
 
@@ -715,6 +881,7 @@ class _RoundNavigator extends StatelessWidget {
   final OrderRound? selected;
   final bool allRounds;
   final bool roundError;
+  final bool deadlineEnabled;
 
   /// null 이면 전체 회차.
   final ValueChanged<OrderRound?> onChanged;
@@ -722,8 +889,7 @@ class _RoundNavigator extends StatelessWidget {
   bool get _all => currentRound != null && allRounds;
 
   /// 최신순 목록에서 고른 회차의 위치
-  int get _index =>
-      rounds == null || _all || selected == null
+  int get _index => rounds == null || _all || selected == null
       ? 0
       : rounds!.all.indexWhere((r) => r.id == selected!.id);
 
@@ -900,7 +1066,7 @@ class _RoundNavigator extends StatelessWidget {
             ActionChip(
               avatar: const Icon(Icons.schedule, size: 18),
               label: const Text('마감 변경'),
-              onPressed: cur == null
+              onPressed: !deadlineEnabled
                   ? null
                   : () => showRoundDeadlineDialog(context),
             ),
@@ -911,368 +1077,7 @@ class _RoundNavigator extends StatelessWidget {
   }
 }
 
-// ----------------------------------------------------------------------------
-// 집계
-// ----------------------------------------------------------------------------
-
-class _Summary extends StatelessWidget {
-  const _Summary({required this.orders, required this.textbookId});
-
-  final List<TextbookOrder> orders;
-  final String? textbookId;
-
-  @override
-  Widget build(BuildContext context) {
-    final byStatus = summarizeByStatus(orders);
-    final tallies =
-        tallyByTextbook(orders).entries
-            .where((e) => textbookId == null || e.key == textbookId)
-            .map((e) => e.value)
-            .toList()
-          ..sort((a, b) => a.title.compareTo(b.title));
-    final totalQty = tallies.fold(0, (s, t) => s + t.quantity);
-    final totalAmount = tallies.fold(0, (s, t) => s + t.amount);
-    final theme = Theme.of(context);
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        LayoutBuilder(
-          builder: (context, constraints) {
-            final cards = [
-              for (final s in OrderStatus.values)
-                _StatCard(
-                  label: s.label,
-                  value: '${byStatus[s]!.count}건',
-                  sub: formatWon(byStatus[s]!.amount),
-                  compact: constraints.maxWidth < _compactWidth,
-                ),
-            ];
-            // 모바일에서는 고정 너비 카드가 한 줄에 하나씩 떨어지므로 한 줄에 나눠 담는다.
-            if (constraints.maxWidth < _compactWidth) {
-              return Row(
-                children: [
-                  for (var i = 0; i < cards.length; i++) ...[
-                    if (i > 0) const SizedBox(width: 8),
-                    Expanded(child: cards[i]),
-                  ],
-                ],
-              );
-            }
-            return Wrap(
-              spacing: 12,
-              runSpacing: 12,
-              children: [
-                for (final card in cards) SizedBox(width: 180, child: card),
-              ],
-            );
-          },
-        ),
-        const SizedBox(height: 12),
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                const SectionTitle('교재별 집계 (취소 제외)'),
-                if (tallies.isEmpty)
-                  Text('집계할 신청이 없습니다.', style: theme.textTheme.bodyMedium)
-                else
-                  Table(
-                    columnWidths: const {
-                      0: FlexColumnWidth(),
-                      1: IntrinsicColumnWidth(),
-                      2: IntrinsicColumnWidth(),
-                    },
-                    defaultVerticalAlignment: TableCellVerticalAlignment.middle,
-                    children: [
-                      _tallyRow(context, '교재', '수량', '금액', header: true),
-                      for (final t in tallies)
-                        _tallyRow(
-                          context,
-                          t.title,
-                          '${t.quantity}권',
-                          formatWon(t.amount),
-                        ),
-                      _tallyRow(
-                        context,
-                        '합계',
-                        '$totalQty권',
-                        formatWon(totalAmount),
-                        header: true,
-                      ),
-                    ],
-                  ),
-              ],
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  TableRow _tallyRow(
-    BuildContext context,
-    String a,
-    String b,
-    String c, {
-    bool header = false,
-  }) {
-    final style = header
-        ? Theme.of(context).textTheme.labelLarge
-              ?.copyWith(fontWeight: FontWeight.w700)
-        : Theme.of(context).textTheme.bodyMedium;
-    Widget cell(String text, {bool right = false}) => Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
-      child: Text(
-        text,
-        style: style,
-        textAlign: right ? TextAlign.right : TextAlign.left,
-      ),
-    );
-    return TableRow(
-      // 카드(회색 면) 안의 표라 머리행은 면 대신 구분선으로 나눈다.
-      decoration: header
-          ? BoxDecoration(
-              border: Border(
-                bottom: BorderSide(color: context.colors.surfaceStrong),
-              ),
-            )
-          : null,
-      children: [cell(a), cell(b, right: true), cell(c, right: true)],
-    );
-  }
-}
-
-class _StatCard extends StatelessWidget {
-  const _StatCard({
-    required this.label,
-    required this.value,
-    required this.sub,
-    this.compact = false,
-  });
-
-  final String label;
-  final String value;
-  final String sub;
-
-  /// 좁은 카드: 여백을 줄이고, 큰 금액은 넘치지 않게 글자를 줄인다.
-  final bool compact;
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.colors;
-    Widget fit(Widget child) => FittedBox(
-      fit: BoxFit.scaleDown,
-      alignment: Alignment.centerLeft,
-      child: child,
-    );
-    return Card(
-      child: Padding(
-        padding: EdgeInsets.all(compact ? 14 : 20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(label, style: TextStyle(fontSize: 13, color: c.textSecondary)),
-            const SizedBox(height: 6),
-            fit(FigureText(value)),
-            const SizedBox(height: 2),
-            fit(
-              Text(sub, style: TextStyle(fontSize: 14, color: c.textSecondary)),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ----------------------------------------------------------------------------
-// 목록 (데스크톱: 표 / 모바일: 카드)
-// ----------------------------------------------------------------------------
-
-typedef _OnStatus = void Function(TextbookOrder order, OrderStatus status);
 typedef _OnToggle = void Function(TextbookOrder order, bool value);
-typedef _OnBulk = void Function(_BulkField field, bool value);
-
-/// 선택한 신청에 한 번에 체크할 수 있는 항목. 취소된 신청은 모두 대상이 아니다.
-enum _BulkField {
-  paid('입금확인'),
-  shipped('배송'),
-  received('수령');
-
-  const _BulkField(this.label);
-
-  final String label;
-
-  bool isTarget(TextbookOrder o) =>
-      o.status != OrderStatus.cancelled &&
-      (this != _BulkField.received || o.isShipped);
-
-  bool isChecked(TextbookOrder o) => switch (this) {
-    _BulkField.paid => o.status == OrderStatus.paid,
-    _BulkField.shipped => o.isShipped,
-    _BulkField.received => o.receivedAt != null,
-  };
-}
-
-/// 선택 막대: 선택한 신청을 한 번에 입금확인 / 배송 / 수령 체크 · 해제하거나 이전 / 다음 회차로 옮긴다.
-class _SelectionBar extends StatelessWidget {
-  const _SelectionBar({
-    required this.orders,
-    required this.picked,
-    required this.enabled,
-    required this.showPickAll,
-    required this.onPickAll,
-    required this.onBulk,
-    required this.onShift,
-  });
-
-  final List<TextbookOrder> orders;
-  final Set<String> picked;
-  final bool enabled;
-
-  /// 표에는 머리행에 전체 선택이 있으므로 카드 목록에서만 보인다.
-  final bool showPickAll;
-  final ValueChanged<bool> onPickAll;
-  final _OnBulk onBulk;
-  final ValueChanged<int> onShift;
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.colors;
-    final count = orders.where((o) => picked.contains(o.id)).length;
-    final all = orders.isNotEmpty && count == orders.length;
-    final active = enabled && count > 0;
-    // 모바일에서는 버튼이 한 줄에 나눠 담기도록 좌우 여백을 줄이고, 좁으면 글자를 줄인다.
-    final compactStyle = OutlinedButton.styleFrom(
-      padding: const EdgeInsets.symmetric(horizontal: 8),
-    );
-    Widget label(Widget child) =>
-        showPickAll ? FittedBox(fit: BoxFit.scaleDown, child: child) : child;
-
-    final header = Row(
-      mainAxisSize: showPickAll ? MainAxisSize.max : MainAxisSize.min,
-      children: [
-        if (showPickAll)
-          MergeSemantics(
-            child: Semantics(
-              label: '전체 선택',
-              child: Checkbox(
-                tristate: true,
-                value: count == 0 ? false : (all ? true : null),
-                onChanged: enabled ? (_) => onPickAll(!all) : null,
-              ),
-            ),
-          ),
-        Flexible(
-          child: Text(
-            count == 0 ? '신청을 선택해 한 번에 처리하세요' : '$count건 선택',
-            style: TextStyle(
-              fontSize: 14,
-              color: count == 0 ? c.textSecondary : c.textPrimary,
-              fontWeight: count == 0 ? null : FontWeight.w600,
-            ),
-          ),
-        ),
-      ],
-    );
-    final clear = TextButton(
-      onPressed: enabled ? () => onPickAll(false) : null,
-      child: const Text('선택 해제'),
-    );
-    final fieldButtons = [
-      for (final f in _BulkField.values)
-        MenuAnchor(
-          builder: (context, controller, _) => OutlinedButton(
-            style: showPickAll ? compactStyle : null,
-            onPressed: !active
-                ? null
-                : () => controller.isOpen
-                      ? controller.close()
-                      : controller.open(),
-            child: label(
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(f.label),
-                  const Icon(Icons.arrow_drop_down, size: 20),
-                ],
-              ),
-            ),
-          ),
-          menuChildren: [
-            MenuItemButton(
-              leadingIcon: const Icon(Icons.check_box_outlined),
-              onPressed: () => onBulk(f, true),
-              child: Text('${f.label} 체크'),
-            ),
-            MenuItemButton(
-              leadingIcon: const Icon(Icons.check_box_outline_blank),
-              onPressed: () => onBulk(f, false),
-              child: Text('${f.label} 해제'),
-            ),
-          ],
-        ),
-    ];
-    Widget shiftButton(int offset) => OutlinedButton.icon(
-      style: showPickAll ? compactStyle : null,
-      onPressed: active ? () => onShift(offset) : null,
-      icon: Icon(
-        offset < 0 ? Icons.chevron_left : Icons.chevron_right,
-        size: 18,
-      ),
-      label: label(Text(offset < 0 ? '이전 회차로' : '다음 회차로')),
-    );
-
-    // 모바일: 선택 / 입금확인 · 배송 · 수령 / 이전 · 다음 회차를 한 줄씩
-    if (showPickAll) {
-      Widget evenRow(List<Widget> children) => Row(
-        children: [
-          for (var i = 0; i < children.length; i++) ...[
-            if (i > 0) const SizedBox(width: 8),
-            Expanded(child: children[i]),
-          ],
-        ],
-      );
-      return Padding(
-        padding: const EdgeInsets.only(bottom: 8),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              children: [
-                Expanded(child: header),
-                if (count > 0) clear,
-              ],
-            ),
-            const SizedBox(height: 4),
-            evenRow(fieldButtons),
-            const SizedBox(height: 8),
-            evenRow([shiftButton(-1), shiftButton(1)]),
-          ],
-        ),
-      );
-    }
-
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Wrap(
-        crossAxisAlignment: WrapCrossAlignment.center,
-        spacing: 8,
-        runSpacing: 8,
-        children: [
-          header,
-          ...fieldButtons,
-          shiftButton(-1),
-          shiftButton(1),
-          if (count > 0) clear,
-        ],
-      ),
-    );
-  }
-}
 
 String _itemsText(TextbookOrder o) =>
     o.items.map((i) => '${i.title} ×${i.quantity}').join(', ');
@@ -1280,7 +1085,6 @@ String _itemsText(TextbookOrder o) =>
 class _OrdersList extends StatelessWidget {
   const _OrdersList({
     required this.orders,
-    required this.busy,
     required this.picked,
     this.mutationsEnabled = true,
     required this.onPick,
@@ -1293,25 +1097,23 @@ class _OrdersList extends StatelessWidget {
   });
 
   final List<TextbookOrder> orders;
-  final Set<String> busy;
   final Set<String> picked;
   final bool mutationsEnabled;
   final _OnToggle onPick;
   final ValueChanged<bool> onPickAll;
-  final _OnStatus onStatus;
+  final OnOrderStatus onStatus;
   final _OnToggle onShipped;
   final _OnToggle onReceived;
-  final _OnBulk onBulk;
+  final OnOrderBulk onBulk;
   final ValueChanged<int> onShift;
 
   @override
   Widget build(BuildContext context) {
-    // 처리 중인 행이 있거나 회차 선택이 확인되지 않았으면 선택 / 일괄 처리를 막는다.
-    final enabled = mutationsEnabled && busy.isEmpty;
+    final enabled = mutationsEnabled;
     return LayoutBuilder(
       builder: (context, constraints) {
         final table = constraints.maxWidth >= 760;
-        final bar = _SelectionBar(
+        final bar = OrderBulkActionBar(
           orders: orders,
           picked: picked,
           enabled: enabled,
@@ -1338,14 +1140,14 @@ class _OrdersList extends StatelessWidget {
                       onSelectAll: enabled
                           ? (v) => onPickAll(v ?? false)
                           : null,
-                      columns: [
-                        const DataColumn(label: Text('회원')),
-                        const DataColumn(label: Text('교재')),
-                        const DataColumn(label: Text('금액'), numeric: true),
-                        const DataColumn(label: Text('상태')),
-                        const DataColumn(label: Text('신청일')),
-                        for (final f in _BulkField.values)
-                          DataColumn(label: Text(f.label)),
+                      columns: const [
+                        DataColumn(label: Text('회원')),
+                        DataColumn(label: Text('교재')),
+                        DataColumn(label: Text('금액'), numeric: true),
+                        DataColumn(label: Text('상태')),
+                        DataColumn(label: Text('신청일')),
+                        DataColumn(label: Text('배송')),
+                        DataColumn(label: Text('수령')),
                       ],
                       rows: [
                         for (final o in orders)
@@ -1370,23 +1172,16 @@ class _OrdersList extends StatelessWidget {
                               ),
                               DataCell(Text(formatWon(o.totalPrice))),
                               DataCell(
-                                _StatusMenu(
-                                  order: o,
-                                  enabled: mutationsEnabled && !busy.contains(o.id),
-                                  onStatus: onStatus,
-                                ),
-                              ),
-                              DataCell(Text(formatShortDateTime(o.createdAt))),
-                              DataCell(
                                 Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    _PaidCheckbox(
+                                    OrderStatusMenu(
                                       order: o,
-                                      enabled: mutationsEnabled && !busy.contains(o.id),
+                                      enabled: enabled,
                                       onStatus: onStatus,
                                     ),
-                                    if (o.isAutoConfirmed)
+                                    if (o.isAutoConfirmed) ...[
+                                      const SizedBox(width: 4),
                                       Text(
                                         '자동 확인',
                                         style: TextStyle(
@@ -1394,13 +1189,15 @@ class _OrdersList extends StatelessWidget {
                                           color: context.colors.textSecondary,
                                         ),
                                       ),
+                                    ],
                                   ],
                                 ),
                               ),
+                              DataCell(Text(formatShortDateTime(o.createdAt))),
                               DataCell(
                                 _ShippedCheckbox(
                                   order: o,
-                                  enabled: mutationsEnabled && !busy.contains(o.id),
+                                  enabled: enabled,
                                   onShipped: onShipped,
                                 ),
                               ),
@@ -1410,7 +1207,7 @@ class _OrdersList extends StatelessWidget {
                                   children: [
                                     _ReceivedCheckbox(
                                       order: o,
-                                      enabled: mutationsEnabled && !busy.contains(o.id),
+                                      enabled: enabled,
                                       onReceived: onReceived,
                                     ),
                                     _ReceiptText(o),
@@ -1434,7 +1231,7 @@ class _OrdersList extends StatelessWidget {
             for (final o in orders) ...[
               _OrderCard(
                 order: o,
-                enabled: mutationsEnabled && !busy.contains(o.id),
+                enabled: enabled,
                 picked: picked.contains(o.id),
                 onPick: enabled ? onPick : null,
                 onStatus: onStatus,
@@ -1494,7 +1291,7 @@ class _OrderCard extends StatelessWidget {
   final bool enabled;
   final bool picked;
   final _OnToggle? onPick;
-  final _OnStatus onStatus;
+  final OnOrderStatus onStatus;
   final _OnToggle onShipped;
   final _OnToggle onReceived;
 
@@ -1526,7 +1323,28 @@ class _OrderCard extends StatelessWidget {
                     style: theme.textTheme.titleMedium,
                   ),
                 ),
-                _StatusMenu(order: order, enabled: enabled, onStatus: onStatus),
+                Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    OrderStatusMenu(
+                      order: order,
+                      enabled: enabled,
+                      onStatus: onStatus,
+                    ),
+                    if (order.isAutoConfirmed)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 4),
+                        child: Text(
+                          '자동 확인',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: context.colors.textSecondary,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
               ],
             ),
             // 체크박스 아래부터는 이름과 같은 줄에 맞춘다.
@@ -1542,23 +1360,10 @@ class _OrderCard extends StatelessWidget {
                     '${order.round?.label ?? '-'} 회차',
                     style: theme.textTheme.bodySmall,
                   ),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          '${formatWon(order.totalPrice)} · ${formatDateTime(order.createdAt)}',
-                          style: theme.textTheme.bodySmall,
-                        ),
-                      ),
-                      Text(
-                        order.isAutoConfirmed ? '입금확인 (자동 확인)' : '입금확인',
-                      ),
-                      _PaidCheckbox(
-                        order: order,
-                        enabled: enabled,
-                        onStatus: onStatus,
-                      ),
-                    ],
+                  const SizedBox(height: 2),
+                  Text(
+                    '${formatWon(order.totalPrice)} · ${formatDateTime(order.createdAt)}',
+                    style: theme.textTheme.bodySmall,
                   ),
                   Row(
                     children: [
@@ -1586,38 +1391,6 @@ class _OrderCard extends StatelessWidget {
               ),
             ),
           ],
-        ),
-      ),
-    );
-  }
-}
-
-class _PaidCheckbox extends StatelessWidget {
-  const _PaidCheckbox({
-    required this.order,
-    required this.enabled,
-    required this.onStatus,
-  });
-
-  final TextbookOrder order;
-  final bool enabled;
-  final _OnStatus onStatus;
-
-  @override
-  Widget build(BuildContext context) {
-    final cancelled = order.status == OrderStatus.cancelled;
-    final who = order.member?.name ?? '신청';
-    return MergeSemantics(
-      child: Semantics(
-        label: '$who 입금확인',
-        child: Checkbox(
-          value: order.status == OrderStatus.paid,
-          onChanged: !enabled || cancelled
-              ? null
-              : (v) => onStatus(
-                  order,
-                  v == true ? OrderStatus.paid : OrderStatus.requested,
-                ),
         ),
       ),
     );
@@ -1732,43 +1505,6 @@ class _ShippedText extends StatelessWidget {
   }
 }
 
-class _StatusMenu extends StatelessWidget {
-  const _StatusMenu({
-    required this.order,
-    required this.enabled,
-    required this.onStatus,
-  });
-
-  final TextbookOrder order;
-  final bool enabled;
-  final _OnStatus onStatus;
-
-  @override
-  Widget build(BuildContext context) {
-    return PopupMenuButton<OrderStatus>(
-      enabled: enabled,
-      tooltip: '상태 변경',
-      initialValue: order.status,
-      onSelected: (s) => onStatus(order, s),
-      itemBuilder: (_) => [
-        for (final s in OrderStatus.values)
-          PopupMenuItem(value: s, child: Text(s.label)),
-      ],
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            OrderStatusChip(order.status),
-            const Icon(Icons.arrow_drop_down, size: 20),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 /// CSV 내보내기 메뉴. 현재 필터가 적용된 목록을 내보낸다.
 class _ExportMenu extends StatelessWidget {
   const _ExportMenu({required this.enabled, required this.onExport});
@@ -1805,165 +1541,12 @@ class _OrdersLoadingSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = context.colors;
     final theme = Theme.of(context);
-
-    Widget statPlaceholder(OrderStatus s, {required bool compact}) => Card(
-      child: Padding(
-        padding: EdgeInsets.all(compact ? 14 : 20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(s.label, style: TextStyle(fontSize: 13, color: c.textSecondary)),
-            const SizedBox(height: 6),
-            const SkeletonText(maxWidth: 48, fontSize: 22, lineHeight: 1.3),
-            const SizedBox(height: 2),
-            const SkeletonText(maxWidth: 84, fontSize: 14),
-          ],
-        ),
-      ),
-    );
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        LayoutBuilder(
-          builder: (context, constraints) {
-            final compact = constraints.maxWidth < _compactWidth;
-            final cards = [
-              for (final s in OrderStatus.values)
-                statPlaceholder(s, compact: compact),
-            ];
-            if (compact) {
-              return Row(
-                children: [
-                  for (var i = 0; i < cards.length; i++) ...[
-                    if (i > 0) const SizedBox(width: 8),
-                    Expanded(child: cards[i]),
-                  ],
-                ],
-              );
-            }
-            return Wrap(
-              spacing: 12,
-              runSpacing: 12,
-              children: [
-                for (final card in cards) SizedBox(width: 180, child: card),
-              ],
-            );
-          },
-        ),
-        const SizedBox(height: 12),
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                const SectionTitle('교재별 집계 (취소 제외)'),
-                SkeletonRegion(
-                  child: Table(
-                    columnWidths: const {
-                      0: FlexColumnWidth(),
-                      1: IntrinsicColumnWidth(),
-                      2: IntrinsicColumnWidth(),
-                    },
-                    defaultVerticalAlignment: TableCellVerticalAlignment.middle,
-                    children: [
-                      TableRow(
-                        decoration: BoxDecoration(
-                          border: Border(
-                            bottom: BorderSide(color: c.surfaceStrong),
-                          ),
-                        ),
-                        children: [
-                          Padding(
-                            padding: const EdgeInsets.symmetric(
-                              vertical: 6,
-                              horizontal: 8,
-                            ),
-                            child: Text(
-                              '교재',
-                              style: theme.textTheme.labelLarge?.copyWith(
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ),
-                          Padding(
-                            padding: const EdgeInsets.symmetric(
-                              vertical: 6,
-                              horizontal: 8,
-                            ),
-                            child: Text(
-                              '수량',
-                              style: theme.textTheme.labelLarge?.copyWith(
-                                fontWeight: FontWeight.w700,
-                              ),
-                              textAlign: TextAlign.right,
-                            ),
-                          ),
-                          Padding(
-                            padding: const EdgeInsets.symmetric(
-                              vertical: 6,
-                              horizontal: 8,
-                            ),
-                            child: Text(
-                              '금액',
-                              style: theme.textTheme.labelLarge?.copyWith(
-                                fontWeight: FontWeight.w700,
-                              ),
-                              textAlign: TextAlign.right,
-                            ),
-                          ),
-                        ],
-                      ),
-                      for (var i = 0; i < 3; i++)
-                        TableRow(
-                          children: [
-                            Padding(
-                              padding: const EdgeInsets.symmetric(
-                                vertical: 6,
-                                horizontal: 8,
-                              ),
-                              child: SkeletonText(
-                                maxWidth: i.isEven ? 160 : 120,
-                                fontSize: 14,
-                                announce: false,
-                              ),
-                            ),
-                            const Padding(
-                              padding: EdgeInsets.symmetric(
-                                vertical: 6,
-                                horizontal: 8,
-                              ),
-                              child: SkeletonText(
-                                width: 32,
-                                fontSize: 14,
-                                alignment: Alignment.centerRight,
-                                announce: false,
-                              ),
-                            ),
-                            const Padding(
-                              padding: EdgeInsets.symmetric(
-                                vertical: 6,
-                                horizontal: 8,
-                              ),
-                              child: SkeletonText(
-                                width: 64,
-                                fontSize: 14,
-                                alignment: Alignment.centerRight,
-                                announce: false,
-                              ),
-                            ),
-                          ],
-                        ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
+        const TextbookTallyAccordion.loading(),
         const SizedBox(height: 16),
         Padding(
           padding: const EdgeInsets.only(bottom: 12),
@@ -1985,178 +1568,150 @@ class _OrdersLoadingSection extends StatelessWidget {
         LayoutBuilder(
           builder: (context, constraints) {
             final table = constraints.maxWidth >= 760;
-            final bar = _SelectionBar(
-              orders: const [],
-              picked: const {},
-              enabled: false,
-              showPickAll: !table,
-              onPickAll: (_) {},
-              onBulk: (_, _) {},
-              onShift: (_) {},
-            );
             if (table) {
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  bar,
-                  SkeletonRegion(
-                    child: Card(
-                      clipBehavior: Clip.antiAlias,
-                      child: SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
-                        child: ConstrainedBox(
-                          constraints: BoxConstraints(
-                            minWidth: constraints.maxWidth,
-                          ),
-                          child: DataTable(
-                            columnSpacing: 12,
-                            horizontalMargin: 16,
-                            columns: [
-                              const DataColumn(label: Text('회원')),
-                              const DataColumn(label: Text('교재')),
-                              const DataColumn(label: Text('금액'), numeric: true),
-                              const DataColumn(label: Text('상태')),
-                              const DataColumn(label: Text('신청일')),
-                              for (final f in _BulkField.values)
-                                DataColumn(label: Text(f.label)),
-                            ],
-                            rows: [
-                              for (var i = 0; i < 4; i++)
-                                DataRow(
-                                  cells: [
-                                    const DataCell(
-                                      Column(
-                                        mainAxisSize: MainAxisSize.min,
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          SkeletonBox(
-                                            width: 56,
-                                            height: 14,
-                                            announce: false,
-                                          ),
-                                          SizedBox(height: 4),
-                                          SkeletonBox(
-                                            width: 68,
-                                            height: 12,
-                                            announce: false,
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                    DataCell(
-                                      SkeletonBox(
-                                        width: i.isEven ? 140 : 110,
-                                        height: 14,
-                                        announce: false,
-                                      ),
-                                    ),
-                                    const DataCell(
-                                      SkeletonBox(
-                                        width: 64,
-                                        height: 14,
-                                        announce: false,
-                                      ),
-                                    ),
-                                    const DataCell(
+              return SkeletonRegion(
+                child: Card(
+                  clipBehavior: Clip.antiAlias,
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(
+                        minWidth: constraints.maxWidth,
+                      ),
+                      child: DataTable(
+                        columnSpacing: 12,
+                        horizontalMargin: 16,
+                        columns: const [
+                          DataColumn(label: Text('회원')),
+                          DataColumn(label: Text('교재')),
+                          DataColumn(label: Text('금액'), numeric: true),
+                          DataColumn(label: Text('상태')),
+                          DataColumn(label: Text('신청일')),
+                          DataColumn(label: Text('배송')),
+                          DataColumn(label: Text('수령')),
+                        ],
+                        rows: [
+                          for (var i = 0; i < 4; i++)
+                            DataRow(
+                              cells: [
+                                const DataCell(
+                                  Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
                                       SkeletonBox(
                                         width: 56,
-                                        height: 22,
-                                        announce: false,
-                                      ),
-                                    ),
-                                    const DataCell(
-                                      SkeletonBox(
-                                        width: 72,
                                         height: 14,
                                         announce: false,
                                       ),
-                                    ),
-                                    const DataCell(
+                                      SizedBox(height: 4),
                                       SkeletonBox(
-                                        width: 20,
-                                        height: 20,
+                                        width: 68,
+                                        height: 12,
                                         announce: false,
                                       ),
-                                    ),
-                                    const DataCell(
-                                      SkeletonBox(
-                                        width: 20,
-                                        height: 20,
-                                        announce: false,
-                                      ),
-                                    ),
-                                    const DataCell(
-                                      SkeletonBox(
-                                        width: 20,
-                                        height: 20,
-                                        announce: false,
-                                      ),
-                                    ),
-                                  ],
+                                    ],
+                                  ),
                                 ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              );
-            }
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                bar,
-                SkeletonList.cards(
-                  count: 3,
-                  spacing: 8,
-                  itemBuilder: (_, _) => const Card(
-                    child: Padding(
-                      padding: EdgeInsets.all(16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          Row(
-                            children: [
-                              Expanded(
-                                child: SkeletonText(
-                                  maxWidth: 140,
-                                  fontSize: 16,
-                                  announce: false,
+                                DataCell(
+                                  SkeletonBox(
+                                    width: i.isEven ? 140 : 110,
+                                    height: 14,
+                                    announce: false,
+                                  ),
                                 ),
-                              ),
-                              SkeletonBox(
-                                width: 56,
-                                height: 22,
-                                announce: false,
-                              ),
-                            ],
-                          ),
-                          SizedBox(height: 8),
-                          SkeletonText(
-                            maxWidth: 200,
-                            fontSize: 14,
-                            announce: false,
-                          ),
-                          SizedBox(height: 4),
-                          SkeletonText(
-                            maxWidth: 120,
-                            fontSize: 13,
-                            announce: false,
-                          ),
-                          SizedBox(height: 6),
-                          SkeletonText(
-                            maxWidth: 160,
-                            fontSize: 13,
-                            announce: false,
-                          ),
+                                const DataCell(
+                                  SkeletonBox(
+                                    width: 64,
+                                    height: 14,
+                                    announce: false,
+                                  ),
+                                ),
+                                const DataCell(
+                                  SkeletonBox(
+                                    width: 56,
+                                    height: 22,
+                                    announce: false,
+                                  ),
+                                ),
+                                const DataCell(
+                                  SkeletonBox(
+                                    width: 72,
+                                    height: 14,
+                                    announce: false,
+                                  ),
+                                ),
+                                const DataCell(
+                                  SkeletonBox(
+                                    width: 20,
+                                    height: 20,
+                                    announce: false,
+                                  ),
+                                ),
+                                const DataCell(
+                                  SkeletonBox(
+                                    width: 20,
+                                    height: 20,
+                                    announce: false,
+                                  ),
+                                ),
+                              ],
+                            ),
                         ],
                       ),
                     ),
                   ),
                 ),
-              ],
+              );
+            }
+            return SkeletonList.cards(
+              count: 3,
+              spacing: 8,
+              itemBuilder: (_, _) => const Card(
+                child: Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: SkeletonText(
+                              maxWidth: 140,
+                              fontSize: 16,
+                              announce: false,
+                            ),
+                          ),
+                          SkeletonBox(
+                            width: 56,
+                            height: 22,
+                            announce: false,
+                          ),
+                        ],
+                      ),
+                      SizedBox(height: 8),
+                      SkeletonText(
+                        maxWidth: 200,
+                        fontSize: 14,
+                        announce: false,
+                      ),
+                      SizedBox(height: 4),
+                      SkeletonText(
+                        maxWidth: 120,
+                        fontSize: 13,
+                        announce: false,
+                      ),
+                      SizedBox(height: 6),
+                      SkeletonText(
+                        maxWidth: 160,
+                        fontSize: 13,
+                        announce: false,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
             );
           },
         ),

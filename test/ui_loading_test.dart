@@ -184,7 +184,11 @@ class _FakeTextbooks implements TextbookRepository {
       : allOrders.where((o) => o.roundId == roundId).toList();
 
   @override
-  Future<void> updateOrderStatus(String orderId, OrderStatus status) async {
+  Future<void> updateOrderStatus(
+    String orderId,
+    OrderStatus status, {
+    required OrderStatus from,
+  }) async {
     allOrders = [
       for (final o in allOrders)
         o.id == orderId ? o.copyWith(status: status) : o,
@@ -925,7 +929,7 @@ void main() {
     await container.read(adminOrdersProvider(_round.id).future);
     await container
         .read(adminOrdersProvider(_round.id).notifier)
-        .setStatus('o1', OrderStatus.paid);
+        .setStatus('o1', OrderStatus.paid, from: OrderStatus.requested);
     await tester.pumpAndSettle();
     expect(h.deposits.unpaidFetches, 3);
   });
@@ -954,7 +958,7 @@ void main() {
 
     await container
         .read(adminOrdersProvider(_round.id).notifier)
-        .setStatus('o1', OrderStatus.paid);
+        .setStatus('o1', OrderStatus.paid, from: OrderStatus.requested);
     expect(
       (await container.read(adminOrdersProvider(null).future)).single.status,
       OrderStatus.paid,
@@ -962,7 +966,7 @@ void main() {
 
     await container
         .read(adminOrdersProvider(null).notifier)
-        .setStatus('o1', OrderStatus.requested);
+        .setStatus('o1', OrderStatus.requested, from: OrderStatus.paid);
     expect(
       (await container.read(adminOrdersProvider(_round.id).future))
           .single

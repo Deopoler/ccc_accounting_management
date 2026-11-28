@@ -7,6 +7,13 @@ import '../domain/textbook.dart';
 import '../domain/textbook_category.dart';
 import '../domain/textbook_order.dart';
 
+/// 다른 곳에서 신청 상태가 먼저 바뀌어 요청을 적용하지 못한 경우.
+class OrderStatusConflictException extends AppException {
+  const OrderStatusConflictException([
+    super.message = '신청 상태가 변경됨, 다시 확인해 주세요.',
+  ]);
+}
+
 /// 배송 처리 후 서버에 저장된 값.
 typedef ShipmentState = ({
   bool isShipped,
@@ -223,11 +230,21 @@ class TextbookRepository {
     return rows.map(TextbookOrder.fromJson).toList();
   }
 
-  Future<void> updateOrderStatus(String orderId, OrderStatus status) => _client
-      .from('textbook_orders')
-      .update({'status': status.name})
-      .eq('id', orderId)
-      .expectAffected();
+  Future<void> updateOrderStatus(
+    String orderId,
+    OrderStatus status, {
+    required OrderStatus from,
+  }) async {
+    final rows = await _client
+        .from('textbook_orders')
+        .update({'status': status.name})
+        .eq('id', orderId)
+        .eq('status', from.name)
+        .select('id');
+    if (rows.length != 1) {
+      throw const OrderStatusConflictException();
+    }
+  }
 
   /// 배송 완료 체크/해제. 배송 시각은 서버 트리거가 기록하고, 해제하면 수령 기록도 지워진다.
   /// 서버에 저장된 배송/수령 값을 돌려준다.
@@ -265,8 +282,26 @@ class TextbookRepository {
   // ---------------------------------------------------------------- 관리자 일괄 처리
 
   /// 여러 신청의 상태를 한 번에 바꾼다. (한 번의 update 라 전부 성공하거나 전부 실패)
-  Future<void> updateOrdersStatus(List<String> orderIds, OrderStatus status) =>
-      _updateMany(orderIds, {'status': status.name});
+  Future<void> updateOrdersStatus(
+    List<String> orderIds,
+    OrderStatus status, {
+    required Set<OrderStatus> from,
+  }) async {
+    if (orderIds.isEmpty) return;
+    if (from.isEmpty) {
+      throw const OrderStatusConflictException();
+    }
+    final uniqueIds = orderIds.toSet().toList();
+    final rows = await _client
+        .from('textbook_orders')
+        .update({'status': status.name})
+        .inFilter('id', uniqueIds)
+        .inFilter('status', [for (final s in from) s.name])
+        .select('id');
+    if (rows.length != uniqueIds.length) {
+      throw const OrderStatusConflictException();
+    }
+  }
 
   /// 여러 신청의 배송 여부를 한 번에 바꾼다. 시각 기록 / 수령 초기화는 트리거가 한다.
   Future<void> setShippedMany(List<String> orderIds, {required bool shipped}) =>

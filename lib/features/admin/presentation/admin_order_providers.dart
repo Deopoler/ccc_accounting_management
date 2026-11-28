@@ -1,11 +1,20 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/riverpod/cache_for.dart';
+import '../../../core/utils/app_exception.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../../campus/presentation/campus_providers.dart';
 import '../../deposits/presentation/deposit_providers.dart';
+import '../../textbooks/data/textbook_repository.dart';
 import '../../textbooks/domain/textbook_order.dart';
 import '../../textbooks/presentation/textbook_providers.dart';
+
+/// 조회 중 캠퍼스가 바뀌거나 화면이 닫혀 작업을 중단한 경우.
+class StaleContextException extends AppException {
+  const StaleContextException([
+    super.message = '캠퍼스가 변경되어 작업을 취소했습니다. 다시 확인해 주세요.',
+  ]);
+}
 
 /// 회차별 전체 신청 현황. 인자(회차 id)가 null 이면 모든 회차.
 final adminOrdersProvider = AsyncNotifierProvider.autoDispose
@@ -62,12 +71,50 @@ class AdminOrdersNotifier extends AsyncNotifier<List<TextbookOrder>> {
     }
   }
 
+  /// 캐시를 우회해 서버에서 최신 신청 목록을 다시 불러오고 로딩 깜빡임 없이 갱신한다.
+  Future<List<TextbookOrder>> refetchFresh() async {
+    final campusId = ref.read(adminCampusIdProvider);
+    if (campusId == null) {
+      throw const StaleContextException('캠퍼스가 선택되지 않아 작업을 진행할 수 없습니다.');
+    }
+    final repo = ref.read(textbookRepositoryProvider);
+    final fresh = await repo.fetchAllOrders(campusId, roundId: roundId);
+    if (!ref.mounted) {
+      throw const StaleContextException();
+    }
+    final currentCampusId = ref.read(adminCampusIdProvider);
+    if (currentCampusId != campusId) {
+      throw const StaleContextException();
+    }
+    state = AsyncData(fresh);
+    return fresh;
+  }
+
   /// 서버에 상태를 저장하고, 성공하면 목록을 다시 불러오지 않고 해당 행만 바꾼다.
-  Future<void> setStatus(String orderId, OrderStatus status) async {
+  Future<void> setStatus(
+    String orderId,
+    OrderStatus status, {
+    required OrderStatus from,
+  }) async {
     final affectedRounds = _roundIdsFor([orderId]);
-    await ref
-        .read(textbookRepositoryProvider)
-        .updateOrderStatus(orderId, status);
+    try {
+      await ref
+          .read(textbookRepositoryProvider)
+          .updateOrderStatus(orderId, status, from: from);
+    } on OrderStatusConflictException {
+      if (ref.mounted) {
+        _invalidateOtherInstances(affectedRounds);
+        ref.invalidate(unpaidLinkTargetsProvider);
+        try {
+          await refetchFresh();
+        } on StaleContextException {
+          // 캠퍼스가 바뀌었으면 이전 캠퍼스 상태를 덮어쓰지 않는다.
+        } catch (_) {
+          if (ref.mounted) ref.invalidateSelf();
+        }
+      }
+      rethrow;
+    }
     if (!ref.mounted) return;
     _invalidateOtherInstances(affectedRounds);
     ref.invalidate(unpaidLinkTargetsProvider);
@@ -102,13 +149,18 @@ class AdminOrdersNotifier extends AsyncNotifier<List<TextbookOrder>> {
   }
 
   /// 일괄 처리. 여러 행이 바뀌므로 끝나면(실패해도) 목록을 다시 불러온다.
-  Future<void> bulkSetPaid(List<String> ids, {required bool paid}) => _bulk(
+  Future<void> bulkSetPaid(
+    List<String> ids, {
+    required bool paid,
+    Set<OrderStatus>? from,
+  }) => _bulk(
     ids,
     () => ref
         .read(textbookRepositoryProvider)
         .updateOrdersStatus(
           ids,
           paid ? OrderStatus.paid : OrderStatus.requested,
+          from: from ?? {paid ? OrderStatus.requested : OrderStatus.paid},
         ),
     affectsUnpaid: true,
   );
@@ -145,12 +197,11 @@ class AdminOrdersNotifier extends AsyncNotifier<List<TextbookOrder>> {
       }
       // 다시 불러오기가 실패해도 원래 오류를 가리지 않게 한다.
       try {
-        final campusId = ref.read(adminCampusIdProvider);
-        final repo = ref.read(textbookRepositoryProvider);
-        final fresh = campusId == null
-            ? const <TextbookOrder>[]
-            : await repo.fetchAllOrders(campusId, roundId: roundId);
-        if (ref.mounted) state = AsyncData(fresh);
+        if (ref.mounted) {
+          await refetchFresh();
+        }
+      } on StaleContextException {
+        // 캠퍼스 전환이나 해제 시 상태를 덮어쓰지 않는다.
       } catch (_) {
         if (ref.mounted) ref.invalidateSelf();
       }

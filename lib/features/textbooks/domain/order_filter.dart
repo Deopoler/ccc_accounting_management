@@ -44,6 +44,13 @@ class OrderFilter {
   List<TextbookOrder> apply(Iterable<TextbookOrder> orders) =>
       orders.where(matches).toList();
 
+  OrderFilter withStatus(OrderStatus? status) => OrderFilter(
+    textbookId: textbookId,
+    status: status,
+    delivery: delivery,
+    query: query,
+  );
+
   OrderFilter withDelivery(DeliveryStatus? delivery) => OrderFilter(
     textbookId: textbookId,
     status: status,
