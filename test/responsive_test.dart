@@ -587,7 +587,7 @@ void main() {
         } else {
           expect(find.byType(NavigationBar), findsNothing);
           expect(find.text('관리자'), findsOneWidget);
-          expect(find.text('교재 주문'), findsOneWidget);
+          expect(find.text('교재'), findsOneWidget);
         }
       });
     });
@@ -752,7 +752,7 @@ void main() {
   group('회차', () {
     setUp(_calls.clear);
 
-    testWidgets('교재 주문: 마감 변경 다이얼로그에서 이번 회차 마감 일시를 저장한다', (tester) async {
+    testWidgets('교재: 마감 변경 다이얼로그에서 이번 회차 마감 일시를 저장한다', (tester) async {
       await _pump(
         tester,
         _sizes['데스크톱']!,

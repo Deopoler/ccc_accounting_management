@@ -30,14 +30,14 @@ void main() {
   });
 
   group('routeMetaFor', () {
-    test('이벤트 상세는 이벤트 수금으로 돌아간다', () {
+    test('이벤트 상세는 이벤트으로 돌아간다', () {
       final meta = routeMetaFor('/admin/events/abc');
       expect(meta.parent, AppRoutes.adminEvents);
-      expect(routeMetaFor('/admin/events').title, '이벤트 수금');
+      expect(routeMetaFor('/admin/events').title, '이벤트');
     });
 
     test('쿼리 파라미터가 있어도 관리자 메뉴 제목을 찾는다', () {
-      expect(routeMetaFor('/admin/orders?tab=catalog').title, '교재 주문');
+      expect(routeMetaFor('/admin/orders?tab=catalog').title, '교재');
       expect(routeMetaFor('/admin/members?tab=account').title, '회원·계좌');
       expect(routeMetaFor('/admin/central?tab=feedback').title, '총괄 관리');
     });

@@ -419,7 +419,7 @@ void main() {
   });
 
   group('탭 쿼리 파라미터 (?tab=) 동기화 및 인라인 다이얼로그', () {
-    testWidgets('교재 주문 / 회원·계좌 / 총괄 관리 탭이 ?tab= 쿼리와 양방향 동기화된다', (
+    testWidgets('교재 / 회원·계좌 / 총괄 관리 탭이 ?tab= 쿼리와 양방향 동기화된다', (
       tester,
     ) async {
       final h = _Harness(role: UserRole.centralAdmin);
@@ -427,7 +427,7 @@ void main() {
       final container = await h.pumpApp(tester);
       final router = container.read(routerProvider);
 
-      // 교재 주문: 기본(신청 현황) -> 교재·카테고리 전환 + 마감 변경 다이얼로그
+      // 교재: 기본(신청 현황) -> 교재·카테고리 전환 + 마감 변경 다이얼로그
       router.go('/admin/orders');
       await tester.pumpAndSettle();
       expect(find.text('마감 변경'), findsOneWidget);
@@ -492,8 +492,8 @@ void main() {
       final router = container.read(routerProvider);
 
       expect(find.text('총괄 관리'), findsNothing);
-      expect(find.text('교재 주문'), findsOneWidget);
-      expect(find.text('이벤트 수금'), findsOneWidget);
+      expect(find.text('교재'), findsOneWidget);
+      expect(find.text('이벤트'), findsWidgets); // 회원 메뉴와 관리자 메뉴에 모두 있다.
       expect(find.text('입금 내역'), findsOneWidget);
       expect(find.text('회원·계좌'), findsOneWidget);
       // 캠퍼스 관리자는 피드백 목록을 조회하지 않는다.
@@ -616,8 +616,8 @@ void main() {
       // 모바일 허브(/admin): 5개 메뉴 + 배지 표시, 상단 섹션 전환기는 숨김
       router.go(AppRoutes.admin);
       await tester.pumpAndSettle();
-      expect(find.text('교재 주문'), findsOneWidget);
-      expect(find.text('이벤트 수금'), findsOneWidget);
+      expect(find.text('교재'), findsOneWidget);
+      expect(find.text('이벤트'), findsWidgets);
       expect(find.text('입금 내역'), findsOneWidget);
       expect(find.text('회원·계좌'), findsOneWidget);
       expect(find.text('총괄 관리'), findsOneWidget);
@@ -625,8 +625,8 @@ void main() {
       expect(find.bySemanticsLabel(RegExp('1건 대기')), findsOneWidget);
       expect(find.bySemanticsLabel(RegExp('2건 대기')), findsOneWidget);
 
-      // 교재 주문으로 진입하면 상단 섹션 전환기가 보인다.
-      await tester.tap(find.text('교재 주문'));
+      // 교재로 진입하면 상단 섹션 전환기가 보인다.
+      await tester.tap(find.text('교재'));
       await tester.pumpAndSettle();
       expect(
         router.routerDelegate.currentConfiguration.uri.path,
@@ -656,11 +656,11 @@ void main() {
       );
       expect(find.bySemanticsLabel(RegExp('1건 대기')), findsOneWidget);
 
-      // 이벤트 상세에서는 뒤로가기가 이벤트 수금으로 돌아가며 섹션 전환기가 숨겨진다.
+      // 이벤트 상세에서는 뒤로가기가 이벤트으로 돌아가며 섹션 전환기가 숨겨진다.
       router.go(AppRoutes.adminEventDetail('e1'));
       await tester.pumpAndSettle();
       expect(find.text('이벤트 송금 현황 · KAIST'), findsOneWidget);
-      expect(find.text('교재 주문'), findsNothing);
+      expect(find.text('교재'), findsNothing);
       await tester.tap(find.byType(BackButton));
       await tester.pumpAndSettle();
       expect(

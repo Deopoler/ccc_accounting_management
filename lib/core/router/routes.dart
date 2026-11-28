@@ -86,14 +86,14 @@ const memberDestinations = <NavDestination>[
 const adminDestinations = <NavDestination>[
   NavDestination(
     path: AppRoutes.adminOrders,
-    label: '교재 주문',
+    label: '교재',
     subtitle: '신청 현황 · 교재·카테고리 · 마감',
     icon: Icons.fact_check_outlined,
     selectedIcon: Icons.fact_check,
   ),
   NavDestination(
     path: AppRoutes.adminEvents,
-    label: '이벤트 수금',
+    label: '이벤트',
     subtitle: '이벤트 등록 · 송금 확인 · 미납자',
     icon: Icons.event_note_outlined,
     selectedIcon: Icons.event_note,

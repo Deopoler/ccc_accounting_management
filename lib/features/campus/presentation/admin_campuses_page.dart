@@ -116,7 +116,7 @@ class AdminCampusesPage extends ConsumerWidget {
               ),
             ),
           Text(
-            '캠퍼스를 고르면 관리자 화면(교재 주문 / 이벤트 수금 / 입금 내역 / 회원·계좌)이 그 캠퍼스로 바뀝니다. '
+            '캠퍼스를 고르면 관리자 화면(교재 / 이벤트 / 입금 내역 / 회원·계좌)이 그 캠퍼스로 바뀝니다. '
             '캠퍼스 관리자는 회원·계좌에서 지정합니다.',
             style: TextStyle(fontSize: 13, color: context.colors.textSecondary),
           ),
