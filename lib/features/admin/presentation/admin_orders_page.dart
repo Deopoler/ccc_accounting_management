@@ -1,6 +1,8 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 
+import '../../../core/router/routes.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/download/download.dart';
 import '../../../core/utils/formatters.dart';
@@ -9,28 +11,41 @@ import '../../../core/widgets/feedback.dart';
 import '../../../core/widgets/responsive.dart';
 import '../../../core/widgets/skeleton.dart';
 import '../../../core/widgets/state_views.dart';
+import '../../campus/presentation/campus_providers.dart';
+import '../../deposits/presentation/deposit_providers.dart';
 import '../../textbooks/domain/order_filter.dart';
 import '../../textbooks/domain/order_round.dart';
 import '../../textbooks/domain/textbook.dart';
 import '../../textbooks/domain/textbook_order.dart';
+import '../../textbooks/presentation/round_deadline_form.dart';
 import '../../textbooks/presentation/textbook_providers.dart';
 import '../../textbooks/presentation/widgets/order_widgets.dart';
 import '../domain/csv_exports.dart';
 import 'admin_order_providers.dart';
-import '../../campus/presentation/campus_providers.dart';
-import '../../deposits/presentation/deposit_providers.dart';
+import 'admin_section_tabs.dart';
+import 'admin_textbooks_page.dart';
 
 /// 이 너비보다 좁으면 (모바일) 필터 / 집계 카드를 고정 너비 대신 폭에 맞춘다.
 const _compactWidth = 600.0;
 
 class AdminOrdersPage extends ConsumerStatefulWidget {
-  const AdminOrdersPage({super.key});
+  const AdminOrdersPage({super.key, this.tab});
+
+  final String? tab;
+
+  static const ordersTab = 'orders';
+  static const catalogTab = 'catalog';
+
+  static String normalizeTab(String? raw) =>
+      raw == catalogTab ? catalogTab : ordersTab;
 
   @override
   ConsumerState<AdminOrdersPage> createState() => _AdminOrdersPageState();
 }
 
 class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
+  late String _tab = AdminOrdersPage.normalizeTab(widget.tab);
+
   /// 고른 회차 id. null 이면 이번 회차.
   String? _roundId;
   bool _allRounds = false;
@@ -42,6 +57,20 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
 
   /// 선택한 신청 id. 선택 막대에서 한 번에 처리한다.
   final Set<String> _picked = {};
+
+  @override
+  void didUpdateWidget(covariant AdminOrdersPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.tab != widget.tab) {
+      _tab = AdminOrdersPage.normalizeTab(widget.tab);
+    }
+  }
+
+  void _selectTab(String id) {
+    if (_tab == id) return;
+    setState(() => _tab = id);
+    GoRouter.maybeOf(context)?.go(AppRoutes.adminOrdersTab(id));
+  }
 
   @override
   void dispose() {
@@ -257,6 +286,28 @@ class _AdminOrdersPageState extends ConsumerState<AdminOrdersPage> {
       }
     });
 
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        AdminTabBar(
+          maxWidth: 1200,
+          selectedId: _tab,
+          onSelected: _selectTab,
+          tabs: const [
+            AdminTabItem(id: AdminOrdersPage.ordersTab, label: '신청 현황'),
+            AdminTabItem(id: AdminOrdersPage.catalogTab, label: '교재·카테고리'),
+          ],
+        ),
+        Expanded(
+          child: _tab == AdminOrdersPage.catalogTab
+              ? const AdminTextbooksPage()
+              : _buildOrdersBody(context),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildOrdersBody(BuildContext context) {
     final activeCampusId = ref.watch(adminCampusIdProvider);
     final campusFallback = missingCampusFallback(ref, activeCampusId);
     if (campusFallback != null) return campusFallback;
@@ -845,6 +896,13 @@ class _RoundNavigator extends StatelessWidget {
               onSelected: cur == null
                   ? null
                   : (v) => onChanged(v ? null : (r?.current ?? cur)),
+            ),
+            ActionChip(
+              avatar: const Icon(Icons.schedule, size: 18),
+              label: const Text('마감 변경'),
+              onPressed: cur == null
+                  ? null
+                  : () => showRoundDeadlineDialog(context),
             ),
           ],
         ),

@@ -10,12 +10,12 @@ import 'package:ccc_accounting_management/features/push/data/push_repository.dar
 import 'package:ccc_accounting_management/features/push/presentation/push_providers.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:ccc_accounting_management/features/admin/data/member_repository.dart';
+import 'package:ccc_accounting_management/features/admin/presentation/admin_central_page.dart';
 import 'package:ccc_accounting_management/features/admin/presentation/admin_event_detail_page.dart';
 import 'package:ccc_accounting_management/features/admin/presentation/admin_events_page.dart';
 import 'package:ccc_accounting_management/features/admin/presentation/admin_hub_page.dart';
 import 'package:ccc_accounting_management/features/admin/presentation/admin_members_page.dart';
 import 'package:ccc_accounting_management/features/admin/presentation/admin_orders_page.dart';
-import 'package:ccc_accounting_management/features/admin/presentation/admin_textbooks_page.dart';
 import 'package:ccc_accounting_management/features/admin/presentation/member_providers.dart';
 import 'package:ccc_accounting_management/features/auth/data/auth_repository.dart';
 import 'package:ccc_accounting_management/features/auth/domain/profile.dart';
@@ -25,7 +25,6 @@ import 'package:ccc_accounting_management/features/auth/presentation/login_page.
 import 'package:ccc_accounting_management/features/auth/presentation/pending_approval_page.dart';
 import 'package:ccc_accounting_management/features/auth/presentation/signup_page.dart';
 import 'package:ccc_accounting_management/features/campus/data/campus_repository.dart';
-import 'package:ccc_accounting_management/features/campus/presentation/admin_campuses_page.dart';
 import 'package:ccc_accounting_management/features/campus/presentation/campus_switcher.dart';
 import 'package:ccc_accounting_management/features/campus/domain/campus.dart';
 import 'package:ccc_accounting_management/features/campus/presentation/campus_providers.dart';
@@ -34,6 +33,9 @@ import 'package:ccc_accounting_management/features/deposits/domain/bank_deposit.
 import 'package:ccc_accounting_management/features/deposits/presentation/admin_deposits_page.dart';
 import 'package:ccc_accounting_management/features/deposits/presentation/deposit_providers.dart';
 import 'package:ccc_accounting_management/features/events/data/event_repository.dart';
+import 'package:ccc_accounting_management/features/feedback/data/feedback_repository.dart';
+import 'package:ccc_accounting_management/features/feedback/domain/feedback_entry.dart';
+import 'package:ccc_accounting_management/features/feedback/presentation/feedback_providers.dart';
 import 'package:ccc_accounting_management/features/push/presentation/signup_push_card.dart';
 import 'package:ccc_accounting_management/features/events/domain/event.dart';
 import 'package:ccc_accounting_management/features/events/presentation/event_providers.dart';
@@ -41,7 +43,6 @@ import 'package:ccc_accounting_management/features/events/presentation/events_pa
 import 'package:ccc_accounting_management/features/home/presentation/home_page.dart';
 import 'package:ccc_accounting_management/features/settings/data/settings_repository.dart';
 import 'package:ccc_accounting_management/features/settings/domain/bank_account.dart';
-import 'package:ccc_accounting_management/features/settings/presentation/admin_settings_page.dart';
 import 'package:ccc_accounting_management/features/settings/presentation/settings_providers.dart';
 import 'package:ccc_accounting_management/features/textbooks/data/textbook_repository.dart';
 import 'package:ccc_accounting_management/features/textbooks/domain/order_round.dart';
@@ -471,12 +472,20 @@ final _pages = <(String, Widget, bool)>[
   ('/events', const EventsPage(), true),
   ('/admin', const AdminHubPage(), true),
   ('/admin/members', const AdminMembersPage(), true),
-  ('/admin/textbooks', const AdminTextbooksPage(), true),
+  (
+    '/admin/members?tab=account',
+    const AdminMembersPage(tab: AdminMembersPage.accountTab),
+    true,
+  ),
   ('/admin/orders', const AdminOrdersPage(), true),
+  (
+    '/admin/orders?tab=catalog',
+    const AdminOrdersPage(tab: AdminOrdersPage.catalogTab),
+    true,
+  ),
   ('/admin/events', const AdminEventsPage(), true),
   ('/admin/events/e1', const AdminEventDetailPage(eventId: 'e1'), true),
   ('/admin/deposits', const AdminDepositsPage(), true),
-  ('/admin/settings', const AdminSettingsPage(), true),
   ('/login', const LoginPage(), false),
   ('/signup', const SignupPage(), false),
   ('/change-password', const ChangePasswordPage(), false),
@@ -498,6 +507,14 @@ class _FakeCampuses implements CampusRepository {
   dynamic noSuchMethod(Invocation i) => super.noSuchMethod(i);
 }
 
+class _FakeFeedback implements FeedbackRepository {
+  @override
+  Future<List<FeedbackEntry>> fetchFeedback({bool unresolvedOnly = false}) async =>
+      const [];
+  @override
+  dynamic noSuchMethod(Invocation i) => super.noSuchMethod(i);
+}
+
 List<Override> get _overrides => [
   currentUserIdProvider.overrideWith(
     (ref) => _loggedOut ? null : (_signedIn?.id ?? 'u1'),
@@ -509,6 +526,7 @@ List<Override> get _overrides => [
   memberRepositoryProvider.overrideWithValue(_FakeMembers()),
   depositRepositoryProvider.overrideWithValue(_FakeDeposits()),
   campusRepositoryProvider.overrideWithValue(_FakeCampuses()),
+  feedbackRepositoryProvider.overrideWithValue(_FakeFeedback()),
 ];
 
 Future<void> _pump(
@@ -569,7 +587,7 @@ void main() {
         } else {
           expect(find.byType(NavigationBar), findsNothing);
           expect(find.text('관리자'), findsOneWidget);
-          expect(find.text('교재 신청 현황'), findsOneWidget);
+          expect(find.text('교재 주문'), findsOneWidget);
         }
       });
     });
@@ -734,23 +752,27 @@ void main() {
   group('회차', () {
     setUp(_calls.clear);
 
-    testWidgets('설정: 이번 회차 마감 일시를 저장한다', (tester) async {
+    testWidgets('교재 주문: 마감 변경 다이얼로그에서 이번 회차 마감 일시를 저장한다', (tester) async {
       await _pump(
         tester,
         _sizes['데스크톱']!,
-        '/admin/settings',
-        const AdminSettingsPage(),
+        '/admin/orders',
+        const AdminOrdersPage(),
         true,
       );
-      final save = find.widgetWithText(FilledButton, '마감 저장');
-      await tester.ensureVisible(save);
+      await tester.tap(find.text('마감 변경'));
       await tester.pumpAndSettle();
+
+      final save = find.widgetWithText(FilledButton, '마감 저장');
       expect(tester.widget<FilledButton>(save).onPressed, isNull);
 
       // 달력에서 날짜를 확인하면 바뀐 것으로 보고 저장할 수 있다.
-      await tester.ensureVisible(find.byIcon(Icons.event));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byIcon(Icons.event));
+      await tester.tap(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.byIcon(Icons.event),
+        ),
+      );
       await tester.pumpAndSettle();
       await tester.tap(
         find
@@ -782,7 +804,11 @@ void main() {
       final label = '${dark ? '다크 ' : ''}$sizeName';
       for (final (path, page) in [
         ('/admin', const AdminHubPage() as Widget),
-        ('/admin/campuses', const AdminCampusesPage()),
+        ('/admin/central', const AdminCentralPage()),
+        (
+          '/admin/central?tab=feedback',
+          const AdminCentralPage(tab: AdminCentralPage.feedbackTab),
+        ),
         ('/admin/members', const AdminMembersPage()),
       ]) {
         testWidgets('$label $path', (tester) async {
@@ -807,17 +833,17 @@ void main() {
         const AdminMembersPage(),
         true,
       );
-      expect(find.text('회원 관리 · KAIST'), findsOneWidget);
+      expect(find.text('회원·계좌 · KAIST'), findsOneWidget);
       // 사이드 메뉴의 캠퍼스 전환
       await tester.tap(find.byType(DropdownMenu<String>));
       await tester.pumpAndSettle();
       await tester.tap(find.text('아주 긴 이름의 캠퍼스 (제2캠퍼스 · 국제관)').last);
       await tester.pumpAndSettle();
-      expect(find.text('회원 관리 · 아주 긴 이름의 캠퍼스 (제2캠퍼스 · 국제관)'), findsOneWidget);
+      expect(find.text('회원·계좌 · 아주 긴 이름의 캠퍼스 (제2캠퍼스 · 국제관)'), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('캠퍼스 관리자에게는 전환 / 캠퍼스 관리 메뉴가 없다', (tester) async {
+    testWidgets('캠퍼스 관리자에게는 전환 / 총괄 관리 메뉴가 없다', (tester) async {
       _signedIn = null;
       await _pump(
         tester,
@@ -827,8 +853,8 @@ void main() {
         true,
       );
       expect(find.byType(CampusSwitcher), findsNothing);
-      expect(find.text('캠퍼스 관리'), findsNothing);
-      expect(find.text('회원 관리'), findsWidgets);
+      expect(find.text('총괄 관리'), findsNothing);
+      expect(find.text('회원·계좌'), findsWidgets);
     });
   });
 
@@ -1132,7 +1158,11 @@ void main() {
       expect(pushRepo.savedEndpoints, isEmpty);
       expect(tester.widget<Switch>(find.byType(Switch)).value, isFalse);
 
-      await pumpPushPage(tester, '/admin/settings', const AdminSettingsPage());
+      await pumpPushPage(
+        tester,
+        '/admin/members?tab=account',
+        const AdminMembersPage(tab: AdminMembersPage.accountTab),
+      );
       expect(
         tester
             .widget<Switch>(

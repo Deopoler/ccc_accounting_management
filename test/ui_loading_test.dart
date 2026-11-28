@@ -20,6 +20,9 @@ import 'package:ccc_accounting_management/features/deposits/presentation/deposit
 import 'package:ccc_accounting_management/features/events/data/event_repository.dart';
 import 'package:ccc_accounting_management/features/events/domain/event.dart';
 import 'package:ccc_accounting_management/features/events/presentation/event_providers.dart';
+import 'package:ccc_accounting_management/features/feedback/data/feedback_repository.dart';
+import 'package:ccc_accounting_management/features/feedback/domain/feedback_entry.dart';
+import 'package:ccc_accounting_management/features/feedback/presentation/feedback_providers.dart';
 import 'package:ccc_accounting_management/features/home/presentation/home_page.dart';
 import 'package:ccc_accounting_management/features/push/data/push_repository.dart';
 import 'package:ccc_accounting_management/features/push/presentation/push_providers.dart';
@@ -311,6 +314,15 @@ class _FakeSettings implements SettingsRepository {
   dynamic noSuchMethod(Invocation i) => super.noSuchMethod(i);
 }
 
+class _FakeFeedback implements FeedbackRepository {
+  @override
+  Future<List<FeedbackEntry>> fetchFeedback({bool unresolvedOnly = false}) async =>
+      const [];
+
+  @override
+  dynamic noSuchMethod(Invocation i) => super.noSuchMethod(i);
+}
+
 class _FakePushBrowser extends PushBrowser {
   @override
   PushSupport support() => PushSupport.unsupported;
@@ -352,6 +364,7 @@ class _Harness {
   final _FakeDeposits deposits = _FakeDeposits();
   final _FakeSettings settings = _FakeSettings();
   final _FakeCampuses campuses = _FakeCampuses();
+  final _FakeFeedback feedback = _FakeFeedback();
 
   Future<ProviderContainer> pumpApp(
     WidgetTester tester, {
@@ -374,6 +387,7 @@ class _Harness {
           textbookRepositoryProvider.overrideWithValue(textbooks),
           eventRepositoryProvider.overrideWithValue(events),
           depositRepositoryProvider.overrideWithValue(deposits),
+          feedbackRepositoryProvider.overrideWithValue(feedback),
           settingsRepositoryProvider.overrideWithValue(settings),
           pushBrowserProvider.overrideWithValue(_FakePushBrowser()),
           pushRepositoryProvider.overrideWithValue(_FakePushRepo()),

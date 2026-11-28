@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 
+import '../../features/admin/presentation/admin_badge_providers.dart';
 import '../../features/auth/presentation/account_menu_button.dart';
 import '../../features/auth/presentation/auth_providers.dart';
 import '../../features/campus/presentation/campus_switcher.dart';
@@ -46,7 +47,8 @@ class _AppShellState extends ConsumerState<AppShell> {
 
   static bool _sameRevalidationTarget(Uri a, Uri b) =>
       a.path == b.path &&
-      a.queryParameters['edit'] == b.queryParameters['edit'];
+      a.queryParameters['edit'] == b.queryParameters['edit'] &&
+      a.queryParameters['tab'] == b.queryParameters['tab'];
 
   @override
   void didUpdateWidget(covariant AppShell oldWidget) {
@@ -161,10 +163,24 @@ class _AppShellState extends ConsumerState<AppShell> {
         ),
     ];
     final selected = matchDestination(destinations, location);
+    final showMobileSwitcher =
+        isAdmin && _isMobileAdminSectionPath(location, isCentral: isCentral);
 
     return Scaffold(
       appBar: appBar,
-      body: widget.child,
+      body: showMobileSwitcher
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _MobileAdminSectionSwitcher(
+                  location: location,
+                  isCentral: isCentral,
+                  onSelect: _navigateToPath,
+                ),
+                Expanded(child: widget.child),
+              ],
+            )
+          : widget.child,
       bottomNavigationBar: DecoratedBox(
         // 그림자 대신 얇은 구분선
         decoration: BoxDecoration(
@@ -193,11 +209,150 @@ class _AppShellState extends ConsumerState<AppShell> {
   }
 }
 
-/// 캠퍼스별 데이터를 다루는 관리자 화면 (허브 / 캠퍼스 관리 / 피드백 제외).
-bool _isCampusScopedAdminPath(String location) =>
-    location.startsWith('${AppRoutes.admin}/') &&
-    !location.startsWith(AppRoutes.adminCampuses) &&
-    !location.startsWith(AppRoutes.adminFeedback);
+/// 캠퍼스별 데이터를 다루는 관리자 화면 (허브 / 총괄 관리 제외).
+bool _isCampusScopedAdminPath(String location) {
+  final path = Uri.parse(location).path;
+  return path.startsWith('${AppRoutes.admin}/') &&
+      !AppRoutes.centralOnly.any((p) => path == p || path.startsWith('$p/'));
+}
+
+/// 모바일 상단 관리자 섹션 전환기를 표시할 상위 관리자 경로인지 판별한다.
+bool _isMobileAdminSectionPath(String location, {required bool isCentral}) {
+  final path = Uri.parse(location).path;
+  final sections = [
+    ...adminDestinations,
+    if (isCentral) ...centralDestinations,
+  ];
+  return sections.any((d) => d.path == path);
+}
+
+class _NavBadgeSlot extends ConsumerWidget {
+  const _NavBadgeSlot({required this.path, this.selected = false});
+
+  final String path;
+  final bool selected;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final count = ref.watch(adminDestinationBadgeProvider(path));
+    if (count == null) return const SizedBox.shrink();
+    return AdminCountBadge(count: count, selected: selected);
+  }
+}
+
+class _MobileAdminSectionSwitcher extends StatelessWidget {
+  const _MobileAdminSectionSwitcher({
+    required this.location,
+    required this.isCentral,
+    required this.onSelect,
+  });
+
+  final String location;
+  final bool isCentral;
+  final ValueChanged<String> onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final sections = [
+      ...adminDestinations,
+      if (isCentral) ...centralDestinations,
+    ];
+    final selected = matchDestination(sections, location);
+    final selectedPath = selected == null ? null : sections[selected].path;
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: c.background,
+        border: Border(bottom: BorderSide(color: c.divider)),
+      ),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+        child: Row(
+          children: [
+            for (var i = 0; i < sections.length; i++) ...[
+              if (i > 0) const SizedBox(width: 8),
+              _MobileSectionChip(
+                destination: sections[i],
+                selected: sections[i].path == selectedPath,
+                onTap: () => onSelect(sections[i].path),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MobileSectionChip extends ConsumerWidget {
+  const _MobileSectionChip({
+    required this.destination,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final NavDestination destination;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final c = context.colors;
+    final badge = ref.watch(adminDestinationBadgeProvider(destination.path));
+    final fg = selected ? c.primary : c.textSecondary;
+
+    return Semantics(
+      button: true,
+      selected: selected,
+      child: FocusRing(
+        borderRadius: BorderRadius.circular(AppRadius.sm),
+        child: Material(
+          color: selected ? c.primarySoft : c.surfaceMuted,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppRadius.sm),
+            side: selected
+                ? BorderSide(color: c.primary, width: 1.5)
+                : BorderSide.none,
+          ),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(AppRadius.sm),
+            onTap: onTap,
+            child: Container(
+              constraints: const BoxConstraints(minHeight: 44),
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              alignment: Alignment.center,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    selected ? destination.selectedIcon : destination.icon,
+                    size: 18,
+                    color: fg,
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    destination.label,
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                      color: fg,
+                    ),
+                  ),
+                  if (badge != null) ...[
+                    const SizedBox(width: 6),
+                    AdminCountBadge(count: badge, selected: selected),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
 
 class _SideNav extends StatelessWidget {
   const _SideNav({
@@ -224,7 +379,7 @@ class _SideNav extends StatelessWidget {
     final selectedPath = selected == null ? null : all[selected].path;
 
     final c = context.colors;
-    Widget tile(NavDestination d) {
+    Widget tile(NavDestination d, {bool showBadge = false}) {
       final isSelected = d.path == selectedPath;
       return Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
@@ -232,8 +387,8 @@ class _SideNav extends StatelessWidget {
           borderRadius: BorderRadius.circular(AppRadius.sm),
           child: ListTile(
             selected: isSelected,
-            selectedTileColor: c.surfaceMuted,
-            selectedColor: c.textPrimary,
+            selectedTileColor: c.primarySoft,
+            selectedColor: c.primary,
             iconColor: c.textTertiary,
             textColor: c.textSecondary,
             leading: Icon(isSelected ? d.selectedIcon : d.icon),
@@ -243,6 +398,9 @@ class _SideNav extends StatelessWidget {
                 fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
               ),
             ),
+            trailing: showBadge
+                ? _NavBadgeSlot(path: d.path, selected: isSelected)
+                : null,
             onTap: () => onSelect(d.path),
           ),
         ),
@@ -290,9 +448,9 @@ class _SideNav extends StatelessWidget {
                     padding: EdgeInsets.fromLTRB(24, 4, 12, 8),
                     child: CampusSwitcher(width: 200),
                   ),
-                for (final d in adminDestinations) tile(d),
+                for (final d in adminDestinations) tile(d, showBadge: true),
                 if (isCentral)
-                  for (final d in centralDestinations) tile(d),
+                  for (final d in centralDestinations) tile(d, showBadge: true),
               ],
             ],
           ),

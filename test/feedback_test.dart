@@ -120,22 +120,27 @@ void main() {
       expect(_go('/admin/feedback', _profile(UserRole.centralAdmin)), isNull);
     });
 
-    test('피드백은 총괄 관리자 메뉴이며 관리자 메뉴로 돌아간다', () {
-      expect(centralDestinations.map((d) => d.path), contains('/admin/feedback'));
-      expect(adminDestinations.map((d) => d.path), isNot(contains('/admin/feedback')));
-      final meta = routeMetaFor('/admin/feedback');
-      expect(meta.title, '피드백');
+    test('총괄 관리는 총괄 관리자 메뉴이며 관리자 메뉴로 돌아간다', () {
+      expect(
+        centralDestinations.map((d) => d.path),
+        contains(AppRoutes.adminCentral),
+      );
+      expect(
+        adminDestinations.map((d) => d.path),
+        isNot(contains(AppRoutes.adminCentral)),
+      );
+      final meta = routeMetaFor(AppRoutes.adminCentral);
+      expect(meta.title, '총괄 관리');
       expect(meta.parent, AppRoutes.admin);
     });
 
-    testWidgets('관리자 허브의 피드백 메뉴는 총괄 관리자에게만 보인다', (tester) async {
+    testWidgets('관리자 허브의 총괄 관리 메뉴는 총괄 관리자에게만 보인다', (tester) async {
       await _pump(tester, const AdminHubPage(), profile: _profile(UserRole.centralAdmin));
-      expect(find.text('피드백'), findsOneWidget);
-      expect(find.text('캠퍼스 관리'), findsOneWidget);
+      expect(find.text('총괄 관리'), findsOneWidget);
 
       await _pump(tester, const AdminHubPage(), profile: _profile(UserRole.campusAdmin));
-      expect(find.text('피드백'), findsNothing);
-      expect(find.text('회원 관리'), findsOneWidget);
+      expect(find.text('총괄 관리'), findsNothing);
+      expect(find.text('회원·계좌'), findsOneWidget);
     });
   });
 

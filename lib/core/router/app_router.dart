@@ -2,12 +2,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 
+import '../../features/admin/presentation/admin_central_page.dart';
 import '../../features/admin/presentation/admin_event_detail_page.dart';
 import '../../features/admin/presentation/admin_events_page.dart';
 import '../../features/admin/presentation/admin_hub_page.dart';
 import '../../features/admin/presentation/admin_members_page.dart';
 import '../../features/admin/presentation/admin_orders_page.dart';
-import '../../features/admin/presentation/admin_textbooks_page.dart';
 import '../../features/auth/presentation/auth_providers.dart';
 import '../../features/auth/presentation/change_password_page.dart';
 import '../../features/auth/presentation/login_page.dart';
@@ -16,10 +16,7 @@ import '../../features/auth/presentation/signup_page.dart';
 import '../../features/auth/presentation/splash_page.dart';
 import '../../features/deposits/presentation/admin_deposits_page.dart';
 import '../../features/events/presentation/events_page.dart';
-import '../../features/feedback/presentation/admin_feedback_page.dart';
 import '../../features/home/presentation/home_page.dart';
-import '../../features/campus/presentation/admin_campuses_page.dart';
-import '../../features/settings/presentation/admin_settings_page.dart';
 import '../../features/textbooks/presentation/my_orders_page.dart';
 import '../../features/textbooks/presentation/order_complete_page.dart';
 import '../../features/textbooks/presentation/textbooks_page.dart';
@@ -123,9 +120,15 @@ final routerProvider = Provider<GoRouter>((ref) {
                   child: const AdminHubPage(),
                 ),
                 routes: [
-                  _tab('members', const AdminMembersPage()),
-                  _tab('textbooks', const AdminTextbooksPage()),
-                  _tab('orders', const AdminOrdersPage()),
+                  GoRoute(
+                    path: 'orders',
+                    pageBuilder: (_, state) => NoTransitionPage(
+                      key: state.pageKey,
+                      child: AdminOrdersPage(
+                        tab: state.uri.queryParameters['tab'],
+                      ),
+                    ),
+                  ),
                   GoRoute(
                     path: 'events',
                     pageBuilder: (_, state) => NoTransitionPage(
@@ -142,9 +145,47 @@ final routerProvider = Provider<GoRouter>((ref) {
                     ],
                   ),
                   _tab('deposits', const AdminDepositsPage()),
-                  _tab('settings', const AdminSettingsPage()),
-                  _tab('campuses', const AdminCampusesPage()),
-                  _tab('feedback', const AdminFeedbackPage()),
+                  GoRoute(
+                    path: 'members',
+                    pageBuilder: (_, state) => NoTransitionPage(
+                      key: state.pageKey,
+                      child: AdminMembersPage(
+                        tab: state.uri.queryParameters['tab'],
+                      ),
+                    ),
+                  ),
+                  GoRoute(
+                    path: 'central',
+                    pageBuilder: (_, state) => NoTransitionPage(
+                      key: state.pageKey,
+                      child: AdminCentralPage(
+                        tab: state.uri.queryParameters['tab'],
+                      ),
+                    ),
+                  ),
+                  // Legacy paths preserved for bookmarks and push notifications.
+                  GoRoute(
+                    path: 'textbooks',
+                    redirect: (_, _) =>
+                        AppRoutes.adminOrdersTab(AdminOrdersPage.catalogTab),
+                  ),
+                  GoRoute(
+                    path: 'settings',
+                    redirect: (_, _) =>
+                        AppRoutes.adminMembersTab(AdminMembersPage.accountTab),
+                  ),
+                  GoRoute(
+                    path: 'campuses',
+                    redirect: (_, _) => AppRoutes.adminCentralTab(
+                      AdminCentralPage.campusesTab,
+                    ),
+                  ),
+                  GoRoute(
+                    path: 'feedback',
+                    redirect: (_, _) => AppRoutes.adminCentralTab(
+                      AdminCentralPage.feedbackTab,
+                    ),
+                  ),
                 ],
               ),
             ],
@@ -154,7 +195,7 @@ final routerProvider = Provider<GoRouter>((ref) {
     ],
   );
 
-  // 푸시 알림(가입 신청 → 회원 관리, 새 피드백 → 피드백함 등)을 누르면 열린 앱 창에서 해당 화면으로 이동한다. (web/push/sw.js)
+  // 푸시 알림(가입 신청 → 회원·계좌, 새 피드백 → 총괄 관리 등)을 누르면 열린 앱 창에서 해당 화면으로 이동한다. (web/push/sw.js)
   var disposed = false;
   listenPushOpenPath((path) {
     if (!disposed) router.go(path);

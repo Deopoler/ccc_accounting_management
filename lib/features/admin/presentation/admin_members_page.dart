@@ -1,6 +1,8 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 
+import '../../../core/router/routes.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../core/utils/korean_search.dart';
@@ -12,20 +14,47 @@ import '../../../core/widgets/state_views.dart';
 import '../../auth/domain/profile.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../../campus/presentation/campus_providers.dart';
+import '../../push/presentation/signup_push_card.dart';
+import '../../settings/presentation/bank_account_form.dart';
+import '../../settings/presentation/settings_providers.dart';
+import 'admin_section_tabs.dart';
 import 'member_providers.dart';
 
-/// 회원 관리: 가입 승인, 관리자 지정.
+/// 회원·계좌: 회원(가입 승인, 관리자 지정) + 송금 계좌·알림.
 class AdminMembersPage extends ConsumerStatefulWidget {
-  const AdminMembersPage({super.key});
+  const AdminMembersPage({super.key, this.tab});
+
+  final String? tab;
+
+  static const membersTab = 'members';
+  static const accountTab = 'account';
+
+  static String normalizeTab(String? raw) =>
+      raw == accountTab ? accountTab : membersTab;
 
   @override
   ConsumerState<AdminMembersPage> createState() => _AdminMembersPageState();
 }
 
 class _AdminMembersPageState extends ConsumerState<AdminMembersPage> {
+  late String _tab = AdminMembersPage.normalizeTab(widget.tab);
   final Set<String> _selected = {};
   final _search = TextEditingController();
   bool _busy = false;
+
+  @override
+  void didUpdateWidget(covariant AdminMembersPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.tab != widget.tab) {
+      _tab = AdminMembersPage.normalizeTab(widget.tab);
+    }
+  }
+
+  void _selectTab(String id) {
+    if (_tab == id) return;
+    setState(() => _tab = id);
+    GoRouter.maybeOf(context)?.go(AppRoutes.adminMembersTab(id));
+  }
 
   @override
   void dispose() {
@@ -179,6 +208,28 @@ class _AdminMembersPageState extends ConsumerState<AdminMembersPage> {
 
   @override
   Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        AdminTabBar(
+          maxWidth: 900,
+          selectedId: _tab,
+          onSelected: _selectTab,
+          tabs: const [
+            AdminTabItem(id: AdminMembersPage.membersTab, label: '회원'),
+            AdminTabItem(id: AdminMembersPage.accountTab, label: '송금 계좌·알림'),
+          ],
+        ),
+        Expanded(
+          child: _tab == AdminMembersPage.accountTab
+              ? const _AccountSettingsTab()
+              : _buildMembersBody(context),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMembersBody(BuildContext context) {
     final activeCampusId = ref.watch(adminCampusIdProvider);
     final campusFallback = missingCampusFallback(ref, activeCampusId);
     if (campusFallback != null) return campusFallback;
@@ -340,6 +391,31 @@ class _AdminMembersPageState extends ConsumerState<AdminMembersPage> {
           ],
         );
       },
+    );
+  }
+}
+
+class _AccountSettingsTab extends ConsumerWidget {
+  const _AccountSettingsTab();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final activeCampusId = ref.watch(adminCampusIdProvider);
+    final campusFallback = missingCampusFallback(ref, activeCampusId);
+    if (campusFallback != null) return campusFallback;
+
+    final account = ref.watch(bankAccountProvider(CampusScope.admin));
+
+    return RefreshOverlay(
+      refreshing: account.isBackgroundRefreshing,
+      child: const ScrollPageBody(
+        maxWidth: 640,
+        children: [
+          BankAccountSection(),
+          SizedBox(height: 16),
+          SignupPushCard(),
+        ],
+      ),
     );
   }
 }

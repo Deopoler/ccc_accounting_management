@@ -1,8 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 
-import '../../../core/router/routes.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../core/utils/korean_search.dart';
@@ -16,6 +14,7 @@ import '../../campus/presentation/campus_providers.dart';
 import '../../events/presentation/event_providers.dart';
 import '../domain/bank_deposit.dart';
 import 'deposit_providers.dart';
+import 'deposit_settings_card.dart';
 
 class AdminDepositsPage extends ConsumerStatefulWidget {
   const AdminDepositsPage({super.key});
@@ -289,6 +288,25 @@ class _AdminDepositsPageState extends ConsumerState<AdminDepositsPage> {
     );
   }
 
+  Future<void> _openDepositSettingsDialog() {
+    return showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('자동 입금 설정'),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 560),
+          child: const SingleChildScrollView(child: DepositSettingsCard()),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('닫기'),
+          ),
+        ],
+      ),
+    );
+  }
+
   bool _matchesSearch(BankDeposit d, String query) {
     final q = query.trim();
     if (q.isEmpty) return true;
@@ -390,10 +408,10 @@ class _AdminDepositsPageState extends ConsumerState<AdminDepositsPage> {
                 icon: Icons.account_balance_wallet_outlined,
                 message:
                     '수집된 입금 내역이 아직 없습니다.\n'
-                    '설정에서 자동 입금 확인을 켜고 알림 전달을 연결해 주세요.',
+                    '자동 입금 설정에서 자동 입금 확인을 켜고 알림 전달을 연결해 주세요.',
                 action: OutlinedButton(
-                  onPressed: () => context.go(AppRoutes.adminSettings),
-                  child: const Text('설정으로 이동'),
+                  onPressed: _openDepositSettingsDialog,
+                  child: const Text('자동 입금 설정'),
                 ),
               )
             else if (visible.isEmpty)
@@ -540,6 +558,11 @@ class _AdminDepositsPageState extends ConsumerState<AdminDepositsPage> {
                           onPressed: _refreshAll,
                           icon: const Icon(Icons.refresh, size: 18),
                           label: const Text('새로고침'),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed: _openDepositSettingsDialog,
+                          icon: const Icon(Icons.tune, size: 18),
+                          label: const Text('자동 입금 설정'),
                         ),
                         if (unparsedWithRawCount > 0)
                           OutlinedButton.icon(

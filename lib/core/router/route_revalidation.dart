@@ -89,50 +89,59 @@ void _visitRouteProviders(
       refreshIfLoaded(eventsProvider(CampusScope.member));
       refreshIfLoaded(myEventPaymentsProvider);
       refreshIfLoaded(bankAccountProvider(CampusScope.member));
-    case AppRoutes.adminMembers:
+    case AppRoutes.admin:
       refreshIfLoaded(membersProvider);
-    case AppRoutes.adminTextbooks:
-      refreshIfLoaded(textbooksProvider(CampusScope.admin));
-      refreshIfLoaded(textbookCategoriesProvider(CampusScope.admin));
+      refreshIfLoaded(depositCountsProvider);
+      refreshIfLoaded(feedbackListProvider(FeedbackFilter.unresolved));
+    case AppRoutes.adminMembers:
+      if (uri.queryParameters['tab'] == 'account') {
+        refreshIfLoaded(bankAccountProvider(CampusScope.admin));
+      } else {
+        refreshIfLoaded(membersProvider);
+      }
     case AppRoutes.adminOrders:
-      final rounds = ref.exists(adminRoundsProvider)
-          ? ref.read(adminRoundsProvider).value
-          : null;
-      final current = ref.exists(adminCurrentRoundProvider)
-          ? ref.read(adminCurrentRoundProvider).value
-          : null;
-      refreshIfLoaded(adminCurrentRoundProvider);
-      refreshIfLoaded(adminRoundsProvider);
-      refreshIfLoaded(textbooksProvider(CampusScope.admin));
-      refreshIfLoaded(adminOrdersProvider(null));
-      final refreshedRoundIds = <String>{};
-      if (rounds != null) {
-        for (final round in rounds.all) {
-          if (refreshedRoundIds.add(round.id)) {
-            refreshIfLoaded(adminOrdersProvider(round.id));
+      if (uri.queryParameters['tab'] == 'catalog') {
+        refreshIfLoaded(textbooksProvider(CampusScope.admin));
+        refreshIfLoaded(textbookCategoriesProvider(CampusScope.admin));
+      } else {
+        final rounds = ref.exists(adminRoundsProvider)
+            ? ref.read(adminRoundsProvider).value
+            : null;
+        final current = ref.exists(adminCurrentRoundProvider)
+            ? ref.read(adminCurrentRoundProvider).value
+            : null;
+        refreshIfLoaded(adminCurrentRoundProvider);
+        refreshIfLoaded(adminRoundsProvider);
+        refreshIfLoaded(textbooksProvider(CampusScope.admin));
+        refreshIfLoaded(adminOrdersProvider(null));
+        final refreshedRoundIds = <String>{};
+        if (rounds != null) {
+          for (final round in rounds.all) {
+            if (refreshedRoundIds.add(round.id)) {
+              refreshIfLoaded(adminOrdersProvider(round.id));
+            }
           }
         }
-      }
-      if (current != null && refreshedRoundIds.add(current.id)) {
-        refreshIfLoaded(adminOrdersProvider(current.id));
+        if (current != null && refreshedRoundIds.add(current.id)) {
+          refreshIfLoaded(adminOrdersProvider(current.id));
+        }
       }
     case AppRoutes.adminEvents:
       refreshIfLoaded(eventsProvider(CampusScope.admin));
       refreshIfLoaded(eventSummariesProvider);
     case AppRoutes.adminDeposits:
       refreshIfLoaded(depositCountsProvider);
+      refreshIfLoaded(depositSettingsProvider);
       for (final filter in DepositFilter.values) {
         refreshIfLoaded(bankDepositsProvider(filter));
       }
-    case AppRoutes.adminSettings:
-      refreshIfLoaded(bankAccountProvider(CampusScope.admin));
-      refreshIfLoaded(adminCurrentRoundProvider);
-      refreshIfLoaded(depositSettingsProvider);
-    case AppRoutes.adminCampuses:
-      refreshIfLoaded(campusesProvider);
-    case AppRoutes.adminFeedback:
-      for (final filter in FeedbackFilter.values) {
-        refreshIfLoaded(feedbackListProvider(filter));
+    case AppRoutes.adminCentral:
+      if (uri.queryParameters['tab'] == 'feedback') {
+        for (final filter in FeedbackFilter.values) {
+          refreshIfLoaded(feedbackListProvider(filter));
+        }
+      } else {
+        refreshIfLoaded(campusesProvider);
       }
   }
 }

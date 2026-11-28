@@ -21,6 +21,7 @@ import 'package:ccc_accounting_management/features/deposits/data/deposit_reposit
 import 'package:ccc_accounting_management/features/deposits/domain/bank_deposit.dart';
 import 'package:ccc_accounting_management/features/deposits/presentation/admin_deposits_page.dart';
 import 'package:ccc_accounting_management/features/deposits/presentation/deposit_providers.dart';
+import 'package:ccc_accounting_management/features/deposits/presentation/deposit_settings_card.dart';
 import 'package:ccc_accounting_management/features/events/data/event_repository.dart';
 import 'package:ccc_accounting_management/features/events/domain/event.dart';
 import 'package:ccc_accounting_management/features/events/presentation/event_providers.dart';
@@ -34,7 +35,6 @@ import 'package:ccc_accounting_management/features/push/data/push_repository.dar
 import 'package:ccc_accounting_management/features/push/presentation/push_providers.dart';
 import 'package:ccc_accounting_management/features/settings/data/settings_repository.dart';
 import 'package:ccc_accounting_management/features/settings/domain/bank_account.dart';
-import 'package:ccc_accounting_management/features/settings/presentation/admin_settings_page.dart';
 import 'package:ccc_accounting_management/features/settings/presentation/bank_account_card.dart';
 import 'package:ccc_accounting_management/features/settings/presentation/settings_providers.dart';
 import 'package:ccc_accounting_management/features/textbooks/data/textbook_repository.dart';
@@ -44,6 +44,7 @@ import 'package:ccc_accounting_management/features/textbooks/domain/textbook_cat
 import 'package:ccc_accounting_management/features/textbooks/domain/textbook_order.dart';
 import 'package:ccc_accounting_management/features/textbooks/presentation/my_orders_page.dart';
 import 'package:ccc_accounting_management/features/textbooks/presentation/order_complete_page.dart';
+import 'package:ccc_accounting_management/features/textbooks/presentation/round_deadline_form.dart';
 import 'package:ccc_accounting_management/features/textbooks/presentation/textbook_providers.dart';
 import 'package:ccc_accounting_management/features/textbooks/presentation/textbooks_page.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -773,7 +774,7 @@ void main() {
     );
   });
 
-  testWidgets('AdminFeedbackPage / AdminMembersPage / AdminDepositsPage / AdminSettingsPage / AdminCampusesPage 스켈레톤 및 다크 테마', (
+  testWidgets('AdminFeedbackPage / AdminMembersPage / AdminDepositsPage / 설정 카드 / AdminCampusesPage 스켈레톤 및 다크 테마', (
     tester,
   ) async {
     final h = _Harness();
@@ -786,7 +787,7 @@ void main() {
     h.members.pending = Completer<List<Profile>>();
     await h.pump(tester, const AdminMembersPage(), theme: AppTheme.dark());
     expect(find.text('가입 승인 대기'), findsOneWidget);
-    expect(find.text('회원'), findsOneWidget);
+    expect(find.text('회원'), findsWidgets);
     expect(find.byType(LoadingView), findsNothing);
     expect(find.bySemanticsLabel('불러오는 중'), findsWidgets);
 
@@ -798,22 +799,38 @@ void main() {
     expect(find.bySemanticsLabel('불러오는 중'), findsWidgets);
 
     h.settings.pendingAccount = Completer<BankAccount>();
-    h.textbooks.pendingRound = Completer<OrderRound>();
-    h.deposits.pendingSettings = Completer<CampusDepositSettings>();
-    await h.pump(tester, const AdminSettingsPage(), theme: AppTheme.dark());
+    await h.pump(
+      tester,
+      const AdminMembersPage(tab: AdminMembersPage.accountTab),
+      theme: AppTheme.dark(),
+    );
     expect(find.text('송금 계좌'), findsOneWidget);
-    expect(find.text('교재 신청 마감'), findsOneWidget);
-    expect(find.text('자동 입금 확인'), findsOneWidget);
     expect(find.byType(LoadingView), findsNothing);
     expect(find.bySemanticsLabel('불러오는 중'), findsWidgets);
     expect(
       tester.widget<FilledButton>(find.widgetWithText(FilledButton, '저장')).onPressed,
       isNull,
     );
+
+    h.textbooks.pendingRound = Completer<OrderRound>();
+    await h.pump(tester, const RoundDeadlineForm(), theme: AppTheme.dark());
+    expect(find.text('교재 신청 마감'), findsOneWidget);
+    expect(find.byType(LoadingView), findsNothing);
+    expect(find.bySemanticsLabel('불러오는 중'), findsWidgets);
     expect(
       tester.widget<FilledButton>(find.widgetWithText(FilledButton, '마감 저장')).onPressed,
       isNull,
     );
+
+    h.deposits.pendingSettings = Completer<CampusDepositSettings>();
+    await h.pump(
+      tester,
+      const SingleChildScrollView(child: DepositSettingsCard()),
+      theme: AppTheme.dark(),
+    );
+    expect(find.text('자동 입금 확인'), findsOneWidget);
+    expect(find.byType(LoadingView), findsNothing);
+    expect(find.bySemanticsLabel('불러오는 중'), findsWidgets);
 
     h.campuses.pending = Completer<List<Campus>>();
     await h.pump(tester, const AdminCampusesPage(), theme: AppTheme.dark());
